@@ -1,0 +1,22 @@
+flowchart LR
+    U[Authorized Telegram User] --> TG[aiogram Telegram Gateway]
+    M[Expo Mobile Companion] --> API[FastAPI Control Plane]
+    TG --> API
+    API --> DB[(PostgreSQL\nConfigs, Snapshots, Audit)]
+    API --> Q[Durable Job Queue]
+    Q --> ORCH[Freqtrade Orchestrator]
+    ORCH --> FT[Unmodified, Pinned\nFreqtrade Engine]
+    FT --> EX[Public OHLCV Adapter\nBinance Spot First]
+    FT --> STRAT[CryptoSignalStrategy\nSignals Only]
+    STRAT --> RULES[Rules + Evidence Adapter\nIndicators, Candles, Wyckoff, SMC, Elliott Experimental]
+    RULES --> API
+    API --> DISP[Alert Policy\nThreshold, Cooldown, Quiet Hours]
+    DISP --> TG
+    API --> HIST[Read-only Signal / Health API]
+    HIST --> M
+    API --> EVAL[Backtest + Walk-forward + Paper Evaluation]
+    EVAL --> REP[(Versioned Reports)]
+    API --> AUDIT[(Immutable Audit Log)]
+
+    classDef boundary fill:#172033,color:#ffffff,stroke:#246BFD,stroke-width:2px
+    class FT,STRAT,RULES boundary
