@@ -27,3 +27,7 @@
 - [x] Implement interactive mobile price charts with signal markers, candle context, and indicator overlays.
 - [x] Add tests for candle history, chart data contracts, scenario safeguards, and empty/stale states.
 - [x] Document the chart, history, and scenario-analysis behavior under `docs/`.
+- [x] Replace the mobile-companion positioning with a responsive browser-first dashboard.
+- [x] Simplify browser navigation and screen layouts for desktop and mobile web usage.
+- [x] Document Telegram as the primary configuration and alert surface, with the web dashboard as read-only research visibility.
+- [x] Verify responsive browser behavior and the existing Telegram command contracts after the client pivot.

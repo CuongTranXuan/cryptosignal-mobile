@@ -12,6 +12,7 @@ type TelegramUpdate = { update_id: number; message?: TelegramMessage };
 let pollingStarted = false;
 let localOffset = 0;
 let botLinkCache: string | null | undefined;
+const WEB_DASHBOARD_URL = "https://cryptosig-3gv3ybwa.manus.space";
 
 function allowedUserIds() {
   return new Set(
@@ -112,7 +113,7 @@ async function handleCommand(message: TelegramMessage) {
   if (command === "/start" || command === "/help") {
     await sendMessage(
       message.chat.id,
-      "CryptoSignal is in signals-only mode. Commands: /status, /signal [SYMBOL], /watchlist [add|remove] SYMBOL, /threshold 0.55, /cooldown 60m, /methodology [enable|disable] FAMILY, /pause, /resume, /help. It does not place orders or use exchange private keys.",
+      "CryptoSignal is in signals-only mode. Commands: /status, /signal [SYMBOL], /watchlist [add|remove] SYMBOL, /threshold 0.55, /cooldown 60m, /methodology [enable|disable] FAMILY, /pause, /resume, /web, /help. Telegram is the control surface; the web dashboard is read-only. It does not place orders or use exchange private keys.",
     );
     return;
   }
@@ -124,6 +125,11 @@ async function handleCommand(message: TelegramMessage) {
       message.chat.id,
       `Status: ${config.isPaused ? "PAUSED" : "MONITORING"}\nWatchlist: ${config.watchlist.join(", ")}\nLatest: ${last ? `${last.assetSymbol} ${last.timeframe} ${last.state} (${last.score.toFixed(2)})` : "No closed-candle signal recorded yet."}`,
     );
+    return;
+  }
+
+  if (command === "/web") {
+    await sendMessage(message.chat.id, `Read-only research dashboard: ${WEB_DASHBOARD_URL}\nUse Telegram commands for watchlist, alert policy, methodology, pause, and resume controls.`);
     return;
   }
 
