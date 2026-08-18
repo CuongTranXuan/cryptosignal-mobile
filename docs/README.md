@@ -14,6 +14,7 @@ This documentation set is the **implementation source of truth** for CryptoSigna
 | 6 | `mobile_interface_design.md` | Portrait mobile companion screen and interaction plan. |
 | 7 | `implementation_backlog.md` | Current completed and planned work register. |
 | 8 | `crypto_signal_bot_architecture.png` and `crypto_signal_bot_architecture.mmd` | Original product architecture diagram and editable source. |
+| 9 | `LOCAL_OPERATION.md` | Current command-line validation steps, environment requirements, and durable-host boundary. |
 
 ## Non-negotiable implementation rules
 

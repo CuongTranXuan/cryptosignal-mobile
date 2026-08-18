@@ -1,0 +1,41 @@
+{
+  "$schema": "https://schema.freqtrade.io/schema.json",
+  "bot_name": "cryptosignal-signals-only",
+  "dry_run": true,
+  "dry_run_wallet": 1000,
+  "stake_currency": "USDT",
+  "stake_amount": 10,
+  "tradable_balance_ratio": 0.0,
+  "max_open_trades": 0,
+  "timeframe": "1h",
+  "process_only_new_candles": true,
+  "cancel_open_orders_on_exit": true,
+  "force_entry_enable": false,
+  "exchange": {
+    "name": "binance",
+    "key": "",
+    "secret": "",
+    "ccxt_config": {"enableRateLimit": true},
+    "ccxt_async_config": {"enableRateLimit": true},
+    "pair_whitelist": ["BTC/USDT", "ETH/USDT", "BNB/USDT"],
+    "pair_blacklist": [".*"]
+  },
+  "pairlists": [{"method": "StaticPairList"}],
+  "entry_pricing": {"price_side": "same", "use_order_book": false},
+  "exit_pricing": {"price_side": "same", "use_order_book": false},
+  "telegram": {
+    "enabled": false,
+    "token": "DISABLED_NO_TELEGRAM_CREDENTIAL",
+    "chat_id": "0",
+    "allow_custom_messages": false
+  },
+  "api_server": {
+    "enabled": false,
+    "listen_ip_address": "127.0.0.1",
+    "listen_port": 8080,
+    "username": "disabled",
+    "password": "disabled",
+    "jwt_secret_key": "DISABLED_NO_API_SERVER_SECRET_000000"
+  },
+  "internals": {"process_throttle_secs": 5}
+}
