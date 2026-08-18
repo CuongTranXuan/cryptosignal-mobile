@@ -1,12 +1,22 @@
 # CryptoSignal Documentation Package
 
-This project is intentionally **documentation-first**. The Expo project is only a future mobile companion scaffold; it contains no market-data ingestion, Telegram commands, indicator calculations, trade execution, exchange credentials, or automated trading.
+This documentation set is the **implementation source of truth** for CryptoSignal. The product is a Telegram-controlled, signals-only OHLCV analysis system with a mobile companion. It does not place orders, store exchange private keys, or manage funds.
 
-| File | Purpose |
-|---|---|
-| `crypto_signal_bot_design.md` | Complete product specification, technical design, Telegram command model, data model, evaluation protocol, security model, and implementation roadmap. |
-| `crypto_signal_bot_research_notes.md` | Verified commercial-product, open-source, methodology, and integration research notes. |
-| `crypto_signal_bot_architecture.mmd` | Editable Mermaid source for the system architecture. |
-| `crypto_signal_bot_architecture.png` | Rendered system architecture diagram. |
+## Reading order
 
-The design assumes a **signals-only** first release. Any future decision to add exchange execution must be reviewed as a separate scope change and must not reuse this scaffold without a dedicated security, regulatory, and risk-control design review.
+| Order | File | Review purpose |
+|---:|---|---|
+| 1 | `FRAMEWORK_DECISION.md` | The maintainable foundation: **Freqtrade + FastAPI + aiogram**, with a strict no-fork boundary. |
+| 2 | `crypto_signal_bot_design.md` | Product scope, rule families, Telegram UX, architecture, evaluation, and security requirements. |
+| 3 | `IMPLEMENTATION_PLAYBOOK.md` | Agent-ready repository layout, interfaces, milestones, test gates, deployment boundary, and acceptance criteria. |
+| 4 | `framework_architecture.png` and `framework_architecture.mmd` | Revised component boundary diagram. The Mermaid file is the editable source. |
+| 5 | `crypto_signal_bot_research_notes.md` | Verified commercial, open-source, methodology, and integration research. |
+| 6 | `mobile_interface_design.md` | Portrait mobile companion screen and interaction plan. |
+| 7 | `implementation_backlog.md` | Current completed and planned work register. |
+| 8 | `crypto_signal_bot_architecture.png` and `crypto_signal_bot_architecture.mmd` | Original product architecture diagram and editable source. |
+
+## Non-negotiable implementation rules
+
+The coding team must pin framework and dependency versions, integrate Freqtrade as an unmodified upstream dependency, and keep all custom logic in the defined adapter, strategy, control-plane, and Telegram gateway modules. A signal must originate from **closed candles only**, contain a reproducible evidence ledger, and be persisted before any Telegram delivery attempt. The Telegram gateway is the authoritative control interface; the mobile client only mirrors read-only state and deep-links users back to Telegram.
+
+Any proposal for exchange execution, balance retrieval, leverage, or private keys is a separate product change. It requires an explicit security, risk, legal, and user-consent design review before implementation.
