@@ -16,6 +16,7 @@ This documentation set is the **implementation source of truth** for CryptoSigna
 | 8 | `crypto_signal_bot_architecture.png` and `crypto_signal_bot_architecture.mmd` | Original product architecture diagram and editable source. |
 | 9 | `LOCAL_OPERATION.md` | Current command-line validation steps, environment requirements, and durable-host boundary. |
 | 10 | `CHARTING_AND_SCENARIOS.md` | Candle-history model, mobile chart behavior, conditional research-outlook contract, and operations. |
+| 11 | `WEB_AND_TELEGRAM_SURFACES.md` | Browser-first dashboard scope, Telegram command reference, and single-poller operating boundary. |
 
 ## Non-negotiable implementation rules
 
