@@ -9,8 +9,15 @@
 - [x] Copy the documentation package into the project for future implementation teams.
 - [x] Generate and install the CryptoSignal Mobile launcher, splash, favicon, and adaptive-icon branding assets.
 - [x] Create the final project checkpoint after documentation packaging and verification.
-- [ ] Implement the mobile companion screens after explicit user authorization.
-- [ ] Implement the Telegram backend and signal-processing services after explicit user authorization.
+- [x] Implement the mobile companion screens after explicit user authorization.
+- [x] Implement the Telegram backend and signal-processing services after explicit user authorization.
 - [x] Evaluate and select a maintainable open-source framework foundation for the signals-only bot.
 - [x] Add an agent-ready implementation plan with repository layout, interfaces, milestones, tests, and acceptance gates.
 - [x] Consolidate all design, research, architecture, framework, and implementation documents under `docs/`.
+- [x] Install and validate a pinned Freqtrade command-line signals-only runtime without Docker.
+- [x] Implement the signals-only Freqtrade strategy adapter and deterministic OHLCV fixture tests.
+- [x] Implement backend APIs, persistence, audit logging, and command orchestration for signal snapshots.
+- [x] Implement the Telegram long-polling gateway with allowlist, update-offset idempotency, and configuration commands; do not use webhooks.
+- [x] Implement the mobile Overview, Signals, Configuration Mirror, and Health screens.
+- [x] Add end-to-end tests for closed-candle signals, no-trade guards, Telegram controls, APIs, and mobile states.
+- [x] Document local operation and the persistent-host requirement for durable runtime availability.

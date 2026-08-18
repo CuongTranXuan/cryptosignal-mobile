@@ -141,7 +141,7 @@ These thresholds are starting parameters only. They must be validated with walk-
 
 ## 6. Telegram-Native Interface
 
-Telegram's official Bot API supports two mutually exclusive update-delivery modes: long polling through `getUpdates` and HTTPS webhooks through `setWebhook`; webhook requests can include a secret token header for verification [9]. Production should use a verified HTTPS webhook endpoint with a secret token, idempotent `update_id` handling, and a durable command inbox. Long polling remains useful for local development and controlled self-hosting.
+Telegram's official Bot API supports two mutually exclusive update-delivery modes: long polling through `getUpdates` and HTTPS webhooks through `setWebhook` [9]. This implementation uses **long polling only**. The polling worker persists its next `update_id` offset, validates a Telegram user-ID allowlist, and does not register a webhook or require a publicly reachable callback URL.
 
 ### Command surface
 
@@ -200,7 +200,7 @@ Informational research signal only; not financial advice.
 
 ## 7. System Architecture
 
-The recommended deployment is a managed mobile app plus a server-side worker/API. The mobile app is not the real-time worker. The backend hosts the Telegram webhook, data ingestion, detector pipeline, scheduler, database, alert dispatcher, and audit log. A default stateless deployment can process periodic jobs; an always-on reserved process is appropriate if the implementation requires continuous WebSocket consumption or sub-minute polling. The hosting mode should be selected after measuring feed frequency, latency, and resource requirements; a managed service is the preferred starting point, with a persistent process used only when continuous consumption is required.
+The recommended deployment is a managed mobile app plus a server-side worker/API. The mobile app is not the real-time worker. The backend hosts the Telegram long-polling worker, data ingestion, detector pipeline, scheduler, database, alert dispatcher, and audit log. A persistent process is required for Telegram polling and periodic candle analysis. The hosting mode should be selected after measuring feed frequency, latency, and resource requirements.
 
 ### Architecture diagram
 
@@ -211,8 +211,8 @@ The recommended deployment is a managed mobile app plus a server-side worker/API
 | Component | Responsibility |
 |---|---|
 | Expo mobile client | Onboarding, read-only dashboard, configuration overview, history, health, documentation. |
-| API gateway | Authenticated app API, Telegram webhook endpoint, rate limiting, request validation. |
-| Telegram adapter | Parse commands, render menus, send alerts, verify webhook secret, enforce chat/user policy. |
+| API gateway | Authenticated app API, signal-ingestion endpoint, rate limiting, request validation. |
+| Telegram adapter | Long-poll updates, persist offsets, parse commands, send alerts, enforce chat/user policy. |
 | Scheduler/worker | Poll or consume closed-candle events, enqueue analysis jobs, enforce idempotency. |
 | Market-data adapters | Exchange public REST/WebSocket connectors, symbol mapping, retries, rate limits, clock sync. |
 | Candle normalizer | UTC timestamps, decimal normalization, deduplication, gap detection, closed-candle state. |
@@ -278,7 +278,7 @@ Outcome definitions must be user-configurable for research but immutable per eva
 
 ## 10. Security, Privacy, and Abuse Resistance
 
-The Telegram bot token is a server-side secret and must never be bundled into the mobile app. Webhook requests must validate the Telegram secret token header, reject replayed `update_id` values, and use an idempotency key. The system must rate-limit commands per user and chat, cap backtest ranges and watchlist size, and redact tokens and credentials from logs.
+The Telegram bot token is a server-side secret and must never be bundled into the mobile app. The long-polling worker must persist the next `update_id` offset after each completed message, reject repeated updates, and use a strict user-ID allowlist. The system must rate-limit commands per user and chat, cap backtest ranges and watchlist size, and redact tokens and credentials from logs.
 
 The first release does not require exchange private keys. If future execution is added, it must be a separately deployed capability with an explicit feature flag, isolated credentials, no withdrawal permission, dry-run default, user confirmation for first activation, and independent risk controls. This blueprint does not authorize such implementation.
 
@@ -298,7 +298,7 @@ Create the repository, documentation, coding standards, environment configuratio
 
 ### Phase B — Market data and Telegram skeleton
 
-Implement one public market-data adapter, preferably Binance spot first, with REST backfill and WebSocket or periodic closed-candle updates. Implement Telegram webhook ingestion, secret verification, command parsing, allowlists, idempotent updates, and outbound message delivery. No signal logic is required beyond `/status` and data-freshness diagnostics at this stage.
+Implement one public market-data adapter, preferably Binance spot first, with REST backfill and WebSocket or periodic closed-candle updates. Implement the Telegram long-polling worker, persisted update offsets, command parsing, allowlists, idempotent updates, and outbound message delivery. No signal logic is required beyond `/status` and data-freshness diagnostics at this stage.
 
 ### Phase C — Indicators and candle patterns
 
@@ -324,7 +324,7 @@ Run load tests, Telegram delivery failure tests, exchange disconnect tests, data
 
 The documentation and future implementation are complete only when a fresh deployment can ingest BTCUSDT, ETHUSDT, and BNBUSDT candles; detect closed-candle boundaries correctly; reproduce a stored signal from its snapshot; explain each directional contribution; identify data gaps; configure all requested pattern families; deliver Telegram alerts only to authorized chats; and display the same signal history in the mobile app.
 
-A production candidate must pass a no-look-ahead test suite, a Telegram webhook security test, a replay determinism test, a duplicate-update test, a stale-feed test, and a configuration rollback test. The release must include a runbook, schema/version migration notes, data-source documentation, user-facing disclaimers, and explicit statements that historical evaluation does not guarantee future results.
+A production candidate must pass a no-look-ahead test suite, a Telegram long-polling authorization and duplicate-offset test, a replay determinism test, a stale-feed test, and a configuration rollback test. The release must include a runbook, schema/version migration notes, data-source documentation, user-facing disclaimers, and explicit statements that historical evaluation does not guarantee future results.
 
 ## 14. Open Decisions for the Next Design Review
 

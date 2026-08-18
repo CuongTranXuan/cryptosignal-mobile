@@ -21,7 +21,7 @@ cryptosignal/
 │   │   │   ├── adapters/               # Freqtrade runner and storage adapters
 │   │   │   └── workers/                # Durable analysis/backtest jobs
 │   │   └── tests/
-│   └── telegram-gateway/               # Python 3.11+, aiogram, webhook mode
+│   └── telegram-gateway/               # Python 3.11+, long-polling mode; no webhook endpoint
 │       ├── app/commands/
 │       ├── app/keyboards/
 │       ├── app/presenters/
@@ -103,7 +103,7 @@ Every Telegram mutation creates a new configuration version. Required fields are
 
 The gateway implements the command surface from `crypto_signal_bot_design.md`. Commands are parsed into typed requests, validated, persisted, and presented back as a configuration diff before final confirmation. The minimal first increment is `/start`, `/status`, `/watchlist`, `/signal`, `/why`, `/pause`, `/resume`, and `/help`.
 
-Telegram receives updates through a verified HTTPS webhook. Telegram documents webhook secret tokens and `update_id` sequencing, both of which must be enforced for authenticity and idempotency [2]. The gateway must allow only approved Telegram user IDs; group use is disabled by default. Freqtrade itself also documents an authorized-user mechanism for Telegram controls [3], but the product gateway is the authoritative authorization layer.
+Telegram receives updates through long polling with `getUpdates`; it does **not** configure or depend on a webhook. The worker persists the next `update_id` offset after handling every update, rejects non-allowlisted sender IDs, and processes only text messages. Group use is disabled by default. Freqtrade itself also documents an authorized-user mechanism for Telegram controls [3], but the product gateway is the authoritative authorization layer.
 
 ## 5. Freqtrade implementation boundary
 
@@ -129,7 +129,7 @@ Freqtrade exposes strategy-level custom messaging and webhook delivery mechanism
 |---|---|---|
 | M0 — Repository and contracts | New topology, pinned dependencies, JSON schemas, Compose development environment, secrets templates. | CI validates schemas and no secrets are committed. |
 | M1 — Data and health | Binance spot OHLCV adapter, UTC normalizer, gap/duplicate/staleness checks, `GET /health` and `GET /assets`. | Frozen-candle replay matches exact expected rows; stale feed is observable. |
-| M2 — Telegram control | aiogram webhook, allowlist, command parser, config versioning, `/status`, `/watchlist`, `/help`. | Duplicate update test, unauthorized-user test, config rollback test. |
+| M2 — Telegram control | Long-polling `getUpdates` worker, allowlist, persisted update offset, command parser, config versioning, `/status`, `/watchlist`, `/help`. | Duplicate update test, unauthorized-user test, config rollback test. |
 | M3 — Core findings | EMA/SMA, RSI, MACD, ADX, ATR, volume features, all requested candlestick patterns, evidence ledger. | Positive/negative/boundary fixtures for every detector. |
 | M4 — Framework integration | Freqtrade strategy wrapper, closed-candle signal pipeline, immutable `SignalSnapshot`, alert cooldown. | Look-ahead analysis passes; no-trade assertion passes; replay is deterministic. |
 | M5 — Methodology rules | Wyckoff range-state machine, narrow SMC proxies, optional Elliott candidate labels. | Each rule exposes evidence/invalidation and supports neutral/conflicted output. |
@@ -149,7 +149,7 @@ The following suites are mandatory and should run in CI. A test without frozen i
 | Strategy suite | No future candle read, no direct network/DB/Telegram calls, no trade columns in signals-only profile. |
 | Replay suite | Same candle manifest + config + strategy version produces byte-equivalent `SignalSnapshot`. |
 | Freqtrade suite | Framework look-ahead and recursive analysis; smoke backtest with pinned release. |
-| Telegram suite | Webhook secret verification, idempotent update handling, authorization, command parsing, confirmation flow. |
+| Telegram suite | Long-polling update-offset idempotency, authorization, command parsing, confirmation flow, and no-webhook regression. |
 | Evaluation suite | Censor gap, chronological splits, fee/slippage assumptions, and no random temporal shuffle. |
 | Mobile suite | API loading/error/stale/empty states, deep links, accessibility labels, no local signal calculation. |
 
@@ -165,8 +165,8 @@ Do not replace Freqtrade with a custom data loop. Do not fork or patch Freqtrade
 
 [1]: https://www.freqtrade.io/en/stable/strategy-customization/ "Freqtrade strategy customization"
 
-[2]: https://core.telegram.org/bots/api "Telegram Bot API — updates and webhooks"
+[2]: https://core.telegram.org/bots/api "Telegram Bot API — getUpdates long polling and update identifiers"
 
 [3]: https://www.freqtrade.io/en/stable/telegram-usage/ "Freqtrade Telegram usage"
 
-[4]: https://www.freqtrade.io/en/stable/webhook-config/ "Freqtrade webhook and strategy message configuration"
+[4]: https://www.freqtrade.io/en/stable/strategy-customization/ "Freqtrade strategy customization and signals-only extension points"
