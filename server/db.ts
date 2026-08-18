@@ -1,14 +1,15 @@
-import { desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, gte } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   auditEvents,
   botConfigs,
+  candleHistory,
   InsertUser,
   signalSnapshots,
   telegramPollingState,
   users,
 } from "../drizzle/schema";
-import type { BotConfigView, SignalSnapshotInput } from "../shared/signal-types";
+import type { BotConfigView, CandlePointInput, ConditionalScenario, SignalSnapshotInput } from "../shared/signal-types";
 import { ENV } from "./_core/env";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -164,6 +165,92 @@ export async function listSignalSnapshots(limit = 30) {
     conflicts: parseJson(row.conflictsJson, []),
     invalidation: parseJson(row.invalidationJson, {}),
   }));
+}
+
+export async function recordCandleHistory(candles: CandlePointInput[]) {
+  const db = await getDb();
+  if (!db || candles.length === 0) return { recorded: candles.length };
+  for (const candle of candles) {
+    await db
+      .insert(candleHistory)
+      .values({ ...candle, candleCloseTime: new Date(candle.candleCloseTime) })
+      .onDuplicateKeyUpdate({
+        set: {
+          open: candle.open, high: candle.high, low: candle.low, close: candle.close, volume: candle.volume,
+          ema20: candle.ema20, ema50: candle.ema50, ema200: candle.ema200, rsi14: candle.rsi14,
+          macd: candle.macd, macdSignal: candle.macdSignal, atr14: candle.atr14,
+          signalState: candle.signalState, signalScore: candle.signalScore,
+          strategyVersion: candle.strategyVersion, configVersion: candle.configVersion,
+        },
+      });
+  }
+  return { recorded: candles.length };
+}
+
+function formatPrice(value: number) {
+  return value >= 100 ? value.toFixed(2) : value.toFixed(4);
+}
+
+export function buildConditionalScenarios(
+  latest: { close: number; atr14: number; ema20: number; ema50: number; rsi14: number; signalState: string; signalScore: number },
+  timeframe: string,
+): ConditionalScenario[] {
+  const band = Math.max(Math.abs(latest.atr14), latest.close * 0.0025);
+  const lower = Number((latest.close - band).toFixed(6));
+  const upper = Number((latest.close + band).toFixed(6));
+  const upEvidence = latest.ema20 >= latest.ema50;
+  const shared = { researchWindow: `Next 1–3 completed ${timeframe} candles`, observedVolatilityBand: { lower, upper } };
+  return [
+    {
+      id: "BULLISH_CONTINUATION", label: "Bullish-continuation condition",
+      condition: upEvidence
+        ? `A completed candle holds above ${formatPrice(latest.ema20)} with non-conflicted momentum.`
+        : `A completed candle reclaims ${formatPrice(latest.ema20)} with confirming momentum; current structure does not establish this.`,
+      invalidation: `A completed candle below ${formatPrice(lower)} weakens this condition.`,
+      ...shared,
+      evidence: [`EMA20 is ${upEvidence ? "above" : "below"} EMA50`, `RSI14 ${latest.rsi14.toFixed(1)}`, `Research score ${latest.signalScore.toFixed(2)}`],
+    },
+    {
+      id: "BEARISH_CONTINUATION", label: "Bearish-continuation condition",
+      condition: !upEvidence
+        ? `A completed candle remains below ${formatPrice(latest.ema20)} with non-conflicted momentum.`
+        : `A completed candle loses ${formatPrice(latest.ema20)} with confirming momentum; current structure does not establish this.`,
+      invalidation: `A completed candle above ${formatPrice(upper)} weakens this condition.`,
+      ...shared,
+      evidence: [`EMA20 is ${upEvidence ? "above" : "below"} EMA50`, `RSI14 ${latest.rsi14.toFixed(1)}`, `Research score ${latest.signalScore.toFixed(2)}`],
+    },
+    {
+      id: "RANGE_OR_REVERSAL", label: "Range or reversal condition",
+      condition: `Price remains between ${formatPrice(lower)} and ${formatPrice(upper)} while independent directional evidence is incomplete or conflicts.`,
+      invalidation: "A completed-candle break with independent confirmation resolves this condition.",
+      ...shared,
+      evidence: ["Observed ATR volatility band only; not a price forecast.", `Current research state ${latest.signalState.replaceAll("_", " ")}`],
+    },
+  ];
+}
+
+export async function getChartWindow(assetSymbol: string, timeframe: string, limit = 120) {
+  const db = await getDb();
+  if (!db) return { candles: [], signals: [], scenarios: [] as ConditionalScenario[] };
+  const newestFirst = await db
+    .select()
+    .from(candleHistory)
+    .where(and(eq(candleHistory.assetSymbol, assetSymbol), eq(candleHistory.timeframe, timeframe)))
+    .orderBy(desc(candleHistory.candleCloseTime))
+    .limit(limit);
+  const candles = newestFirst.reverse();
+  if (candles.length === 0) return { candles, signals: [], scenarios: [] as ConditionalScenario[] };
+  const signals = await db
+    .select()
+    .from(signalSnapshots)
+    .where(and(eq(signalSnapshots.assetSymbol, assetSymbol), eq(signalSnapshots.timeframe, timeframe), gte(signalSnapshots.candleCloseTime, candles[0].candleCloseTime)))
+    .orderBy(asc(signalSnapshots.candleCloseTime));
+  const latest = candles[candles.length - 1];
+  return {
+    candles,
+    signals: signals.map((signal) => ({ ...signal, findings: parseJson(signal.findingsJson, []), conflicts: parseJson(signal.conflictsJson, []) })),
+    scenarios: buildConditionalScenarios(latest, timeframe),
+  };
 }
 
 export async function recordAuditEvent(action: string, actorType: string, actorId: string, payload: unknown) {

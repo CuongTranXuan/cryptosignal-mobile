@@ -39,6 +39,8 @@ Run the Telegram-owned watchlist and timeframes as a single signals-only cycle:
 python3 engines/freqtrade/run_configured_cycle.py
 ```
 
+This command also writes the closed-candle history and indicator values consumed by the interactive mobile chart. See [`CHARTING_AND_SCENARIOS.md`](CHARTING_AND_SCENARIOS.md) for the chart window, scenario, and evidence contract.
+
 ## Required server-side environment
 
 | Variable | Role | Client exposure |

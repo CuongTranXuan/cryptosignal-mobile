@@ -62,6 +62,38 @@ export const signalSnapshots = mysqlTable(
   ],
 );
 
+export const candleHistory = mysqlTable(
+  "candle_history",
+  {
+    id: varchar("id", { length: 96 }).primaryKey(),
+    assetSymbol: varchar("assetSymbol", { length: 32 }).notNull(),
+    venue: varchar("venue", { length: 64 }).notNull(),
+    timeframe: varchar("timeframe", { length: 12 }).notNull(),
+    candleCloseTime: timestamp("candleCloseTime").notNull(),
+    open: double("open").notNull(),
+    high: double("high").notNull(),
+    low: double("low").notNull(),
+    close: double("close").notNull(),
+    volume: double("volume").notNull(),
+    ema20: double("ema20").notNull(),
+    ema50: double("ema50").notNull(),
+    ema200: double("ema200").notNull(),
+    rsi14: double("rsi14").notNull(),
+    macd: double("macd").notNull(),
+    macdSignal: double("macdSignal").notNull(),
+    atr14: double("atr14").notNull(),
+    signalState: varchar("signalState", { length: 32 }).notNull(),
+    signalScore: double("signalScore").notNull(),
+    strategyVersion: varchar("strategyVersion", { length: 32 }).notNull(),
+    configVersion: int("configVersion").notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  (table) => [
+    index("candle_history_asset_time_idx").on(table.assetSymbol, table.timeframe, table.candleCloseTime),
+    index("candle_history_created_idx").on(table.createdAt),
+  ],
+);
+
 export const auditEvents = mysqlTable(
   "audit_events",
   {
@@ -86,3 +118,4 @@ export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 export type BotConfig = typeof botConfigs.$inferSelect;
 export type SignalSnapshot = typeof signalSnapshots.$inferSelect;
+export type CandleHistory = typeof candleHistory.$inferSelect;

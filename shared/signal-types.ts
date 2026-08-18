@@ -39,3 +39,37 @@ export type BotConfigView = {
   cooldownMinutes: number;
   quietHours: { start: string; end: string; timezone: string };
 };
+
+export type CandlePointInput = {
+  id: string;
+  assetSymbol: string;
+  venue: string;
+  timeframe: string;
+  candleCloseTime: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+  ema20: number;
+  ema50: number;
+  ema200: number;
+  rsi14: number;
+  macd: number;
+  macdSignal: number;
+  atr14: number;
+  signalState: SignalState;
+  signalScore: number;
+  strategyVersion: string;
+  configVersion: number;
+};
+
+export type ConditionalScenario = {
+  id: "BULLISH_CONTINUATION" | "BEARISH_CONTINUATION" | "RANGE_OR_REVERSAL";
+  label: string;
+  condition: string;
+  invalidation: string;
+  researchWindow: string;
+  observedVolatilityBand: { lower: number; upper: number };
+  evidence: string[];
+};
