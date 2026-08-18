@@ -1,7 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { COOKIE_NAME } from "../shared/const";
-import { getBotConfig, listSignalSnapshots, recordSignalSnapshot } from "./db";
+import { getBotConfig, getChartWindow, listSignalSnapshots, recordSignalSnapshot } from "./db";
 import { signalSnapshotSchema } from "./signal-ingest";
 import { getCachedTelegramBotLink } from "./telegram-polling";
 import { getSessionCookieOptions } from "./_core/cookies";
@@ -21,6 +21,11 @@ export const appRouter = router({
   signal: router({
     latest: publicProcedure.query(async () => (await listSignalSnapshots(1))[0] ?? null),
     list: publicProcedure.input(z.object({ limit: z.number().int().min(1).max(100).default(30) })).query(({ input }) => listSignalSnapshots(input.limit)),
+  }),
+  market: router({
+    chart: publicProcedure
+      .input(z.object({ assetSymbol: z.enum(["BTC/USDT", "ETH/USDT", "BNB/USDT"]), timeframe: z.enum(["1h", "4h"]), limit: z.number().int().min(30).max(250).default(120) }))
+      .query(({ input }) => getChartWindow(input.assetSymbol, input.timeframe, input.limit)),
   }),
   bot: router({
     status: publicProcedure.query(async () => {

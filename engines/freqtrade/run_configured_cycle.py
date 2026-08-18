@@ -13,13 +13,13 @@ import os
 
 import requests
 
-from run_signal_cycle import build_snapshot, load_closed_candles
+from run_signal_cycle import build_candle_history, build_snapshot, load_closed_candles
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--api-base-url", default=os.getenv("CRYPTO_SIGNAL_API_BASE_URL", "http://127.0.0.1:3000"))
-    parser.add_argument("--limit", type=int, default=260)
+    parser.add_argument("--limit", type=int, default=500)
     args = parser.parse_args()
     api_base_url = args.api_base_url.rstrip("/")
     token = os.getenv("SIGNAL_INGEST_TOKEN")
@@ -39,6 +39,14 @@ def main() -> None:
             try:
                 candles = load_closed_candles(symbol, timeframe, args.limit)
                 snapshot = build_snapshot(symbol, timeframe, candles, config["configVersion"])
+                history = build_candle_history(symbol, timeframe, candles, config["configVersion"])
+                history_response = requests.post(
+                    f"{api_base_url}/api/signals/candles",
+                    headers={"content-type": "application/json", "x-signal-ingest-token": token},
+                    json={"candles": history},
+                    timeout=30,
+                )
+                history_response.raise_for_status()
                 response = requests.post(
                     f"{api_base_url}/api/signals/ingest",
                     headers={"content-type": "application/json", "x-signal-ingest-token": token},
@@ -46,7 +54,7 @@ def main() -> None:
                     timeout=20,
                 )
                 response.raise_for_status()
-                results.append({"assetSymbol": symbol, "timeframe": timeframe, "state": snapshot["state"], "score": snapshot["score"], "result": response.json().get("alert")})
+                results.append({"assetSymbol": symbol, "timeframe": timeframe, "state": snapshot["state"], "score": snapshot["score"], "candlesRecorded": history_response.json().get("recorded"), "result": response.json().get("alert")})
             except Exception as error:
                 results.append({"assetSymbol": symbol, "timeframe": timeframe, "error": str(error)})
     print(json.dumps({"ok": True, "configVersion": config["configVersion"], "results": results}, indent=2, sort_keys=True))

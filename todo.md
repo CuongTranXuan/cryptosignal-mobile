@@ -21,3 +21,9 @@
 - [x] Implement the mobile Overview, Signals, Configuration Mirror, and Health screens.
 - [x] Add end-to-end tests for closed-candle signals, no-trade guards, Telegram controls, APIs, and mobile states.
 - [x] Document local operation and the persistent-host requirement for durable runtime availability.
+- [x] Persist normalized closed-candle OHLCV history for BTC/USDT, ETH/USDT, and BNB/USDT.
+- [x] Add historical candle and signal retrieval APIs with indicator-overlay data.
+- [x] Add conditional evidence-based scenario outlooks, invalidation levels, and explicit research-only safeguards.
+- [x] Implement interactive mobile price charts with signal markers, candle context, and indicator overlays.
+- [x] Add tests for candle history, chart data contracts, scenario safeguards, and empty/stale states.
+- [x] Document the chart, history, and scenario-analysis behavior under `docs/`.
