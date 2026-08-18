@@ -1,0 +1,27 @@
+flowchart LR
+    U[User] --> T[Telegram Bot]
+    U --> M[Expo Mobile Companion]
+    T --> G[API Gateway / Webhook]
+    M --> G
+    G --> A[Auth + Allowlist + Rate Limits]
+    G --> C[Config Service]
+    G --> H[Signal History API]
+    G --> S[Service Health API]
+    W[Market Data Adapter\nREST + WebSocket] --> N[Candle Normalizer]
+    N --> D[(Candle Store)]
+    N --> Q[Data Quality Checks]
+    D --> F[Feature Engine\nIndicators + Patterns]
+    D --> Y[Methodology Engine\nWyckoff + Elliott Exp. + SMC Proxies]
+    F --> X[Signal Aggregator\nScore + Confidence + Conflicts]
+    Y --> X
+    Q --> X
+    C --> X
+    X --> R[(Immutable Signal Store)]
+    X --> P[Alert Policy\nThreshold + Cooldown + Quiet Hours]
+    P --> Z[Telegram Delivery]
+    R --> H
+    D --> E[Evaluation Service\nBacktest + Walk-forward + Paper]
+    E --> O[(Evaluation Reports)]
+    G --> J[(Audit Log)]
+    Z --> J
+    X --> J
