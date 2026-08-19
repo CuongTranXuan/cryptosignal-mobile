@@ -34,6 +34,11 @@ export function getTelegramPollingHealth(): TelegramPollingHealth {
   return { ...pollingHealth };
 }
 
+/** Development intentionally runs polling in-process; production requires the Docker poller to opt in explicitly. */
+export function shouldStartTelegramPolling(environment: NodeJS.ProcessEnv = process.env) {
+  return environment.NODE_ENV !== "production" || environment.TELEGRAM_POLLING_ENABLED === "true";
+}
+
 /** Telegram reserves getUpdates for one active consumer; conflicts use a slower retry to avoid log and API churn. */
 export function telegramPollingBackoffMs(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
@@ -305,6 +310,10 @@ async function pollLoop() {
 
 export function startTelegramPolling() {
   if (pollingStarted) return;
+  if (!shouldStartTelegramPolling()) {
+    setPollingHealth({ state: "DISABLED", lastError: null, lastErrorAt: null });
+    return;
+  }
   if (process.env.TELEGRAM_POLLING_ENABLED === "false") {
     setPollingHealth({ state: "DISABLED", lastError: null, lastErrorAt: null });
     return;

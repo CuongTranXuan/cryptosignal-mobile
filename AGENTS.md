@@ -4,7 +4,7 @@
 
 CryptoSignal is a **signals-only market-research service**. Do not introduce order placement, exchange private keys, portfolio tracking, leverage controls, deposit/withdrawal actions, or imperative personalized trade recommendations. Keep all analytics tied to closed candles, persisted evidence, data quality, and explicit invalidation conditions.
 
-The browser is a read-only research dashboard. Telegram long polling is the sole operational surface for owner-allowlisted changes. Never add Telegram webhooks unless the product owner explicitly changes this architecture.
+The browser dashboard and Telegram long polling are dual, shared operational surfaces for owner-allowlisted configuration. Keep the browser's research boundary: no order actions, private exchange keys, target prices, or personalized recommendations. Never add Telegram webhooks unless the product owner explicitly changes this architecture.
 
 ## Source-of-truth map
 
@@ -27,9 +27,9 @@ The first admin requires `DASHBOARD_BOOTSTRAP_TOKEN`. The bootstrap path is one-
 
 ## Telegram and runtime rules
 
-Run exactly one API process for each Telegram bot token. The long-polling loop starts inside `server/_core/index.ts`; a second process produces `getUpdates` conflicts. Every bot command must verify `TELEGRAM_ALLOWED_USER_IDS`, persist configuration changes through `updateBotConfig`, and record auditable events.
+Development starts polling in process. In production, only the Docker poller (`infra/docker-compose.poller.yml`) may set `TELEGRAM_POLLING_ENABLED=true`; all other API instances must leave polling disabled. This guarantees exactly one `getUpdates` consumer per bot token. Every bot command must verify `TELEGRAM_ALLOWED_USER_IDS`, persist configuration changes through `updateBotConfig`, and record auditable events.
 
-The Freqtrade runner may retrieve public market data and submit closed-candle snapshots through `SIGNAL_INGEST_TOKEN`. It must not use `freqtrade trade`, exchange API keys, or any order capability.
+The Freqtrade runner may retrieve public market data and submit closed-candle snapshots and compact runner health through `SIGNAL_INGEST_TOKEN`. Production scheduling uses `scripts/run-configured-cycle-quiet.sh` and `infra/cron/cryptosignal.crontab`; it must not write routine output or overlap runs. It must not use `freqtrade trade`, exchange API keys, or any order capability.
 
 ## Database changes
 
@@ -54,4 +54,4 @@ Add every new feature, defect, and operational change to `todo.md` before implem
 
 ## Persistent-host deployment checklist
 
-Use HTTPS, a single same-origin reverse proxy for `/api/`, TLS for the database, a protected environment file, regular database backups, one Node API service, and a separate scheduled Freqtrade cycle. Build the static web bundle with `pnpm build:web` and the Node service with `pnpm build`. Do not rely on the development Metro process for production.
+Use HTTPS, a single same-origin reverse proxy for `/api/`, TLS for the database, protected environment files, regular database backups, one Docker-owned polling service, and a separate scheduled Freqtrade cycle. Build the static web bundle with `pnpm build:web` and the Node service with `pnpm build`. Do not rely on the development Metro process for production.

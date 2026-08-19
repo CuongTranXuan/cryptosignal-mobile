@@ -1,0 +1,12 @@
+.git
+.expo
+.manus-logs
+node_modules
+dist
+dist-web
+.env
+.env.*
+!*.example
+__pycache__
+*.pyc
+ideas.md

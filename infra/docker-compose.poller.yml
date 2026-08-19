@@ -1,0 +1,21 @@
+services:
+  poller:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: cryptosignal-poller
+    restart: unless-stopped
+    env_file:
+      - ${CRYPTO_SIGNAL_POLLING_ENV_FILE:?Set CRYPTO_SIGNAL_POLLING_ENV_FILE to an absolute, root-readable production environment file.}
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      TELEGRAM_POLLING_ENABLED: "true"
+    ports:
+      - ${CRYPTO_SIGNAL_API_BIND:-127.0.0.1:3000}:3000
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s

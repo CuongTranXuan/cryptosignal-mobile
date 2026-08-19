@@ -141,9 +141,28 @@ export const telegramPollingState = mysqlTable("telegram_polling_state", {
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 
+export const runnerHealth = mysqlTable(
+  "runner_health",
+  {
+    id: int("id").primaryKey(),
+    runId: varchar("runId", { length: 64 }),
+    state: varchar("state", { length: 24 }).notNull(),
+    configVersion: int("configVersion"),
+    startedAt: timestamp("startedAt"),
+    finishedAt: timestamp("finishedAt"),
+    cycleCount: int("cycleCount").default(0).notNull(),
+    failureCount: int("failureCount").default(0).notNull(),
+    lastError: text("lastError"),
+    summaryJson: text("summaryJson").notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (table) => [index("runner_health_updated_idx").on(table.updatedAt)],
+);
+
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 export type BotConfig = typeof botConfigs.$inferSelect;
 export type SignalSnapshot = typeof signalSnapshots.$inferSelect;
 export type CandleHistory = typeof candleHistory.$inferSelect;
 export type DashboardCredential = typeof dashboardCredentials.$inferSelect;
+export type RunnerHealth = typeof runnerHealth.$inferSelect;

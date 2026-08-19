@@ -13,6 +13,7 @@ describe("signals-only backend integration", () => {
     expect(status.telegramMode).toBe("LONG_POLLING");
     expect(status.telegramPoller).toMatchObject({ state: expect.any(String) });
     expect(status.telegramPoller).toHaveProperty("lastError");
+    expect(status.runnerHealth).toMatchObject({ state: expect.any(String), cycleCount: expect.any(Number), failureCount: expect.any(Number) });
   });
 
   it("returns persisted signal snapshots through the protected dashboard read model", async () => {
@@ -36,5 +37,13 @@ describe("signals-only backend integration", () => {
   it("accepts a 30-minute closed-candle chart window", async () => {
     const chart = await createCaller().market.chart({ assetSymbol: "BTC/USDT", timeframe: "30m", limit: 30 });
     expect(chart).toMatchObject({ candles: expect.any(Array), signals: expect.any(Array), scenarios: expect.any(Array) });
+  });
+
+  it("exposes an operational audit-history list for the protected dashboard", async () => {
+    const events = await createCaller().bot.auditHistory({ limit: 10 });
+    expect(Array.isArray(events)).toBe(true);
+    if (events[0]) {
+      expect(events[0]).toMatchObject({ action: expect.any(String), actorType: expect.any(String), payload: expect.any(Object) });
+    }
   });
 });

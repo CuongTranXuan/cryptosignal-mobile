@@ -74,3 +74,27 @@ export type ConditionalScenario = {
   observedVolatilityBand: { lower: number; upper: number };
   evidence: string[];
 };
+
+export type RunnerHealthState = "IDLE" | "RUNNING" | "SUCCESS" | "DEGRADED" | "PAUSED";
+
+export type RunnerHealthView = {
+  runId: string | null;
+  state: RunnerHealthState;
+  configVersion: number | null;
+  startedAt: Date | null;
+  finishedAt: Date | null;
+  cycleCount: number;
+  failureCount: number;
+  lastError: string | null;
+  summary: Record<string, unknown>;
+  updatedAt: Date | null;
+};
+
+export type AuditEventView = {
+  id: string;
+  action: string;
+  actorType: string;
+  actorId: string;
+  payload: Record<string, unknown>;
+  createdAt: Date;
+};

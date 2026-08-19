@@ -7,11 +7,12 @@ import {
   dashboardCredentials,
   dashboardSessions,
   InsertUser,
+  runnerHealth,
   signalSnapshots,
   telegramPollingState,
   users,
 } from "../drizzle/schema";
-import type { BotConfigView, CandlePointInput, ConditionalScenario, SignalSnapshotInput } from "../shared/signal-types";
+import type { AuditEventView, BotConfigView, CandlePointInput, ConditionalScenario, RunnerHealthState, RunnerHealthView, SignalSnapshotInput } from "../shared/signal-types";
 import { ENV } from "./_core/env";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -26,6 +27,19 @@ export const DEFAULT_BOT_CONFIG: BotConfigView = {
   alertThreshold: 0.55,
   cooldownMinutes: 60,
   quietHours: { start: "22:00", end: "07:00", timezone: "UTC" },
+};
+
+export const DEFAULT_RUNNER_HEALTH: RunnerHealthView = {
+  runId: null,
+  state: "IDLE",
+  configVersion: null,
+  startedAt: null,
+  finishedAt: null,
+  cycleCount: 0,
+  failureCount: 0,
+  lastError: null,
+  summary: {},
+  updatedAt: null,
 };
 
 function parseJson<T>(value: string, fallback: T): T {
@@ -337,6 +351,85 @@ export async function recordAuditEvent(action: string, actorType: string, actorI
     actorId,
     payloadJson: JSON.stringify(payload),
   });
+}
+
+export async function listAuditEvents(limit = 30): Promise<AuditEventView[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db.select().from(auditEvents).orderBy(desc(auditEvents.createdAt)).limit(limit);
+  return rows.map((row) => ({
+    id: row.id,
+    action: row.action,
+    actorType: row.actorType,
+    actorId: row.actorId,
+    payload: parseJson<Record<string, unknown>>(row.payloadJson, {}),
+    createdAt: row.createdAt,
+  }));
+}
+
+export async function getRunnerHealth(): Promise<RunnerHealthView> {
+  const db = await getDb();
+  if (!db) return DEFAULT_RUNNER_HEALTH;
+  const rows = await db.select().from(runnerHealth).where(eq(runnerHealth.id, 1)).limit(1);
+  const row = rows[0];
+  if (!row) return DEFAULT_RUNNER_HEALTH;
+  return {
+    runId: row.runId ?? null,
+    state: row.state as RunnerHealthState,
+    configVersion: row.configVersion ?? null,
+    startedAt: row.startedAt ?? null,
+    finishedAt: row.finishedAt ?? null,
+    cycleCount: row.cycleCount,
+    failureCount: row.failureCount,
+    lastError: row.lastError ?? null,
+    summary: parseJson<Record<string, unknown>>(row.summaryJson, {}),
+    updatedAt: row.updatedAt ?? null,
+  };
+}
+
+export type RunnerHealthUpdate = Omit<RunnerHealthView, "updatedAt">;
+
+export async function recordRunnerHealth(update: RunnerHealthUpdate): Promise<RunnerHealthView> {
+  const db = await getDb();
+  if (!db) return { ...update, updatedAt: new Date() };
+  await db
+    .insert(runnerHealth)
+    .values({
+      id: 1,
+      runId: update.runId,
+      state: update.state,
+      configVersion: update.configVersion,
+      startedAt: update.startedAt,
+      finishedAt: update.finishedAt,
+      cycleCount: update.cycleCount,
+      failureCount: update.failureCount,
+      lastError: update.lastError,
+      summaryJson: JSON.stringify(update.summary),
+    })
+    .onDuplicateKeyUpdate({
+      set: {
+        runId: update.runId,
+        state: update.state,
+        configVersion: update.configVersion,
+        startedAt: update.startedAt,
+        finishedAt: update.finishedAt,
+        cycleCount: update.cycleCount,
+        failureCount: update.failureCount,
+        lastError: update.lastError,
+        summaryJson: JSON.stringify(update.summary),
+      },
+    });
+  if (update.state !== "RUNNING") {
+    await recordAuditEvent("RUNNER_CYCLE_REPORTED", "ENGINE", "freqtrade", {
+      runId: update.runId,
+      state: update.state,
+      configVersion: update.configVersion,
+      cycleCount: update.cycleCount,
+      failureCount: update.failureCount,
+      lastError: update.lastError,
+    });
+  }
+  return { ...update, updatedAt: new Date() };
 }
 
 export async function hasRecentSignalAlert(alertKey: string, cooldownMinutes: number) {

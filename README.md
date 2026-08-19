@@ -8,9 +8,9 @@ CryptoSignal is a **signals-only crypto-market research system**. It stores comp
 
 | Component | Responsibility |
 |---|---|
-| Browser dashboard | Username/password-protected, read-only charts, signal history, indicator evidence, and scenario conditions. |
+| Browser dashboard | Username/password-protected charts, signal history, indicator evidence, shared controls, runner health, and audit history. |
 | Express/tRPC API | First-party password session endpoints, protected dashboard data, signal ingestion, and health checks. |
-| MySQL/TiDB | Credentials, hashed sessions, immutable signals, candle history, configuration, and audit records. |
+| MySQL/TiDB | Credentials, hashed sessions, immutable signals, candle history, configuration, runner health, and audit records. |
 | Freqtrade adapter | Runs local public-market closed-candle analysis without trading commands or credentials. |
 | Telegram long polling | Owner-allowlisted alerts and all operational configuration commands. |
 
@@ -49,10 +49,12 @@ The browser receives only an HTTP-only session cookie. Passwords are stored as s
 | `SIGNAL_INGEST_TOKEN` | Yes | Private token authorizing Freqtrade closed-candle signal and history submissions. |
 | `PORT` | Yes | API listen port; use `3000` behind the reverse proxy. |
 | `NODE_ENV` | Yes | Set to `production` on the persistent host. |
+| `TELEGRAM_POLLING_ENABLED` | Docker poller only | Set to `true` only in the single production polling container. Production API processes default to polling disabled. |
+| `CRYPTO_SIGNAL_API_BASE_URL` | Runner host | HTTPS API base URL used by the cron-driven Freqtrade runner. |
 
 `JWT_SECRET` remains required only if the template’s legacy OAuth endpoints are retained. It is not used for the first-party username/password session implementation.
 
-## Persistent-host deployment (Ubuntu, no Docker)
+## Persistent-host deployment
 
 Build the Node API and static browser bundle on the host or CI artifact, then serve both through HTTPS on one domain. The browser uses relative `/api` paths in production, so the reverse proxy must route `/api/` to the Node API.
 
@@ -62,12 +64,25 @@ pnpm build:all
 NODE_ENV=production PORT=3000 pnpm start
 ```
 
-Use a process manager such as systemd for the API. Run **one** instance only: the API embeds the Telegram `getUpdates` long-polling loop, and a second instance with the same token produces Telegram `409 Conflict` errors.
+### Docker-owned Telegram poller
 
-Use an external scheduler or systemd timer for the Freqtrade cycle. It must run on the same private network as the API or use an explicit `CRYPTO_SIGNAL_API_BASE_URL` and `SIGNAL_INGEST_TOKEN` over HTTPS.
+The production Telegram poller is the **only** process that sets `TELEGRAM_POLLING_ENABLED=true`. It is intentionally isolated in the Docker deployment below. Other production API instances retain the same dashboard/API behavior but leave polling disabled, while development continues to poll in process by default.
 
 ```bash
-python3 engines/freqtrade/run_configured_cycle.py --limit 500
+chmod +x scripts/configure-production-poller.sh scripts/run-configured-cycle-quiet.sh
+scripts/configure-production-poller.sh /etc/cryptosignal/poller.env
+```
+
+The Docker host needs Docker Compose, and `/etc/cryptosignal/poller.env` must be readable by the deployment user and contain `DATABASE_URL`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_USER_IDS`, and `SIGNAL_INGEST_TOKEN`. The service binds to `127.0.0.1:3000` by default for a same-host reverse proxy. Use `docker compose -f infra/docker-compose.poller.yml ps` to check service health.
+
+### Quiet cron runner
+
+Install the provided cron template on the host that has the pinned Freqtrade runtime. The wrapper takes a non-blocking lock, prevents overlap, suppresses cron output, and reports compact health data back to the dashboard API. It must run on the same private network as the API or use an explicit HTTPS `CRYPTO_SIGNAL_API_BASE_URL` and `SIGNAL_INGEST_TOKEN`.
+
+```bash
+chmod 600 /etc/cryptosignal/runner.env
+crontab infra/cron/cryptosignal.crontab
+# The scheduled wrapper runs: scripts/run-configured-cycle-quiet.sh
 ```
 
 The following Nginx shape serves the exported web bundle and proxies the API on a single HTTPS domain. Replace paths and hostname.
@@ -92,7 +107,7 @@ server {
 
 ## Operations
 
-The Telegram bot is the configuration surface. Use `/help` for commands, `/web` for the dashboard link, and make every allowed user send `/start` before expecting alerts. Run a backup for the database and environment file before migrations or engine upgrades. For all operations, consult [`docs/LOCAL_OPERATION.md`](docs/LOCAL_OPERATION.md), [`docs/WEB_AND_TELEGRAM_SURFACES.md`](docs/WEB_AND_TELEGRAM_SURFACES.md), and [`docs/AUTHENTICATION.md`](docs/AUTHENTICATION.md).
+Telegram and the dashboard share the versioned configuration surface. The browser dashboard also displays runner health and an immutable operational audit history without logging background health polling to the browser console. Use `/help` for bot commands, `/web` for the dashboard link, and make every allowed user send `/start` before expecting alerts. Run a backup for the database and environment file before migrations or engine upgrades.
 
 ## Validation
 
