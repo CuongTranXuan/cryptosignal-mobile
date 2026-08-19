@@ -1,0 +1,2 @@
+# Run the configured signals-only OHLCV cycle every five minutes. The wrapper holds a non-blocking lock and suppresses cron output.
+*/5 * * * * /opt/cryptosignal/scripts/run-configured-cycle-quiet.sh

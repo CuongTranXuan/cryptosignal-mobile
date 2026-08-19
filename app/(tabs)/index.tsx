@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { ActivityIndicator, LayoutChangeEvent, Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { DashboardAuthScreen } from "@/components/dashboard-auth-screen";
+import { OperationalAuditPanel } from "@/components/operational-audit-panel";
 import { PriceHistoryChart } from "@/components/price-history-chart";
 import { ScreenContainer } from "@/components/screen-container";
 import { SignalCard } from "@/components/signal-card";
@@ -36,7 +37,7 @@ function AuthenticatedDashboard({ username, onSignOut }: { username: string; onS
   const [timeframe, setTimeframe] = useState<(typeof TIMEFRAMES)[number]>("1h");
   const [cooldownDraft, setCooldownDraft] = useState("60");
   const [controlNotice, setControlNotice] = useState<ControlNotice>(null);
-  const status = trpc.bot.status.useQuery();
+  const status = trpc.bot.status.useQuery(undefined, { refetchInterval: 30_000, refetchIntervalInBackground: true });
   const configuration = trpc.bot.config.useQuery();
   const latest = trpc.signal.latest.useQuery();
   const chart = trpc.market.chart.useQuery({ assetSymbol, timeframe, limit: 180 });
@@ -88,7 +89,7 @@ function AuthenticatedDashboard({ username, onSignOut }: { username: string; onS
     </View>
     <View style={styles.hero}><Text style={[styles.eyebrow, { color: colors.primary }]}>CLOSED-CANDLE MARKET RESEARCH</Text><Text style={[styles.title, { color: colors.foreground }]}>Signals, conditional outlooks, and shared operational controls.</Text><Text style={[styles.subtitle, { color: colors.muted }]}>The dashboard and Telegram bot operate against one versioned configuration. Every alert and scenario remains signals-only research based on completed OHLCV candles.</Text></View>
     {status.isLoading || configuration.isLoading ? <ActivityIndicator color={colors.primary} /> : null}
-    {status.data ? <View style={[styles.status, { backgroundColor: colors.surface, borderColor: colors.border }]}><View style={[styles.statusDot, { backgroundColor: status.data.isPaused ? colors.warning : colors.success }]} /><View style={styles.statusMain}><Text style={[styles.statusTitle, { color: colors.foreground }]}>{status.data.isPaused ? "Signal processing paused" : "Monitoring completed candles"}</Text><Text style={[styles.statusCopy, { color: colors.muted }]}>{status.data.watchlist.join(" · ")} · {status.data.timeframes.join(" · ")} · long polling</Text></View><Text style={[styles.noExecution, { color: colors.primary }]}>NO EXECUTION</Text></View> : null}
+    {status.data ? <View style={[styles.status, { backgroundColor: colors.surface, borderColor: colors.border }]}><View style={[styles.statusDot, { backgroundColor: status.data.isPaused ? colors.warning : colors.success }]} /><View style={styles.statusMain}><Text style={[styles.statusTitle, { color: colors.foreground }]}>{status.data.isPaused ? "Signal processing paused" : "Monitoring completed candles"}</Text><Text style={[styles.statusCopy, { color: colors.muted }]}>{status.data.watchlist.join(" · ")} · {status.data.timeframes.join(" · ")} · runner {status.data.runnerHealth.state.toLowerCase()}</Text></View><Text style={[styles.noExecution, { color: colors.primary }]}>NO EXECUTION</Text></View> : null}
     <View style={styles.grid}>
       <View style={styles.primaryColumn}>
         <Panel title="Historical price & signal evidence" subtitle="Pan, zoom, use the crosshair, and inspect completed candles and persisted annotations." colors={colors}>
@@ -113,6 +114,7 @@ function AuthenticatedDashboard({ username, onSignOut }: { username: string; onS
           </> : <Empty title="Controls unavailable" detail="Configuration could not be loaded. Retry after the API is available." colors={colors} />}
         </Panel>
         <Panel title="Latest persisted signal" subtitle="Saved before a Telegram delivery attempt." colors={colors}>{latest.data ? <SignalCard signal={latest.data} /> : <Empty title="No signal snapshot" detail="The engine has not submitted a completed-candle result yet." colors={colors} />}</Panel>
+        <OperationalAuditPanel runnerHealth={status.data?.runnerHealth ?? null} />
         <Panel title="Telegram commands" subtitle="The same configuration can also be managed by its owner-allowlisted bot." colors={colors}><View style={styles.commandList}>{["/watchlist — tracked pairs", "/timeframes — 30m, 1h, 4h", "/threshold and /cooldown — alert policy", "/methodology — evidence families", "/pause or /resume — processing state"].map((command) => <Text key={command} style={[styles.command, { color: colors.muted }]}>{command}</Text>)}</View><Pressable disabled={!telegramUrl} onPress={openTelegram} style={({ pressed }) => [styles.primaryButton, { backgroundColor: colors.primary }, pressed && styles.pressed, !telegramUrl && styles.disabled]}><Text style={styles.primaryButtonText}>Open Telegram</Text></Pressable></Panel>
         <View style={[styles.disclosure, { borderColor: colors.border }]}><Text style={[styles.disclosureTitle, { color: colors.foreground }]}>Research boundary</Text><Text style={[styles.disclosureCopy, { color: colors.muted }]}>The dashboard displays historical rule evidence and conditional scenarios. It does not place orders, hold exchange credentials, provide a target price, or issue a personalized recommendation.</Text></View>
       </View>

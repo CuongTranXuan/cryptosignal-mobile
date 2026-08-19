@@ -57,3 +57,9 @@
 - [x] Validate the code-quality pass and synchronize the resulting commit to GitHub.
 - [x] Add 30-minute timeframe parity to the legacy historical-signals screen.
 - [x] Align legacy configuration and health messaging with the current dual-control operating model.
+- [x] Add Docker production deployment that exclusively enables the Telegram long-polling service.
+- [x] Add a quiet, cron-safe configured signal-cycle script and production crontab template.
+- [x] Persist and expose non-verbose runner-health data for the dashboard.
+- [x] Add a browser audit-history view for shared configuration and runner operations.
+- [x] Perform a clean application startup check and capture any actionable runtime blockers.
+- [ ] Validate and push the production operations and audit-history expansion.

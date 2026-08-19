@@ -1,7 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { COOKIE_NAME } from "../shared/const";
-import { getBotConfig, getChartWindow, listSignalSnapshots, recordSignalSnapshot, setBotPaused, updateBotConfig } from "./db";
+import { getBotConfig, getChartWindow, getRunnerHealth, listAuditEvents, listSignalSnapshots, recordSignalSnapshot, setBotPaused, updateBotConfig } from "./db";
 import { signalSnapshotSchema } from "./signal-ingest";
 import { getCachedTelegramBotLink, getTelegramPollingHealth } from "./telegram-polling";
 import { getSessionCookieOptions } from "./_core/cookies";
@@ -29,7 +29,7 @@ export const appRouter = router({
   }),
   bot: router({
     status: dashboardProtectedProcedure.query(async () => {
-      const [config, latest] = await Promise.all([getBotConfig(), listSignalSnapshots(1)]);
+      const [config, latest, runnerHealth] = await Promise.all([getBotConfig(), listSignalSnapshots(1), getRunnerHealth()]);
       return {
         mode: "SIGNALS_ONLY" as const,
         isPaused: config.isPaused,
@@ -40,10 +40,12 @@ export const appRouter = router({
         telegramMode: "LONG_POLLING" as const,
         telegramBotUrl: getCachedTelegramBotLink(),
         telegramPoller: getTelegramPollingHealth(),
+        runnerHealth,
         executionEnabled: false,
       };
     }),
     config: dashboardProtectedProcedure.query(() => getBotConfig()),
+    auditHistory: dashboardProtectedProcedure.input(z.object({ limit: z.number().int().min(1).max(100).default(30) })).query(({ input }) => listAuditEvents(input.limit)),
     controls: router({
       setPaused: dashboardProtectedProcedure.input(z.object({ isPaused: z.boolean() })).mutation(({ input }) => setBotPaused(input.isPaused, "dashboard", "DASHBOARD")),
       setWatchlist: dashboardProtectedProcedure.input(z.object({ watchlist: z.array(z.enum(["BTC/USDT", "ETH/USDT", "BNB/USDT"])) .min(1).max(3) })).mutation(async ({ input }) => {
