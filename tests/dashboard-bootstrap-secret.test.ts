@@ -1,11 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { validateDashboardBootstrapToken } from "../server/dashboard-auth";
 
-describe("dashboard bootstrap secret", () => {
-  it("is accepted by the bootstrap validation contract", async () => {
-    const bootstrapToken = process.env.DASHBOARD_BOOTSTRAP_TOKEN;
-    expect(bootstrapToken).toBeTruthy();
-    expect(validateDashboardBootstrapToken(bootstrapToken!)).toBe(true);
-    expect(validateDashboardBootstrapToken(`${bootstrapToken}x`)).toBe(false);
+import { DEMO_PASSWORD, DEMO_USERNAME, isDemoCredentialPair } from "../server/dashboard-auth";
+
+describe("demo access", () => {
+  it("does not require a bootstrap secret", () => {
+    expect(isDemoCredentialPair(DEMO_USERNAME, DEMO_PASSWORD)).toBe(true);
   });
 });

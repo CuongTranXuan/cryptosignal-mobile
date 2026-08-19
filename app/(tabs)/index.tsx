@@ -16,7 +16,7 @@ export default function WebDashboard() {
   const auth = useDashboardAuth();
   const colors = useColors();
   if (auth.loading) return <ScreenContainer edges={["top", "bottom", "left", "right"]} className="items-center justify-center"><ActivityIndicator color={colors.primary} /></ScreenContainer>;
-  if (!auth.authenticated) return <DashboardAuthScreen bootstrapRequired={auth.bootstrapRequired} onSignIn={auth.signIn} onBootstrap={auth.bootstrap} />;
+  if (!auth.authenticated) return <DashboardAuthScreen onSignIn={auth.signIn} />;
   return <AuthenticatedDashboard username={auth.user?.username ?? "owner"} onSignOut={auth.signOut} />;
 }
 

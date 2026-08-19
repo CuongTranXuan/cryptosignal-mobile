@@ -42,3 +42,6 @@
 - [x] Add an MIT License and public-release instructions without modifying existing documentation files.
 - [x] Verify that the sanitized repository has no committed secrets and that all existing documentation files are unchanged.
 - [x] Commit and push the sanitized public-release changes to the existing GitHub repository without changing its visibility.
+- [x] Replace one-time owner bootstrap with default `user` / `password` demo credentials and remove username/password constraints.
+- [x] Repair the browser-to-server authentication request path so the sign-in response is valid JSON.
+- [x] Test the demo sign-in flow and push the completed change to GitHub.
