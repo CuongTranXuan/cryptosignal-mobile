@@ -14,6 +14,32 @@ let localOffset = 0;
 let botLinkCache: string | null | undefined;
 const WEB_DASHBOARD_URL = "https://cryptosig-3gv3ybwa.manus.space";
 
+export type TelegramPollingHealth = {
+  state: "NOT_CONFIGURED" | "DISABLED" | "STARTING" | "RUNNING" | "DEGRADED" | "CONFLICT";
+  lastError: string | null;
+  lastErrorAt: string | null;
+};
+
+let pollingHealth: TelegramPollingHealth = {
+  state: process.env.TELEGRAM_BOT_TOKEN ? "STARTING" : "NOT_CONFIGURED",
+  lastError: null,
+  lastErrorAt: null,
+};
+
+function setPollingHealth(next: Partial<TelegramPollingHealth>) {
+  pollingHealth = { ...pollingHealth, ...next };
+}
+
+export function getTelegramPollingHealth(): TelegramPollingHealth {
+  return { ...pollingHealth };
+}
+
+/** Telegram reserves getUpdates for one active consumer; conflicts use a slower retry to avoid log and API churn. */
+export function telegramPollingBackoffMs(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes(" 409:") || message.includes("Conflict: terminated by other getUpdates request") ? 60_000 : 5_000;
+}
+
 function allowedUserIds() {
   return new Set(
     (process.env.TELEGRAM_ALLOWED_USER_IDS ?? "")
@@ -248,9 +274,13 @@ async function handleCommand(message: TelegramMessage) {
 }
 
 async function pollLoop() {
-  localOffset = Math.max(localOffset, await getTelegramUpdateOffset());
+  let offsetInitialized = false;
   while (pollingStarted) {
     try {
+      if (!offsetInitialized) {
+        localOffset = Math.max(localOffset, await getTelegramUpdateOffset());
+        offsetInitialized = true;
+      }
       const result = (await telegramRequest("getUpdates", {
         offset: localOffset,
         timeout: 25,
@@ -262,16 +292,29 @@ async function pollLoop() {
         localOffset = update.update_id + 1;
         await setTelegramUpdateOffset(localOffset);
       }
+      setPollingHealth({ state: "RUNNING", lastError: null, lastErrorAt: null });
     } catch (error) {
-      console.error("[TelegramPolling]", error instanceof Error ? error.message : error);
-      await new Promise((resolve) => setTimeout(resolve, 5_000));
+      const message = error instanceof Error ? error.message : String(error);
+      const isConflict = telegramPollingBackoffMs(error) === 60_000;
+      setPollingHealth({ state: isConflict ? "CONFLICT" : "DEGRADED", lastError: message, lastErrorAt: new Date().toISOString() });
+      console.error("[TelegramPolling]", message);
+      await new Promise((resolve) => setTimeout(resolve, telegramPollingBackoffMs(error)));
     }
   }
 }
 
 export function startTelegramPolling() {
-  if (pollingStarted || !process.env.TELEGRAM_BOT_TOKEN) return;
+  if (pollingStarted) return;
+  if (process.env.TELEGRAM_POLLING_ENABLED === "false") {
+    setPollingHealth({ state: "DISABLED", lastError: null, lastErrorAt: null });
+    return;
+  }
+  if (!process.env.TELEGRAM_BOT_TOKEN) {
+    setPollingHealth({ state: "NOT_CONFIGURED", lastError: null, lastErrorAt: null });
+    return;
+  }
   pollingStarted = true;
+  setPollingHealth({ state: "STARTING", lastError: null, lastErrorAt: null });
   void getTelegramBotLink();
   void pollLoop();
 }

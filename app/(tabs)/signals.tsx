@@ -8,7 +8,7 @@ import { trpc } from "@/lib/trpc";
 import { useState } from "react";
 
 const ASSETS = ["BTC/USDT", "ETH/USDT", "BNB/USDT"] as const;
-const TIMEFRAMES = ["1h", "4h"] as const;
+const TIMEFRAMES = ["30m", "1h", "4h"] as const;
 
 export default function SignalsScreen() {
   const colors = useColors();

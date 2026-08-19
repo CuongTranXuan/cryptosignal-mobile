@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildConditionalScenarios } from "../server/db";
 import { candlePointSchema } from "../server/signal-ingest";
+import { normalizeChartCandles } from "../shared/chart-utils";
 
 const candle = {
   id: "candle_0123456789abcdef",
@@ -29,5 +30,16 @@ describe("chart history and conditional outlook contract", () => {
     expect(scenarios).toHaveLength(3);
     expect(scenarios.every((scenario) => scenario.invalidation.length > 0 && scenario.researchWindow.includes("completed"))).toBe(true);
     expect(JSON.stringify(scenarios).toLowerCase()).not.toMatch(/\b(buy|sell|guarantee|recommend)\b/);
+  });
+
+  it("normalizes malformed, duplicate, and out-of-order chart inputs before rendering", () => {
+    const normalized = normalizeChartCandles([
+      { ...candle, candleCloseTime: "2026-08-18T11:00:00Z" },
+      { ...candle, candleCloseTime: "not-a-date" },
+      { ...candle, candleCloseTime: "2026-08-18T10:00:00Z", close: 64600 },
+      { ...candle, candleCloseTime: "2026-08-18T10:00:00Z", close: 64700 },
+    ]);
+    expect(normalized).toHaveLength(2);
+    expect(normalized.map((item) => item.close)).toEqual([64700, 64500]);
   });
 });

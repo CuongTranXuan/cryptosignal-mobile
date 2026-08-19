@@ -11,6 +11,8 @@ describe("signals-only backend integration", () => {
     expect(status.mode).toBe("SIGNALS_ONLY");
     expect(status.executionEnabled).toBe(false);
     expect(status.telegramMode).toBe("LONG_POLLING");
+    expect(status.telegramPoller).toMatchObject({ state: expect.any(String) });
+    expect(status.telegramPoller).toHaveProperty("lastError");
   });
 
   it("returns persisted signal snapshots through the protected dashboard read model", async () => {
