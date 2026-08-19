@@ -37,3 +37,7 @@
 - [x] Write a persistent-host deployment README with database, HTTPS, long-polling, scheduling, secret, backup, and single-worker requirements.
 - [x] Write AGENTS.md with architecture, safety constraints, test commands, migration procedure, and modification guardrails for future agents.
 - [x] Test credential validation, session authorization, protected-route behavior, and handoff documentation coverage.
+- [x] Audit repository files and Git history for tokens, local environment values, generated artifacts, private ideation, and deployment-specific identifiers.
+- [x] Remove or redact public-release-sensitive non-documentation artifacts and add ignore/security guardrails.
+- [x] Add an MIT License and public-release instructions without modifying existing documentation files.
+- [x] Verify that the sanitized repository has no committed secrets and that all existing documentation files are unchanged.

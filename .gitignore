@@ -6,6 +6,7 @@ node_modules/
 # Expo
 .expo/
 dist/
+dist-web/
 web-build/
 expo-env.d.ts
 
@@ -31,7 +32,13 @@ yarn-error.*
 *.pem
 
 # local env files
+.env
+.env.*
+!.env.example
 .env*.local
+*.secret
+*.token
+*.private
 
 # typescript
 *.tsbuildinfo
@@ -64,3 +71,10 @@ Thumbs.db
 # Webdev artifacts (checkpoint zips, migrations, etc.)
 .webdev/
 .project-config.json
+.manus-logs/
+terminal_full_output/
+
+# Private working material
+ideas.md
+IDEAS.md
+brainstorm/
