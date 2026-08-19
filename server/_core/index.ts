@@ -9,6 +9,7 @@ import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { startTelegramPolling } from "../telegram-polling";
 import { registerSignalIngestRoutes } from "../signal-ingest";
+import { registerDashboardAuthRoutes } from "../dashboard-auth";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise((resolve) => {
@@ -59,6 +60,7 @@ async function startServer() {
 
   registerStorageProxy(app);
   registerOAuthRoutes(app);
+  registerDashboardAuthRoutes(app);
   registerSignalIngestRoutes(app);
 
   app.get("/api/health", (_req, res) => {

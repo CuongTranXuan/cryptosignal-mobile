@@ -9,7 +9,7 @@ The chart extension records completed public OHLCV candles for **BTC/USDT**, **E
 | Engine | `run_configured_cycle.py` fetches public candles, calculates the Freqtrade adapter’s indicators, and posts up to 240 normalized history rows per asset/timeframe. | No exchange credentials, account data, or orders are used. |
 | Persistence | `candle_history` is idempotent on asset, timeframe, close time, and strategy identity. | Raw history is technical-market data only. |
 | API | `market.chart` returns an ordered candle window, matching immutable signal snapshots, and deterministic scenario conditions. | It does not return a target price, entry, position size, or action recommendation. |
-| Mobile chart | Candlesticks, EMA overlays, optional RSI pane, timestamp-aligned signal markers, pair/timeframe controls, and touch inspection. | The client renders server-calculated data and does not calculate signals locally. |
+| Browser chart | Candlesticks, EMA overlays, optional RSI pane, timestamp-aligned signal markers, pair/timeframe controls, and touch inspection. | The client renders server-calculated data and does not calculate signals locally. |
 
 ## Chart interaction model
 

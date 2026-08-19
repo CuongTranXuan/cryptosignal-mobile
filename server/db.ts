@@ -1,9 +1,11 @@
-import { and, asc, desc, eq, gte } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   auditEvents,
   botConfigs,
   candleHistory,
+  dashboardCredentials,
+  dashboardSessions,
   InsertUser,
   signalSnapshots,
   telegramPollingState,
@@ -86,6 +88,58 @@ export async function getBotConfig(): Promise<BotConfigView> {
     cooldownMinutes: row.cooldownMinutes,
     quietHours: parseJson(row.quietHoursJson, DEFAULT_BOT_CONFIG.quietHours),
   };
+}
+
+export type DashboardUser = { id: number; username: string; role: "user" | "admin" };
+
+export async function countDashboardCredentials() {
+  const db = await getDb();
+  if (!db) throw new Error("Database is unavailable");
+  const rows = await db.select({ id: dashboardCredentials.id }).from(dashboardCredentials).limit(1);
+  return rows.length;
+}
+
+export async function getDashboardCredential(username: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is unavailable");
+  const rows = await db.select().from(dashboardCredentials).where(eq(dashboardCredentials.username, username)).limit(1);
+  return rows[0] ?? null;
+}
+
+export async function createDashboardCredential(username: string, passwordHash: string, role: "user" | "admin") {
+  const db = await getDb();
+  if (!db) throw new Error("Database is unavailable");
+  const result = await db.insert(dashboardCredentials).values({ username, passwordHash, role });
+  return Number(result[0].insertId);
+}
+
+export async function createDashboardSession(credentialId: number, tokenHash: string, expiresAt: Date) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is unavailable");
+  const id = crypto.randomUUID();
+  await db.insert(dashboardSessions).values({ id, credentialId, tokenHash, expiresAt, lastSeenAt: new Date() });
+  await db.update(dashboardCredentials).set({ lastSignedIn: new Date() }).where(eq(dashboardCredentials.id, credentialId));
+  return id;
+}
+
+export async function getDashboardUserBySessionHash(tokenHash: string): Promise<DashboardUser | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const rows = await db
+    .select({ id: dashboardCredentials.id, username: dashboardCredentials.username, role: dashboardCredentials.role })
+    .from(dashboardSessions)
+    .innerJoin(dashboardCredentials, eq(dashboardSessions.credentialId, dashboardCredentials.id))
+    .where(and(eq(dashboardSessions.tokenHash, tokenHash), gt(dashboardSessions.expiresAt, new Date())))
+    .limit(1);
+  if (!rows[0]) return null;
+  await db.update(dashboardSessions).set({ lastSeenAt: new Date() }).where(eq(dashboardSessions.tokenHash, tokenHash));
+  return rows[0];
+}
+
+export async function deleteDashboardSession(tokenHash: string) {
+  const db = await getDb();
+  if (!db) return;
+  await db.delete(dashboardSessions).where(eq(dashboardSessions.tokenHash, tokenHash));
 }
 
 export async function setBotPaused(isPaused: boolean, actorId: string): Promise<BotConfigView> {

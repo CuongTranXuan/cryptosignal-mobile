@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { appRouter } from "../server/routers";
 
 function createCaller() {
-  return appRouter.createCaller({ user: null, req: {} as never, res: {} as never });
+  return appRouter.createCaller({ user: null, dashboardUser: { id: 1, username: "test-owner", role: "admin" }, req: {} as never, res: {} as never });
 }
 
 describe("signals-only backend integration", () => {
@@ -13,7 +13,7 @@ describe("signals-only backend integration", () => {
     expect(status.telegramMode).toBe("LONG_POLLING");
   });
 
-  it("returns persisted signal snapshots through the public read model", async () => {
+  it("returns persisted signal snapshots through the protected dashboard read model", async () => {
     const signals = await createCaller().signal.list({ limit: 5 });
     expect(Array.isArray(signals)).toBe(true);
     if (signals[0]) {
