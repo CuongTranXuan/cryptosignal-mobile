@@ -62,4 +62,4 @@
 - [x] Persist and expose non-verbose runner-health data for the dashboard.
 - [x] Add a browser audit-history view for shared configuration and runner operations.
 - [x] Perform a clean application startup check and capture any actionable runtime blockers.
-- [ ] Validate and push the production operations and audit-history expansion.
+- [x] Validate and push the production operations and audit-history expansion.
