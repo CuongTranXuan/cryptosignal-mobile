@@ -6,7 +6,7 @@ The system now includes a pinned **Freqtrade 2026.7** signals-only adapter, a pu
 
 ## Development commands
 
-Run the API independently of Metro so the command-line engine remains available if the mobile bundler reconnects.
+Run the API independently of the browser development bundler so the command-line engine remains available if the web bundler reconnects.
 
 ```bash
 pnpm dev:api
@@ -39,7 +39,7 @@ Run the Telegram-owned watchlist and timeframes as a single signals-only cycle:
 python3 engines/freqtrade/run_configured_cycle.py
 ```
 
-This command also writes the closed-candle history and indicator values consumed by the interactive mobile chart. See [`CHARTING_AND_SCENARIOS.md`](CHARTING_AND_SCENARIOS.md) for the chart window, scenario, and evidence contract.
+This command also writes the closed-candle history and indicator values consumed by the interactive browser chart. See [`CHARTING_AND_SCENARIOS.md`](CHARTING_AND_SCENARIOS.md) for the chart window, scenario, and evidence contract.
 
 ## Required server-side environment
 
@@ -56,6 +56,6 @@ Before alerts can be delivered, each allowed Telegram user must open the bot and
 
 ## Durable operation
 
-The managed mobile preview and sandbox support development validation only. A usable recurring service requires an always-on process to keep the Telegram `getUpdates` worker running and to schedule the closed-candle command-line cycle. Use a persistent Linux host that can install Python, Freqtrade 2026.7, and Node; configure the API base URL and server secrets there. The host does not need a public inbound webhook URL.
+The managed browser preview and sandbox support development validation only. A usable recurring service requires an always-on process to keep the Telegram `getUpdates` worker running and to schedule the closed-candle command-line cycle. Use a persistent Linux host that can install Python, Freqtrade 2026.7, and Node; configure the API base URL and server secrets there. The host does not need a public inbound webhook URL.
 
 > Do not schedule or expose any order-execution process. The only approved job is the signals-only runner with `--submit`, which posts completed-candle research snapshots to the application API.

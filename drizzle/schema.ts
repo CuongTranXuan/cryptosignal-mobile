@@ -22,6 +22,33 @@ export const users = mysqlTable("users", {
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
 });
 
+export const dashboardCredentials = mysqlTable(
+  "dashboard_credentials",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    username: varchar("username", { length: 64 }).notNull().unique(),
+    passwordHash: varchar("passwordHash", { length: 255 }).notNull(),
+    role: mysqlEnum("role", ["user", "admin"]).default("user").notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+    lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
+  },
+  (table) => [index("dashboard_credentials_username_idx").on(table.username)],
+);
+
+export const dashboardSessions = mysqlTable(
+  "dashboard_sessions",
+  {
+    id: varchar("id", { length: 64 }).primaryKey(),
+    credentialId: int("credentialId").notNull(),
+    tokenHash: varchar("tokenHash", { length: 64 }).notNull().unique(),
+    expiresAt: timestamp("expiresAt").notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    lastSeenAt: timestamp("lastSeenAt").defaultNow().notNull(),
+  },
+  (table) => [index("dashboard_sessions_credential_idx").on(table.credentialId), index("dashboard_sessions_expiry_idx").on(table.expiresAt)],
+);
+
 export const botConfigs = mysqlTable("bot_configs", {
   id: int("id").primaryKey(),
   configVersion: int("configVersion").notNull(),
@@ -119,3 +146,4 @@ export type InsertUser = typeof users.$inferInsert;
 export type BotConfig = typeof botConfigs.$inferSelect;
 export type SignalSnapshot = typeof signalSnapshots.$inferSelect;
 export type CandleHistory = typeof candleHistory.$inferSelect;
+export type DashboardCredential = typeof dashboardCredentials.$inferSelect;

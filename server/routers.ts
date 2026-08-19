@@ -6,7 +6,7 @@ import { signalSnapshotSchema } from "./signal-ingest";
 import { getCachedTelegramBotLink } from "./telegram-polling";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
-import { publicProcedure, router } from "./_core/trpc";
+import { dashboardProtectedProcedure, publicProcedure, router } from "./_core/trpc";
 
 export const appRouter = router({
   system: systemRouter,
@@ -19,16 +19,16 @@ export const appRouter = router({
     }),
   }),
   signal: router({
-    latest: publicProcedure.query(async () => (await listSignalSnapshots(1))[0] ?? null),
-    list: publicProcedure.input(z.object({ limit: z.number().int().min(1).max(100).default(30) })).query(({ input }) => listSignalSnapshots(input.limit)),
+    latest: dashboardProtectedProcedure.query(async () => (await listSignalSnapshots(1))[0] ?? null),
+    list: dashboardProtectedProcedure.input(z.object({ limit: z.number().int().min(1).max(100).default(30) })).query(({ input }) => listSignalSnapshots(input.limit)),
   }),
   market: router({
-    chart: publicProcedure
+    chart: dashboardProtectedProcedure
       .input(z.object({ assetSymbol: z.enum(["BTC/USDT", "ETH/USDT", "BNB/USDT"]), timeframe: z.enum(["1h", "4h"]), limit: z.number().int().min(30).max(250).default(120) }))
       .query(({ input }) => getChartWindow(input.assetSymbol, input.timeframe, input.limit)),
   }),
   bot: router({
-    status: publicProcedure.query(async () => {
+    status: dashboardProtectedProcedure.query(async () => {
       const [config, latest] = await Promise.all([getBotConfig(), listSignalSnapshots(1)]);
       return {
         mode: "SIGNALS_ONLY" as const,
@@ -42,7 +42,7 @@ export const appRouter = router({
         executionEnabled: false,
       };
     }),
-    config: publicProcedure.query(() => getBotConfig()),
+    config: dashboardProtectedProcedure.query(() => getBotConfig()),
   }),
   ingestion: router({
     health: publicProcedure.input(z.object({ token: z.string().min(1) })).query(({ input }) => {

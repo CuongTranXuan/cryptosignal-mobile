@@ -31,3 +31,9 @@
 - [x] Simplify browser navigation and screen layouts for desktop and mobile web usage.
 - [x] Document Telegram as the primary configuration and alert surface, with the web dashboard as read-only research visibility.
 - [x] Verify responsive browser behavior and the existing Telegram command contracts after the client pivot.
+- [x] Add a secure username/password credential model with salted password hashing and an initial-owner bootstrap path.
+- [x] Add server-managed authenticated sessions, sign-in/sign-out endpoints, and protected dashboard access.
+- [x] Build responsive sign-in and bootstrap-account screens for the browser dashboard.
+- [x] Write a persistent-host deployment README with database, HTTPS, long-polling, scheduling, secret, backup, and single-worker requirements.
+- [x] Write AGENTS.md with architecture, safety constraints, test commands, migration procedure, and modification guardrails for future agents.
+- [x] Test credential validation, session authorization, protected-route behavior, and handoff documentation coverage.

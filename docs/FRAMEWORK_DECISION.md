@@ -1,5 +1,7 @@
 # Framework Decision — Build on Freqtrade, Do Not Build a Trading Engine from Scratch
 
+> **Historical planning note:** This document captures the pre-implementation framework comparison. The implemented product uses a browser-first Expo Web dashboard, Node/Express/tRPC API, MySQL/TiDB, pinned Freqtrade adapter, and native Telegram long polling. Follow [`CURRENT_ARCHITECTURE.md`](CURRENT_ARCHITECTURE.md), [`../README.md`](../README.md), and [`../AGENTS.md`](../AGENTS.md) for current decisions.
+
 **Decision status:** Approved for implementation planning  
 **Scope:** Signals-only crypto OHLCV analytics, Telegram-first control, mobile companion  
 **Recommended stack:** **Freqtrade (Python engine) + FastAPI (control-plane API) + aiogram (Telegram gateway) + PostgreSQL + Expo/TypeScript mobile companion**

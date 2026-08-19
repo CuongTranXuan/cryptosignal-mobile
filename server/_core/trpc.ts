@@ -27,6 +27,13 @@ const requireUser = t.middleware(async (opts) => {
 
 export const protectedProcedure = t.procedure.use(requireUser);
 
+export const dashboardProtectedProcedure = t.procedure.use(
+  t.middleware(async (opts) => {
+    if (!opts.ctx.dashboardUser) throw new TRPCError({ code: "UNAUTHORIZED", message: "Sign in to access the dashboard." });
+    return opts.next({ ctx: { ...opts.ctx, dashboardUser: opts.ctx.dashboardUser } });
+  }),
+);
+
 export const adminProcedure = t.procedure.use(
   t.middleware(async (opts) => {
     const { ctx, next } = opts;
