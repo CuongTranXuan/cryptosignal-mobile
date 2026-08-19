@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { CandlestickSeries, ColorType, CrosshairMode, HistogramSeries, LineSeries, LineStyle, createChart, createSeriesMarkers, type UTCTimestamp } from "lightweight-charts";
 
+import { normalizeChartCandles } from "@/shared/chart-utils";
 import { useColors } from "@/hooks/use-colors";
 
 type Candle = { candleCloseTime: string | Date; open: number; high: number; low: number; close: number; ema20: number; ema50: number; rsi14: number; macd?: number; macdSignal?: number };
@@ -20,11 +21,16 @@ export function PriceHistoryChart({ candles, signals }: { candles: Candle[]; sig
   const [showMacd, setShowMacd] = useState(true);
   const [levels, setLevels] = useState<number[]>([]);
   const [inspection, setInspection] = useState<Inspection | null>(null);
+  const normalizedCandles = useMemo(() => normalizeChartCandles(candles), [candles]);
+  const normalizedSignals = useMemo(() => {
+    const candleTimes = new Set(normalizedCandles.map((candle) => timestamp(candle.candleCloseTime)));
+    return signals.filter((signal) => candleTimes.has(timestamp(signal.candleCloseTime)) && Number.isFinite(signal.score));
+  }, [normalizedCandles, signals]);
 
   useEffect(() => {
-    if (Platform.OS !== "web" || !chartHost.current || !candles.length) return;
+    if (Platform.OS !== "web" || !chartHost.current || !normalizedCandles.length) return;
     const host = chartHost.current;
-    const ordered = [...candles].sort((left, right) => new Date(left.candleCloseTime).getTime() - new Date(right.candleCloseTime).getTime());
+    const ordered = normalizedCandles;
     const candleLookup = new Map(ordered.map((candle) => [timestamp(candle.candleCloseTime), candle]));
     const chart = createChart(host, {
       autoSize: true,
@@ -62,7 +68,7 @@ export function PriceHistoryChart({ candles, signals }: { candles: Candle[]; sig
     histogram.setData(ordered.map((candle) => { const value = (candle.macd ?? 0) - (candle.macdSignal ?? 0); return { time: timestamp(candle.candleCloseTime), value, color: value >= 0 ? `${colors.success}99` : `${colors.error}99` }; }));
     macd.createPriceLine({ price: 0, color: colors.border, lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: false, title: "" });
 
-    createSeriesMarkers(candlesticks, signals.map((marker) => ({
+    createSeriesMarkers(candlesticks, normalizedSignals.map((marker) => ({
       time: timestamp(marker.candleCloseTime),
       position: marker.state === "BULLISH_SETUP" ? "belowBar" : marker.state === "BEARISH_SETUP" ? "aboveBar" : "inBar",
       color: marker.state === "BULLISH_SETUP" ? colors.success : marker.state === "BEARISH_SETUP" ? colors.error : colors.warning,
@@ -71,16 +77,21 @@ export function PriceHistoryChart({ candles, signals }: { candles: Candle[]; sig
     })));
     levels.forEach((level, index) => candlesticks.createPriceLine({ price: level, color: colors.primary, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: `Level ${index + 1}` }));
     chart.timeScale().fitContent();
-    chart.subscribeCrosshairMove((event) => {
+    const onCrosshairMove = (event: { time?: unknown }) => {
       const candle = typeof event.time === "number" ? candleLookup.get(event.time as UTCTimestamp) : undefined;
       setInspection(candle ? { ...candle, label: new Date(candle.candleCloseTime).toLocaleString() } : null);
-    });
-    return () => chart.remove();
-  }, [candles, colors, levels, showEma, showMacd, showRsi, signals]);
+    };
+    chart.subscribeCrosshairMove(onCrosshairMove);
+    return () => {
+      chart.unsubscribeCrosshairMove(onCrosshairMove);
+      chart.remove();
+    };
+  }, [colors, levels, normalizedCandles, normalizedSignals, showEma, showMacd, showRsi]);
 
   if (!candles.length) return null;
   if (Platform.OS !== "web") return <Text style={[styles.unsupported, { color: colors.muted }]}>Interactive charts are available in the browser dashboard.</Text>;
-  const latest = inspection ?? { ...candles[candles.length - 1], label: new Date(candles[candles.length - 1].candleCloseTime).toLocaleString() };
+  if (!normalizedCandles.length) return <Text style={[styles.unsupported, { color: colors.muted }]}>Chart data is unavailable because the selected history contains no valid completed candles.</Text>;
+  const latest = inspection ?? { ...normalizedCandles[normalizedCandles.length - 1], label: new Date(normalizedCandles[normalizedCandles.length - 1].candleCloseTime).toLocaleString() };
   return <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
     <View style={styles.header}><View><Text style={[styles.price, { color: colors.foreground }]}>{price(latest.close)}</Text><Text style={[styles.meta, { color: colors.muted }]}>{latest.label} · closed candle</Text></View><View style={styles.toolRow}><Tool label="EMA" active={showEma} onPress={() => setShowEma((current) => !current)} colors={colors} /><Tool label="RSI" active={showRsi} onPress={() => setShowRsi((current) => !current)} colors={colors} /><Tool label="MACD" active={showMacd} onPress={() => setShowMacd((current) => !current)} colors={colors} /></View></View>
     <div ref={chartHost} style={{ width: "100%", minHeight: 432 }} aria-label="Interactive historical price chart with candlesticks, indicator overlays, and signal annotations" />

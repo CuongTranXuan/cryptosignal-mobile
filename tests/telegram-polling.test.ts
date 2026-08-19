@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeConfiguredSymbol, parseTelegramCommand } from "../server/telegram-polling";
+import { normalizeConfiguredSymbol, parseTelegramCommand, telegramPollingBackoffMs } from "../server/telegram-polling";
 
 describe("Telegram long-polling commands", () => {
   it("normalizes bot suffixes and preserves command arguments", () => {
@@ -21,5 +21,10 @@ describe("Telegram long-polling commands", () => {
   it("normalizes only the explicitly supported public market symbols", () => {
     expect(normalizeConfiguredSymbol("ethusdt")).toBe("ETH/USDT");
     expect(normalizeConfiguredSymbol("DOGEUSDT")).toBeNull();
+  });
+
+  it("backs off after a getUpdates conflict instead of retrying the same token every few seconds", () => {
+    expect(telegramPollingBackoffMs(new Error("Telegram getUpdates failed with 409: Conflict: terminated by other getUpdates request"))).toBe(60_000);
+    expect(telegramPollingBackoffMs(new Error("Telegram getUpdates failed with 500"))).toBe(5_000);
   });
 });

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { COOKIE_NAME } from "../shared/const";
 import { getBotConfig, getChartWindow, listSignalSnapshots, recordSignalSnapshot, setBotPaused, updateBotConfig } from "./db";
 import { signalSnapshotSchema } from "./signal-ingest";
-import { getCachedTelegramBotLink } from "./telegram-polling";
+import { getCachedTelegramBotLink, getTelegramPollingHealth } from "./telegram-polling";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { dashboardProtectedProcedure, publicProcedure, router } from "./_core/trpc";
@@ -39,6 +39,7 @@ export const appRouter = router({
         latestSignalAt: latest[0]?.candleCloseTime ?? null,
         telegramMode: "LONG_POLLING" as const,
         telegramBotUrl: getCachedTelegramBotLink(),
+        telegramPoller: getTelegramPollingHealth(),
         executionEnabled: false,
       };
     }),
