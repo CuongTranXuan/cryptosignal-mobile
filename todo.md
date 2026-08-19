@@ -41,3 +41,4 @@
 - [x] Remove or redact public-release-sensitive non-documentation artifacts and add ignore/security guardrails.
 - [x] Add an MIT License and public-release instructions without modifying existing documentation files.
 - [x] Verify that the sanitized repository has no committed secrets and that all existing documentation files are unchanged.
+- [ ] Commit and push the sanitized public-release changes to the existing GitHub repository without changing its visibility.
