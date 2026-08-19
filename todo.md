@@ -54,6 +54,6 @@
 - [x] Add resilient dashboard feedback and refresh behavior for shared configuration changes.
 - [x] Improve Telegram poller conflict diagnostics and operator-facing long-polling health visibility.
 - [x] Harden the interactive chart lifecycle and verify browser-dashboard rendering contracts.
-- [ ] Validate the code-quality pass and synchronize the resulting commit to GitHub.
+- [x] Validate the code-quality pass and synchronize the resulting commit to GitHub.
 - [x] Add 30-minute timeframe parity to the legacy historical-signals screen.
 - [x] Align legacy configuration and health messaging with the current dual-control operating model.
