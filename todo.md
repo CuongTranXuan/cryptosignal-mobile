@@ -45,3 +45,9 @@
 - [x] Replace one-time owner bootstrap with default `user` / `password` demo credentials and remove username/password constraints.
 - [x] Repair the browser-to-server authentication request path so the sign-in response is valid JSON.
 - [x] Test the demo sign-in flow and push the completed change to GitHub.
+- [x] Add dashboard controls that mirror the supported Telegram operational commands with versioned, auditable configuration updates.
+- [x] Add 30-minute closed-candle acquisition, persistence, analysis, and chart-window support.
+- [x] Add evidence-based upcoming-candle scenario outlooks with confidence, conditions, and invalidation—without personalized trade instructions.
+- [x] Adopt and integrate a maintained interactive charting framework for drawing tools, indicator overlays, model layers, and signal annotations.
+- [x] Test Telegram/dashboard configuration synchronization, 30-minute candle contracts, scenario safeguards, and chart interactions.
+- [x] Document the dual-control surface, 30-minute analysis, and interactive chart behavior.

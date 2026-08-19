@@ -20,4 +20,19 @@ describe("signals-only backend integration", () => {
       expect(signals[0]).toMatchObject({ assetSymbol: expect.any(String), state: expect.any(String) });
     }
   });
+
+  it("accepts dashboard configuration changes and records the dashboard as the shared control surface", async () => {
+    const caller = createCaller();
+    const updated = await caller.bot.controls.setTimeframes({ timeframes: ["30m", "1h"] });
+    expect(updated.timeframes).toEqual(["30m", "1h"]);
+    expect(updated.lastChangedBy).toBe("DASHBOARD");
+
+    const paused = await caller.bot.controls.setPaused({ isPaused: true });
+    expect(paused).toMatchObject({ isPaused: true, lastChangedBy: "DASHBOARD" });
+  });
+
+  it("accepts a 30-minute closed-candle chart window", async () => {
+    const chart = await createCaller().market.chart({ assetSymbol: "BTC/USDT", timeframe: "30m", limit: 30 });
+    expect(chart).toMatchObject({ candles: expect.any(Array), signals: expect.any(Array), scenarios: expect.any(Array) });
+  });
 });

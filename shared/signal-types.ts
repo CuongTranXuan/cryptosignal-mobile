@@ -31,6 +31,7 @@ export type SignalSnapshotInput = {
 
 export type BotConfigView = {
   configVersion: number;
+  lastChangedBy: "SYSTEM" | "TELEGRAM" | "DASHBOARD";
   isPaused: boolean;
   watchlist: string[];
   timeframes: string[];

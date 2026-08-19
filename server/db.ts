@@ -18,9 +18,10 @@ let _db: ReturnType<typeof drizzle> | null = null;
 
 export const DEFAULT_BOT_CONFIG: BotConfigView = {
   configVersion: 1,
+  lastChangedBy: "SYSTEM",
   isPaused: false,
   watchlist: ["BTC/USDT", "ETH/USDT", "BNB/USDT"],
-  timeframes: ["1h", "4h"],
+  timeframes: ["30m", "1h", "4h"],
   ruleFamilies: ["TREND", "MOMENTUM", "VOLUME", "CANDLE_PATTERN"],
   alertThreshold: 0.55,
   cooldownMinutes: 60,
@@ -78,8 +79,17 @@ export async function getBotConfig(): Promise<BotConfigView> {
   const rows = await db.select().from(botConfigs).where(eq(botConfigs.id, 1)).limit(1);
   const row = rows[0];
   if (!row) return DEFAULT_BOT_CONFIG;
+  const recentChanges = await db
+    .select({ actorType: auditEvents.actorType })
+    .from(auditEvents)
+    .where(eq(auditEvents.action, "BOT_CONFIGURATION_CHANGED"))
+    .orderBy(desc(auditEvents.createdAt))
+    .limit(1);
+  const actorType = recentChanges[0]?.actorType;
+  const lastChangedBy = actorType === "DASHBOARD" || actorType === "TELEGRAM" ? actorType : "SYSTEM";
   return {
     configVersion: row.configVersion,
+    lastChangedBy,
     isPaused: row.isPaused,
     watchlist: parseJson(row.watchlistJson, DEFAULT_BOT_CONFIG.watchlist),
     timeframes: parseJson(row.timeframesJson, DEFAULT_BOT_CONFIG.timeframes),
@@ -142,19 +152,20 @@ export async function deleteDashboardSession(tokenHash: string) {
   await db.delete(dashboardSessions).where(eq(dashboardSessions.tokenHash, tokenHash));
 }
 
-export async function setBotPaused(isPaused: boolean, actorId: string): Promise<BotConfigView> {
+export async function setBotPaused(isPaused: boolean, actorId: string, actorType: "TELEGRAM" | "DASHBOARD" = "TELEGRAM"): Promise<BotConfigView> {
   const current = await getBotConfig();
-  return updateBotConfig({ isPaused }, actorId, current);
+  return updateBotConfig({ isPaused }, actorId, current, actorType);
 }
 
 export async function updateBotConfig(
-  patch: Partial<Omit<BotConfigView, "configVersion">>,
+  patch: Partial<Omit<BotConfigView, "configVersion" | "lastChangedBy">>,
   actorId: string,
   currentConfig?: BotConfigView,
+  actorType = "TELEGRAM",
 ): Promise<BotConfigView> {
   const db = await getDb();
   const current = currentConfig ?? (await getBotConfig());
-  const next = { ...current, ...patch, configVersion: current.configVersion + 1 };
+  const next = { ...current, ...patch, configVersion: current.configVersion + 1, lastChangedBy: actorType === "DASHBOARD" ? "DASHBOARD" as const : "TELEGRAM" as const };
   if (!db) return next;
   await db
     .insert(botConfigs)
@@ -170,9 +181,18 @@ export async function updateBotConfig(
       quietHoursJson: JSON.stringify(next.quietHours),
     })
     .onDuplicateKeyUpdate({
-      set: { configVersion: next.configVersion, isPaused: next.isPaused },
+      set: {
+        configVersion: next.configVersion,
+        isPaused: next.isPaused,
+        watchlistJson: JSON.stringify(next.watchlist),
+        timeframesJson: JSON.stringify(next.timeframes),
+        ruleFamiliesJson: JSON.stringify(next.ruleFamilies),
+        alertThreshold: next.alertThreshold,
+        cooldownMinutes: next.cooldownMinutes,
+        quietHoursJson: JSON.stringify(next.quietHours),
+      },
     });
-  await recordAuditEvent("BOT_CONFIGURATION_CHANGED", "TELEGRAM", actorId, { patch, configVersion: next.configVersion });
+  await recordAuditEvent("BOT_CONFIGURATION_CHANGED", actorType, actorId, { patch, configVersion: next.configVersion });
   return next;
 }
 

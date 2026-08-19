@@ -113,7 +113,7 @@ async function handleCommand(message: TelegramMessage) {
   if (command === "/start" || command === "/help") {
     await sendMessage(
       message.chat.id,
-      "CryptoSignal is in signals-only mode. Commands: /status, /signal [SYMBOL], /watchlist [add|remove] SYMBOL, /threshold 0.55, /cooldown 60m, /methodology [enable|disable] FAMILY, /pause, /resume, /web, /help. Telegram is the control surface; the web dashboard is read-only. It does not place orders or use exchange private keys.",
+      "CryptoSignal is in signals-only mode. Commands: /status, /signal [SYMBOL], /watchlist [add|remove] SYMBOL, /timeframes [add|remove] 30m|1h|4h, /threshold 0.55, /cooldown 60m, /methodology [enable|disable] FAMILY, /pause, /resume, /web, /help. Telegram and the web dashboard share the same configuration. It does not place orders or use exchange private keys.",
     );
     return;
   }
@@ -129,7 +129,7 @@ async function handleCommand(message: TelegramMessage) {
   }
 
   if (command === "/web") {
-    await sendMessage(message.chat.id, `Read-only research dashboard: ${WEB_DASHBOARD_URL}\nUse Telegram commands for watchlist, alert policy, methodology, pause, and resume controls.`);
+    await sendMessage(message.chat.id, `Dashboard: ${WEB_DASHBOARD_URL}\nTelegram and dashboard controls share the same watchlist, timeframe, alert policy, methodology, pause, and resume configuration.`);
     return;
   }
 
@@ -172,6 +172,25 @@ async function handleCommand(message: TelegramMessage) {
     }
     const next = await updateBotConfig({ alertThreshold: threshold }, actorId);
     await sendMessage(message.chat.id, `Alert threshold set to ${Math.round(next.alertThreshold * 100)}% (v${next.configVersion}).`);
+    return;
+  }
+
+  if (command === "/timeframes") {
+    const config = await getBotConfig();
+    const action = args[0]?.toLowerCase();
+    const timeframe = args[1]?.toLowerCase();
+    const allowed = new Set(["30m", "1h", "4h"]);
+    if ((action === "add" || action === "remove") && timeframe && allowed.has(timeframe)) {
+      const enabled = config.timeframes.includes(timeframe);
+      if (action === "add" && enabled) return void await sendMessage(message.chat.id, `${timeframe} is already enabled.`);
+      if (action === "remove" && !enabled) return void await sendMessage(message.chat.id, `${timeframe} is not enabled.`);
+      if (action === "remove" && config.timeframes.length === 1) return void await sendMessage(message.chat.id, "At least one timeframe must remain enabled.");
+      const timeframes = action === "add" ? [...config.timeframes, timeframe] : config.timeframes.filter((item) => item !== timeframe);
+      const next = await updateBotConfig({ timeframes }, actorId, config);
+      await sendMessage(message.chat.id, `Timeframes v${next.configVersion}: ${next.timeframes.join(", ")}`);
+      return;
+    }
+    await sendMessage(message.chat.id, `Timeframes: ${config.timeframes.join(", ")}\nUse /timeframes add 30m or /timeframes remove 4h.`);
     return;
   }
 
