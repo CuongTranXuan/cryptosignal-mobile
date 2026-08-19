@@ -13,8 +13,9 @@ describe("Telegram long-polling commands", () => {
     expect(parseTelegramCommand("/pause")).toEqual({ command: "/pause", args: [] });
   });
 
-  it("recognizes the read-only browser dashboard shortcut", () => {
+  it("recognizes the browser dashboard shortcut alongside operational command arguments", () => {
     expect(parseTelegramCommand("/web@CryptoSignalBot")).toEqual({ command: "/web", args: [] });
+    expect(parseTelegramCommand("/timeframes add 30m")).toEqual({ command: "/timeframes", args: ["add", "30m"] });
   });
 
   it("normalizes only the explicitly supported public market symbols", () => {

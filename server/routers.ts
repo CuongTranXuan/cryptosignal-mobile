@@ -1,7 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { COOKIE_NAME } from "../shared/const";
-import { getBotConfig, getChartWindow, listSignalSnapshots, recordSignalSnapshot } from "./db";
+import { getBotConfig, getChartWindow, listSignalSnapshots, recordSignalSnapshot, setBotPaused, updateBotConfig } from "./db";
 import { signalSnapshotSchema } from "./signal-ingest";
 import { getCachedTelegramBotLink } from "./telegram-polling";
 import { getSessionCookieOptions } from "./_core/cookies";
@@ -24,7 +24,7 @@ export const appRouter = router({
   }),
   market: router({
     chart: dashboardProtectedProcedure
-      .input(z.object({ assetSymbol: z.enum(["BTC/USDT", "ETH/USDT", "BNB/USDT"]), timeframe: z.enum(["1h", "4h"]), limit: z.number().int().min(30).max(250).default(120) }))
+      .input(z.object({ assetSymbol: z.enum(["BTC/USDT", "ETH/USDT", "BNB/USDT"]), timeframe: z.enum(["30m", "1h", "4h"]), limit: z.number().int().min(30).max(500).default(180) }))
       .query(({ input }) => getChartWindow(input.assetSymbol, input.timeframe, input.limit)),
   }),
   bot: router({
@@ -43,6 +43,29 @@ export const appRouter = router({
       };
     }),
     config: dashboardProtectedProcedure.query(() => getBotConfig()),
+    controls: router({
+      setPaused: dashboardProtectedProcedure.input(z.object({ isPaused: z.boolean() })).mutation(({ input }) => setBotPaused(input.isPaused, "dashboard", "DASHBOARD")),
+      setWatchlist: dashboardProtectedProcedure.input(z.object({ watchlist: z.array(z.enum(["BTC/USDT", "ETH/USDT", "BNB/USDT"])) .min(1).max(3) })).mutation(async ({ input }) => {
+        const current = await getBotConfig();
+        return updateBotConfig({ watchlist: input.watchlist }, "dashboard", current, "DASHBOARD");
+      }),
+      setTimeframes: dashboardProtectedProcedure.input(z.object({ timeframes: z.array(z.enum(["30m", "1h", "4h"])) .min(1).max(3) })).mutation(async ({ input }) => {
+        const current = await getBotConfig();
+        return updateBotConfig({ timeframes: input.timeframes }, "dashboard", current, "DASHBOARD");
+      }),
+      setThreshold: dashboardProtectedProcedure.input(z.object({ alertThreshold: z.number().min(0).max(1) })).mutation(async ({ input }) => {
+        const current = await getBotConfig();
+        return updateBotConfig({ alertThreshold: input.alertThreshold }, "dashboard", current, "DASHBOARD");
+      }),
+      setCooldown: dashboardProtectedProcedure.input(z.object({ cooldownMinutes: z.number().int().min(1).max(1440) })).mutation(async ({ input }) => {
+        const current = await getBotConfig();
+        return updateBotConfig({ cooldownMinutes: input.cooldownMinutes }, "dashboard", current, "DASHBOARD");
+      }),
+      setRuleFamilies: dashboardProtectedProcedure.input(z.object({ ruleFamilies: z.array(z.enum(["TREND", "MOMENTUM", "VOLUME", "CANDLE_PATTERN", "WYCKOFF", "SMC", "ELLIOTT_EXPERIMENTAL"])) .max(7) })).mutation(async ({ input }) => {
+        const current = await getBotConfig();
+        return updateBotConfig({ ruleFamilies: input.ruleFamilies }, "dashboard", current, "DASHBOARD");
+      }),
+    }),
   }),
   ingestion: router({
     health: publicProcedure.input(z.object({ token: z.string().min(1) })).query(({ input }) => {
