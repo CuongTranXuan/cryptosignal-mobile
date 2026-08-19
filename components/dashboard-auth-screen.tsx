@@ -3,34 +3,24 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 
 
 import { useColors } from "@/hooks/use-colors";
 
-export function DashboardAuthScreen({ bootstrapRequired, onSignIn, onBootstrap }: { bootstrapRequired: boolean; onSignIn: (username: string, password: string) => Promise<void>; onBootstrap: (username: string, password: string, bootstrapToken: string) => Promise<void> }) {
+export function DashboardAuthScreen({ onSignIn }: { onSignIn: (username: string, password: string) => Promise<void> }) {
   const colors = useColors();
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [bootstrapToken, setBootstrapToken] = useState("");
+  const [username, setUsername] = useState("user");
+  const [password, setPassword] = useState("password");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const submit = async () => {
     setError(null);
-    if (username.trim().length < 3 || password.length < 12) {
-      setError("Use a username of at least 3 characters and a password of at least 12 characters.");
-      return;
-    }
-    if (bootstrapRequired && bootstrapToken.length < 16) {
-      setError("Enter the one-time bootstrap key configured on the server.");
-      return;
-    }
     setSubmitting(true);
     try {
-      if (bootstrapRequired) await onBootstrap(username, password, bootstrapToken);
-      else await onSignIn(username, password);
+      await onSignIn(username, password);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Unable to authenticate.");
+      setError(cause instanceof Error ? cause.message : "Unable to sign in.");
     } finally {
       setSubmitting(false);
     }
   };
-  return <View style={[styles.page, { backgroundColor: colors.background }]}><View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}><Text style={[styles.brand, { color: colors.primary }]}>CRYPTO SIGNAL</Text><Text style={[styles.title, { color: colors.foreground }]}>{bootstrapRequired ? "Create the first dashboard owner" : "Sign in to research"}</Text><Text style={[styles.copy, { color: colors.muted }]}>{bootstrapRequired ? "Use the server-held bootstrap key once to create an administrator username and password. Bootstrap becomes unavailable immediately after this account is created." : "The browser dashboard is read-only. Telegram remains the control surface for watchlists, alerts, and rule configuration."}</Text><View style={styles.fields}><Field label="Username" value={username} onChangeText={setUsername} autoCapitalize="none" colors={colors} /><Field label="Password" value={password} onChangeText={setPassword} secureTextEntry colors={colors} />{bootstrapRequired ? <Field label="One-time bootstrap key" value={bootstrapToken} onChangeText={setBootstrapToken} secureTextEntry colors={colors} /> : null}</View>{error ? <Text style={[styles.error, { color: colors.error }]}>{error}</Text> : null}<Pressable onPress={submit} disabled={submitting} style={({ pressed }) => [styles.button, { backgroundColor: colors.primary }, pressed && styles.pressed, submitting && styles.disabled]}>{submitting ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.buttonText}>{bootstrapRequired ? "Create secured owner account" : "Sign in"}</Text>}</Pressable><Text style={[styles.note, { color: colors.muted }]}>No exchange credentials or trading actions are available in this dashboard.</Text></View></View>;
+  return <View style={[styles.page, { backgroundColor: colors.background }]}><View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}><Text style={[styles.brand, { color: colors.primary }]}>CRYPTO SIGNAL</Text><Text style={[styles.title, { color: colors.foreground }]}>Demo research access</Text><Text style={[styles.copy, { color: colors.muted }]}>Use the default demo account to open the read-only dashboard. Telegram remains the control surface for watchlists, alerts, and rule configuration.</Text><View style={styles.fields}><Field label="Username" value={username} onChangeText={setUsername} autoCapitalize="none" colors={colors} /><Field label="Password" value={password} onChangeText={setPassword} secureTextEntry colors={colors} /></View>{error ? <Text style={[styles.error, { color: colors.error }]}>{error}</Text> : null}<Pressable onPress={submit} disabled={submitting} style={({ pressed }) => [styles.button, { backgroundColor: colors.primary }, pressed && styles.pressed, submitting && styles.disabled]}>{submitting ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.buttonText}>Open demo dashboard</Text>}</Pressable><Text style={[styles.note, { color: colors.muted }]}>Demo credentials: user / password. No exchange credentials or trading actions are available here.</Text></View></View>;
 }
 
 function Field({ label, colors, ...props }: { label: string; colors: ReturnType<typeof useColors>; value: string; onChangeText: (value: string) => void; secureTextEntry?: boolean; autoCapitalize?: "none" | "sentences" | "words" | "characters" }) { return <View style={styles.field}><Text style={[styles.label, { color: colors.foreground }]}>{label}</Text><TextInput {...props} style={[styles.input, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.background }]} placeholderTextColor={colors.muted} accessibilityLabel={label} /></View>; }
