@@ -72,3 +72,4 @@
 - [x] Diagnose and restore browser access to the deployed web dashboard.
 - [x] Serve the built web bundle from the deployed Node root path and ensure deployment builds it.
 - [x] Package the static web bundle inside the server distribution so the managed deployment can serve it reliably.
+- [x] Add and verify the explicit CSS interop runtime dependency required by the managed static web build.
