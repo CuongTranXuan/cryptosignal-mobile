@@ -74,3 +74,4 @@
 - [x] Package the static web bundle inside the server distribution so the managed deployment can serve it reliably.
 - [x] Add and verify the explicit CSS interop runtime dependency required by the managed static web build.
 - [x] Configure the clean production dependency layout so Metro can resolve CSS interop during managed builds.
+- [x] Remove the filesystem-only NativeWind cache path that breaks the managed static web export.
