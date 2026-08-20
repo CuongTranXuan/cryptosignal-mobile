@@ -73,3 +73,4 @@
 - [x] Serve the built web bundle from the deployed Node root path and ensure deployment builds it.
 - [x] Package the static web bundle inside the server distribution so the managed deployment can serve it reliably.
 - [x] Add and verify the explicit CSS interop runtime dependency required by the managed static web build.
+- [x] Configure the clean production dependency layout so Metro can resolve CSS interop during managed builds.
