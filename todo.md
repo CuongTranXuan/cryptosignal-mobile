@@ -75,3 +75,11 @@
 - [x] Add and verify the explicit CSS interop runtime dependency required by the managed static web build.
 - [x] Configure the clean production dependency layout so Metro can resolve CSS interop during managed builds.
 - [x] Remove the filesystem-only NativeWind cache path that breaks the managed static web export.
+- [x] Add an English-default and Vietnamese i18n provider with persisted language preference.
+- [x] Translate the dashboard login, navigation, controls, health, audit, and research surfaces.
+- [x] Add an accessible English/Vietnamese language selector to the web dashboard.
+- [ ] Validate and synchronize the bilingual web dashboard update to GitHub.
+- [x] Add a dashboard-triggered public closed-candle refresh and signals-only calculation action.
+- [x] Present refresh progress, completion, and non-sensitive failure feedback in the web dashboard.
+- [x] Validate the public-data refresh workflow without exchange credentials or order execution.
+- [x] Batch public candle-history persistence so dashboard refreshes complete within an interactive request window.
