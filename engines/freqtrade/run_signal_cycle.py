@@ -63,73 +63,115 @@ def load_closed_candles(symbol: str, timeframe: str, limit: int) -> pd.DataFrame
     return frame.iloc[:-1][["date", "open", "high", "low", "close", "volume"]].reset_index(drop=True)
 
 
-def build_snapshot(symbol: str, timeframe: str, dataframe: pd.DataFrame, config_version: int = 1) -> dict:
+def build_snapshot(
+    symbol: str,
+    timeframe: str,
+    dataframe: pd.DataFrame,
+    config_version: int = 1,
+    analysis_config: dict | None = None,
+) -> dict:
     strategy = CryptoSignalStrategy({})
     analyzed = strategy.populate_indicators(dataframe.copy(), {"pair": symbol})
     analyzed = strategy.populate_entry_trend(analyzed, {"pair": symbol})
     analyzed = strategy.populate_exit_trend(analyzed, {"pair": symbol})
     row = analyzed.iloc[-1]
     close_time = row["date"].to_pydatetime().astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
-    direction = "BULLISH" if row["signal_score"] > 0 else "BEARISH" if row["signal_score"] < 0 else "NEUTRAL"
+    analysis_config = analysis_config or {}
+    rule_families = set(analysis_config.get("ruleFamilies", ["TREND", "MOMENTUM", "VOLUME", "CANDLE_PATTERN"]))
+    enabled_patterns = set(analysis_config.get("enabledPatterns", [
+        "DOJI_V1", "HAMMER_V1", "INVERTED_HAMMER_V1", "SHOOTING_STAR_V1", "HANGING_MAN_V1", "SPINNING_TOP_V1",
+        "BULLISH_ENGULFING_V1", "BEARISH_ENGULFING_V1", "BULLISH_HARAMI_V1", "BEARISH_HARAMI_V1", "TWEEZER_TOP_V1", "TWEEZER_BOTTOM_V1",
+        "MORNING_STAR_V1", "EVENING_STAR_V1", "THREE_WHITE_SOLDIERS_V1", "THREE_BLACK_CROWS_V1", "THREE_INSIDE_UP_V1", "THREE_INSIDE_DOWN_V1",
+    ]))
+    enabled_methodologies = set(analysis_config.get("enabledMethodologies", [
+        "EMA_TREND_V1", "RSI_MACD_CONFIRMATION_V1", "VOLUME_CONFIRMATION_V1", "WYCKOFF_SPRING_PROXY_V1", "WYCKOFF_UPTHRUST_PROXY_V1",
+        "SMC_BULLISH_BOS_PROXY_V1", "SMC_BEARISH_BOS_PROXY_V1", "ELLIOTT_BULLISH_IMPULSE_PROXY_V1", "ELLIOTT_BEARISH_IMPULSE_PROXY_V1",
+    ]))
+    trend_direction = "BULLISH" if row["ema_20"] > row["ema_50"] > row["ema_200"] else "BEARISH" if row["ema_20"] < row["ema_50"] < row["ema_200"] else "NEUTRAL"
+    momentum_direction = "BULLISH" if row["rsi_14"] >= 50 and row["macd"] >= row["macd_signal"] else "BEARISH" if row["rsi_14"] <= 50 and row["macd"] <= row["macd_signal"] else "NEUTRAL"
+    volume_direction = "BULLISH" if row["relative_volume"] >= 1 and row["close"] > row["open"] else "BEARISH" if row["relative_volume"] >= 1 and row["close"] < row["open"] else "NEUTRAL"
     finding_specs = [
-        ("TREND", "EMA_TREND_V1", abs(float(row["signal_score"])) >= 0.3, direction),
-        ("MOMENTUM", "RSI_MACD_CONFIRMATION_V1", abs(float(row["signal_score"])) >= 0.2, direction),
-        ("CANDLE_PATTERN", "DOJI_V1", float(row["doji_raw"]) > 0, "NEUTRAL"),
-        ("CANDLE_PATTERN", "HAMMER_V1", float(row["hammer_raw"]) > 0, "BULLISH"),
-        ("CANDLE_PATTERN", "INVERTED_HAMMER_V1", float(row["inverted_hammer_raw"]) > 0, "BULLISH"),
-        ("CANDLE_PATTERN", "SHOOTING_STAR_V1", float(row["shooting_star_raw"]) > 0, "BEARISH"),
-        ("CANDLE_PATTERN", "HANGING_MAN_V1", float(row["hanging_man_raw"]) > 0, "BEARISH"),
-        ("CANDLE_PATTERN", "SPINNING_TOP_V1", float(row["spinning_top_raw"]) > 0, "NEUTRAL"),
-        ("CANDLE_PATTERN", "BULLISH_ENGULFING_V1", float(row["bullish_engulfing_raw"]) > 0, "BULLISH"),
-        ("CANDLE_PATTERN", "BEARISH_ENGULFING_V1", float(row["bearish_engulfing_raw"]) > 0, "BEARISH"),
-        ("CANDLE_PATTERN", "BULLISH_HARAMI_V1", float(row["bullish_harami_raw"]) > 0, "BULLISH"),
-        ("CANDLE_PATTERN", "BEARISH_HARAMI_V1", float(row["bearish_harami_raw"]) > 0, "BEARISH"),
-        ("CANDLE_PATTERN", "TWEEZER_TOP_V1", bool(row["tweezer_top_raw"]), "BEARISH"),
-        ("CANDLE_PATTERN", "TWEEZER_BOTTOM_V1", bool(row["tweezer_bottom_raw"]), "BULLISH"),
-        ("CANDLE_PATTERN", "MORNING_STAR_V1", float(row["morning_star_raw"]) > 0, "BULLISH"),
-        ("CANDLE_PATTERN", "EVENING_STAR_V1", float(row["evening_star_raw"]) > 0, "BEARISH"),
-        ("CANDLE_PATTERN", "THREE_WHITE_SOLDIERS_V1", float(row["three_white_soldiers_raw"]) > 0, "BULLISH"),
-        ("CANDLE_PATTERN", "THREE_BLACK_CROWS_V1", float(row["three_black_crows_raw"]) > 0, "BEARISH"),
-        ("CANDLE_PATTERN", "THREE_INSIDE_UP_V1", float(row["three_inside_up_raw"]) > 0, "BULLISH"),
-        ("CANDLE_PATTERN", "THREE_INSIDE_DOWN_V1", float(row["three_inside_down_raw"]) > 0, "BEARISH"),
+        ("TREND", "EMA_TREND_V1", trend_direction != "NEUTRAL", trend_direction, 0.30),
+        ("MOMENTUM", "RSI_MACD_CONFIRMATION_V1", momentum_direction != "NEUTRAL", momentum_direction, 0.20),
+        ("VOLUME", "VOLUME_CONFIRMATION_V1", volume_direction != "NEUTRAL", volume_direction, 0.10),
+        ("WYCKOFF", "WYCKOFF_SPRING_PROXY_V1", bool(row["wyckoff_spring_proxy_raw"]), "BULLISH", 0.16),
+        ("WYCKOFF", "WYCKOFF_UPTHRUST_PROXY_V1", bool(row["wyckoff_upthrust_proxy_raw"]), "BEARISH", 0.16),
+        ("SMC", "SMC_BULLISH_BOS_PROXY_V1", bool(row["smc_bullish_bos_proxy_raw"]), "BULLISH", 0.18),
+        ("SMC", "SMC_BEARISH_BOS_PROXY_V1", bool(row["smc_bearish_bos_proxy_raw"]), "BEARISH", 0.18),
+        ("ELLIOTT_EXPERIMENTAL", "ELLIOTT_BULLISH_IMPULSE_PROXY_V1", bool(row["elliott_bullish_impulse_proxy_raw"]), "BULLISH", 0.12),
+        ("ELLIOTT_EXPERIMENTAL", "ELLIOTT_BEARISH_IMPULSE_PROXY_V1", bool(row["elliott_bearish_impulse_proxy_raw"]), "BEARISH", 0.12),
+        ("CANDLE_PATTERN", "DOJI_V1", float(row["doji_raw"]) > 0, "NEUTRAL", 0.0),
+        ("CANDLE_PATTERN", "HAMMER_V1", float(row["hammer_raw"]) > 0, "BULLISH", 0.06),
+        ("CANDLE_PATTERN", "INVERTED_HAMMER_V1", float(row["inverted_hammer_raw"]) > 0, "BULLISH", 0.06),
+        ("CANDLE_PATTERN", "SHOOTING_STAR_V1", float(row["shooting_star_raw"]) > 0, "BEARISH", 0.06),
+        ("CANDLE_PATTERN", "HANGING_MAN_V1", float(row["hanging_man_raw"]) > 0, "BEARISH", 0.06),
+        ("CANDLE_PATTERN", "SPINNING_TOP_V1", float(row["spinning_top_raw"]) > 0, "NEUTRAL", 0.0),
+        ("CANDLE_PATTERN", "BULLISH_ENGULFING_V1", float(row["bullish_engulfing_raw"]) > 0, "BULLISH", 0.15),
+        ("CANDLE_PATTERN", "BEARISH_ENGULFING_V1", float(row["bearish_engulfing_raw"]) > 0, "BEARISH", 0.15),
+        ("CANDLE_PATTERN", "BULLISH_HARAMI_V1", float(row["bullish_harami_raw"]) > 0, "BULLISH", 0.10),
+        ("CANDLE_PATTERN", "BEARISH_HARAMI_V1", float(row["bearish_harami_raw"]) > 0, "BEARISH", 0.10),
+        ("CANDLE_PATTERN", "TWEEZER_TOP_V1", bool(row["tweezer_top_raw"]), "BEARISH", 0.10),
+        ("CANDLE_PATTERN", "TWEEZER_BOTTOM_V1", bool(row["tweezer_bottom_raw"]), "BULLISH", 0.10),
+        ("CANDLE_PATTERN", "MORNING_STAR_V1", float(row["morning_star_raw"]) > 0, "BULLISH", 0.15),
+        ("CANDLE_PATTERN", "EVENING_STAR_V1", float(row["evening_star_raw"]) > 0, "BEARISH", 0.15),
+        ("CANDLE_PATTERN", "THREE_WHITE_SOLDIERS_V1", float(row["three_white_soldiers_raw"]) > 0, "BULLISH", 0.15),
+        ("CANDLE_PATTERN", "THREE_BLACK_CROWS_V1", float(row["three_black_crows_raw"]) > 0, "BEARISH", 0.15),
+        ("CANDLE_PATTERN", "THREE_INSIDE_UP_V1", float(row["three_inside_up_raw"]) > 0, "BULLISH", 0.12),
+        ("CANDLE_PATTERN", "THREE_INSIDE_DOWN_V1", float(row["three_inside_down_raw"]) > 0, "BEARISH", 0.12),
     ]
+    active_specs = [
+        spec for spec in finding_specs
+        if spec[2]
+        and spec[0] in rule_families
+        and (spec[1] in enabled_patterns if spec[0] == "CANDLE_PATTERN" else spec[1] in enabled_methodologies)
+    ]
+    score = sum(spec[4] if spec[3] == "BULLISH" else -spec[4] if spec[3] == "BEARISH" else 0.0 for spec in active_specs)
+    score = max(-1.0, min(1.0, score))
+    threshold = float(analysis_config.get("alertThreshold", 0.35))
+    direction = "BULLISH" if score > 0 else "BEARISH" if score < 0 else "NEUTRAL"
+    state = "BULLISH_SETUP" if score >= threshold else "BEARISH_SETUP" if score <= -threshold else "NEUTRAL"
+    confidence = min(1.0, abs(score) * 0.75 + min(float(row["adx_14"]), 40.0) / 40.0 * 0.25)
     findings = [
         {
             "findingId": hashlib.sha256(f"{symbol}:{timeframe}:{close_time}:{rule_id}".encode()).hexdigest()[:24],
             "ruleFamily": family,
             "ruleId": rule_id,
             "direction": finding_direction,
-            "strength": min(1.0, abs(float(row["signal_score"]))),
+            "strength": weight,
             "evidence": {
+                "closedCandle": True,
                 "close": float(row["close"]),
                 "ema20": float(row["ema_20"]),
                 "ema50": float(row["ema_50"]),
+                "ema200": float(row["ema_200"]),
                 "rsi14": float(row["rsi_14"]),
+                "macd": float(row["macd"]),
+                "macdSignal": float(row["macd_signal"]),
                 "relativeVolume": float(row["relative_volume"]),
+                "experimentalProxy": family in {"WYCKOFF", "SMC", "ELLIOTT_EXPERIMENTAL"},
             },
         }
-        for family, rule_id, active, finding_direction in finding_specs
-        if active
+        for family, rule_id, active, finding_direction, weight in active_specs
     ]
-    candle_key = f"{symbol}:{timeframe}:{close_time}:0.1.0"
+    candle_key = f"{symbol}:{timeframe}:{close_time}:0.2.0:{config_version}"
     return {
         "id": f"sig_{hashlib.sha256(candle_key.encode()).hexdigest()[:24]}",
         "assetSymbol": symbol,
         "venue": "binance_spot_public",
         "timeframe": timeframe,
         "candleCloseTime": close_time,
-        "state": str(row["signal_state"]),
-        "score": round(float(row["signal_score"]), 4),
-        "confidence": round(float(row["signal_confidence"]), 4),
+        "state": state,
+        "score": round(score, 4),
+        "confidence": round(confidence, 4),
         "regime": "TREND_UP" if row["ema_20"] > row["ema_50"] else "TREND_DOWN" if row["ema_20"] < row["ema_50"] else "RANGE",
         "dataQualityState": str(row["data_quality_state"]),
         "findings": findings,
         "conflicts": [],
         "invalidation": {
-            "type": "CLOSE_BELOW_ATR" if direction == "BULLISH" else "CLOSE_ABOVE_ATR",
-            "price": round(float(row["close"] - row["atr_14"] if direction == "BULLISH" else row["close"] + row["atr_14"]), 4),
+            "type": "CLOSE_BELOW_ATR" if direction == "BULLISH" else "CLOSE_ABOVE_ATR" if direction == "BEARISH" else "CLOSE_OUTSIDE_ATR_RANGE",
+            "price": round(float(row["close"] - row["atr_14"] if direction == "BULLISH" else row["close"] + row["atr_14"] if direction == "BEARISH" else row["close"]), 4),
         },
-        "strategyVersion": "0.1.0",
+        "strategyVersion": "0.2.0",
         "configVersion": config_version,
         "sourceManifestId": f"binance:{symbol.replace('/', '')}:{timeframe}:{close_time}",
     }

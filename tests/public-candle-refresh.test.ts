@@ -1,14 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { buildPublicResearchWindow, parseClosedBinanceCandles, refreshPublicCandleResearch } from "../server/public-candle-refresh";
+import { CANDLE_PATTERN_RULE_IDS, METHODOLOGY_RULE_IDS, type BotConfigView } from "../shared/signal-types";
+import * as signalDb from "../server/db";
 
-const config = {
+const config: BotConfigView = {
   configVersion: 1,
   lastChangedBy: "DASHBOARD" as const,
   isPaused: false,
   watchlist: ["BTC/USDT"],
   timeframes: ["1h"],
   ruleFamilies: ["TREND", "MOMENTUM", "VOLUME", "CANDLE_PATTERN"],
+  enabledPatterns: [...CANDLE_PATTERN_RULE_IDS],
+  enabledMethodologies: [...METHODOLOGY_RULE_IDS],
   alertThreshold: 0.35,
   cooldownMinutes: 60,
   quietHours: { start: "22:00", end: "07:00", timezone: "UTC" },
@@ -49,13 +53,37 @@ describe("public candle refresh calculation", () => {
     expect(result.snapshot.findings.length).toBeGreaterThan(1);
   });
 
+  it("emits only a selected named closed-candle pattern when its parent family is enabled", () => {
+    const start = Date.UTC(2025, 11, 1, 0, 0, 0);
+    const candles = Array.from({ length: 240 }, (_, index) => ({
+      openTime: start + index * 3_600_000 - 3_600_000,
+      closeTime: start + index * 3_600_000,
+      open: 100 + index * 0.2 - 0.1,
+      high: 100 + index * 0.2 + 0.3,
+      low: 100 + index * 0.2 - 0.3,
+      close: 100 + index * 0.2,
+      volume: 120,
+    }));
+    const latest = candles.at(-1)!;
+    latest.open = latest.close - 0.2;
+    latest.high = latest.close;
+    latest.low = latest.close - 5;
+    const result = buildPublicResearchWindow("BTC/USDT", "1h", { ...config, ruleFamilies: ["CANDLE_PATTERN"], enabledPatterns: ["HAMMER_V1"] }, candles);
+    expect(result.snapshot.findings.map((finding) => finding.ruleId)).toEqual(["HAMMER_V1"]);
+  });
+
   it("refreshes from a public response without exchange credentials or order execution", async () => {
     const start = Date.UTC(2025, 11, 1, 0, 0, 0);
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(Array.from({ length: 240 }, (_, index) => kline(index, start + index * 3_600_000))), { status: 200 })));
-    const result = await refreshPublicCandleResearch({ assetSymbol: "BTC/USDT", timeframe: "1h" });
-    expect(result.ok).toBe(true);
-    expect(result.paused).toBe(false);
-    expect(result.candlesRecorded).toBe(240);
-    expect(result.snapshot?.venue).toBe("BINANCE_PUBLIC");
+    const getConfig = vi.spyOn(signalDb, "getBotConfig").mockResolvedValue({ ...config, isPaused: false });
+    try {
+      const result = await refreshPublicCandleResearch({ assetSymbol: "BTC/USDT", timeframe: "1h" });
+      expect(result.ok).toBe(true);
+      expect(result.paused).toBe(false);
+      expect(result.candlesRecorded).toBe(240);
+      expect(result.snapshot?.venue).toBe("BINANCE_PUBLIC");
+    } finally {
+      getConfig.mockRestore();
+    }
   });
 });
