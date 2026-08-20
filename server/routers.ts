@@ -4,6 +4,7 @@ import { COOKIE_NAME } from "../shared/const";
 import { getBotConfig, getChartWindow, getRunnerHealth, listAuditEvents, listSignalSnapshots, recordSignalSnapshot, setBotPaused, updateBotConfig } from "./db";
 import { signalSnapshotSchema } from "./signal-ingest";
 import { getCachedTelegramBotLink, getTelegramPollingHealth } from "./telegram-polling";
+import { refreshPublicCandleResearch } from "./public-candle-refresh";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { dashboardProtectedProcedure, publicProcedure, router } from "./_core/trpc";
@@ -46,6 +47,9 @@ export const appRouter = router({
     }),
     config: dashboardProtectedProcedure.query(() => getBotConfig()),
     auditHistory: dashboardProtectedProcedure.input(z.object({ limit: z.number().int().min(1).max(100).default(30) })).query(({ input }) => listAuditEvents(input.limit)),
+    refreshPublicData: dashboardProtectedProcedure
+      .input(z.object({ assetSymbol: z.enum(["BTC/USDT", "ETH/USDT", "BNB/USDT"]), timeframe: z.enum(["30m", "1h", "4h"]) }))
+      .mutation(({ input }) => refreshPublicCandleResearch(input)),
     controls: router({
       setPaused: dashboardProtectedProcedure.input(z.object({ isPaused: z.boolean() })).mutation(({ input }) => setBotPaused(input.isPaused, "dashboard", "DASHBOARD")),
       setWatchlist: dashboardProtectedProcedure.input(z.object({ watchlist: z.array(z.enum(["BTC/USDT", "ETH/USDT", "BNB/USDT"])) .min(1).max(3) })).mutation(async ({ input }) => {

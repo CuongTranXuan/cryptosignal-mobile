@@ -1,4 +1,5 @@
 import { and, asc, desc, eq, gt, gte } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   auditEvents,
@@ -258,20 +259,18 @@ export async function listSignalSnapshots(limit = 30) {
 export async function recordCandleHistory(candles: CandlePointInput[]) {
   const db = await getDb();
   if (!db || candles.length === 0) return { recorded: candles.length };
-  for (const candle of candles) {
-    await db
-      .insert(candleHistory)
-      .values({ ...candle, candleCloseTime: new Date(candle.candleCloseTime) })
-      .onDuplicateKeyUpdate({
-        set: {
-          open: candle.open, high: candle.high, low: candle.low, close: candle.close, volume: candle.volume,
-          ema20: candle.ema20, ema50: candle.ema50, ema200: candle.ema200, rsi14: candle.rsi14,
-          macd: candle.macd, macdSignal: candle.macdSignal, atr14: candle.atr14,
-          signalState: candle.signalState, signalScore: candle.signalScore,
-          strategyVersion: candle.strategyVersion, configVersion: candle.configVersion,
-        },
-      });
-  }
+  await db
+    .insert(candleHistory)
+    .values(candles.map((candle) => ({ ...candle, candleCloseTime: new Date(candle.candleCloseTime) })))
+    .onDuplicateKeyUpdate({
+      set: {
+        open: sql`VALUES(${candleHistory.open})`, high: sql`VALUES(${candleHistory.high})`, low: sql`VALUES(${candleHistory.low})`, close: sql`VALUES(${candleHistory.close})`, volume: sql`VALUES(${candleHistory.volume})`,
+        ema20: sql`VALUES(${candleHistory.ema20})`, ema50: sql`VALUES(${candleHistory.ema50})`, ema200: sql`VALUES(${candleHistory.ema200})`, rsi14: sql`VALUES(${candleHistory.rsi14})`,
+        macd: sql`VALUES(${candleHistory.macd})`, macdSignal: sql`VALUES(${candleHistory.macdSignal})`, atr14: sql`VALUES(${candleHistory.atr14})`,
+        signalState: sql`VALUES(${candleHistory.signalState})`, signalScore: sql`VALUES(${candleHistory.signalScore})`,
+        strategyVersion: sql`VALUES(${candleHistory.strategyVersion})`, configVersion: sql`VALUES(${candleHistory.configVersion})`,
+      },
+    });
   return { recorded: candles.length };
 }
 

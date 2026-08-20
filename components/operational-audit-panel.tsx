@@ -3,9 +3,11 @@ import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import type { RunnerHealthView } from "@/shared/signal-types";
 import { useColors } from "@/hooks/use-colors";
 import { trpc } from "@/lib/trpc";
+import { useI18n } from "@/lib/i18n";
 
 export function OperationalAuditPanel({ runnerHealth }: { runnerHealth: RunnerHealthView | null }) {
   const colors = useColors();
+  const { t, locale } = useI18n();
   const auditHistory = trpc.bot.auditHistory.useQuery(
     { limit: 20 },
     { refetchInterval: 30_000, refetchIntervalInBackground: true },
@@ -14,23 +16,23 @@ export function OperationalAuditPanel({ runnerHealth }: { runnerHealth: RunnerHe
   return (
     <View style={[styles.stack, { backgroundColor: colors.surface, borderColor: colors.border }]}>
       <View style={styles.header}>
-        <Text style={[styles.title, { color: colors.foreground }]}>Runner health</Text>
-        <Text style={[styles.subtitle, { color: colors.muted }]}>Quietly refreshed every 30 seconds from persisted runner data.</Text>
+        <Text style={[styles.title, { color: colors.foreground }]}>{t("runnerHealth")}</Text>
+        <Text style={[styles.subtitle, { color: colors.muted }]}>{t("runnerHealthSubtitle")}</Text>
       </View>
       {runnerHealth ? (
         <View style={[styles.healthCard, { backgroundColor: colors.background, borderColor: colors.border }]}>
           <View style={styles.healthHeading}>
             <Text style={[styles.healthState, { color: healthColor(runnerHealth.state, colors) }]}>{runnerHealth.state}</Text>
-            <Text style={[styles.healthCount, { color: colors.foreground }]}>{runnerHealth.cycleCount} checks</Text>
+            <Text style={[styles.healthCount, { color: colors.foreground }]}>{t("checks", { count: runnerHealth.cycleCount })}</Text>
           </View>
-          <Text style={[styles.meta, { color: colors.muted }]}>{runnerHealth.finishedAt ? `Last completed ${new Date(runnerHealth.finishedAt).toLocaleString()}` : "No completed cycle reported yet"}</Text>
+          <Text style={[styles.meta, { color: colors.muted }]}>{runnerHealth.finishedAt ? t("lastCompleted", { time: new Date(runnerHealth.finishedAt).toLocaleString(locale === "vi" ? "vi-VN" : "en-US") }) : t("noCompletedCycle")}</Text>
           {runnerHealth.lastError ? <Text style={[styles.error, { color: colors.error }]}>{runnerHealth.lastError}</Text> : null}
         </View>
-      ) : <Text style={[styles.meta, { color: colors.muted }]}>Runner state is unavailable until the API responds.</Text>}
+      ) : <Text style={[styles.meta, { color: colors.muted }]}>{t("runnerUnavailable")}</Text>}
 
       <View style={styles.header}>
-        <Text style={[styles.title, { color: colors.foreground }]}>Operational audit history</Text>
-        <Text style={[styles.subtitle, { color: colors.muted }]}>Read-only evidence for configuration, engine, delivery, and runner events.</Text>
+        <Text style={[styles.title, { color: colors.foreground }]}>{t("auditHistory")}</Text>
+        <Text style={[styles.subtitle, { color: colors.muted }]}>{t("auditHistorySubtitle")}</Text>
       </View>
       {auditHistory.isLoading ? <ActivityIndicator color={colors.primary} /> : auditHistory.data?.length ? (
         <View style={styles.auditList}>
@@ -40,12 +42,12 @@ export function OperationalAuditPanel({ runnerHealth }: { runnerHealth: RunnerHe
                 <Text style={[styles.auditAction, { color: colors.foreground }]}>{formatAction(event.action)}</Text>
                 <Text style={[styles.actor, { color: colors.primary }]}>{event.actorType}</Text>
               </View>
-              <Text style={[styles.meta, { color: colors.muted }]}>{new Date(event.createdAt).toLocaleString()} · {event.actorId}</Text>
+              <Text style={[styles.meta, { color: colors.muted }]}>{new Date(event.createdAt).toLocaleString(locale === "vi" ? "vi-VN" : "en-US")} · {event.actorId}</Text>
               <Text style={[styles.auditCopy, { color: colors.muted }]}>{formatPayload(event.payload)}</Text>
             </View>
           ))}
         </View>
-      ) : <Text style={[styles.meta, { color: colors.muted }]}>No persisted operational events yet.</Text>}
+      ) : <Text style={[styles.meta, { color: colors.muted }]}>{t("noOperationalEvents")}</Text>}
     </View>
   );
 }
