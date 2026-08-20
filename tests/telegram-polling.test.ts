@@ -28,9 +28,10 @@ describe("Telegram long-polling commands", () => {
     expect(telegramPollingBackoffMs(new Error("Telegram getUpdates failed with 500"))).toBe(5_000);
   });
 
-  it("keeps in-process polling for development but requires explicit production opt-in", () => {
-    expect(shouldStartTelegramPolling({ NODE_ENV: "development" })).toBe(true);
-    expect(shouldStartTelegramPolling({ NODE_ENV: "production" })).toBe(false);
-    expect(shouldStartTelegramPolling({ NODE_ENV: "production", TELEGRAM_POLLING_ENABLED: "true" })).toBe(true);
+  it("keeps the web app independent of Telegram until a configured deployment explicitly opts in", () => {
+    expect(shouldStartTelegramPolling({ NODE_ENV: "development" })).toBe(false);
+    expect(shouldStartTelegramPolling({ NODE_ENV: "development", TELEGRAM_BOT_TOKEN: "token" })).toBe(false);
+    expect(shouldStartTelegramPolling({ NODE_ENV: "production", TELEGRAM_BOT_TOKEN: "token" })).toBe(false);
+    expect(shouldStartTelegramPolling({ NODE_ENV: "production", TELEGRAM_BOT_TOKEN: "token", TELEGRAM_POLLING_ENABLED: "true" })).toBe(true);
   });
 });

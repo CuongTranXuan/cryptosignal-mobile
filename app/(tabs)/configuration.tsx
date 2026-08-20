@@ -15,7 +15,7 @@ export default function ConfigurationScreen() {
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <Text style={[styles.eyebrow, { color: colors.primary }]}>SHARED CONFIGURATION</Text>
         <Text style={[styles.title, { color: colors.foreground }]}>Configuration</Text>
-        <Text style={[styles.subtitle, { color: colors.muted }]}>Telegram and the browser dashboard share one versioned, audited configuration record. Use the dashboard control panel or the owner-allowlisted bot to make changes.</Text>
+        <Text style={[styles.subtitle, { color: colors.muted }]}>The web dashboard owns a versioned, audited configuration record for testing. An optional Telegram integration reads the same record when it is enabled.</Text>
         {config.isLoading ? <ActivityIndicator color={colors.primary} /> : null}
         {config.data ? <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <ConfigRow label="Config version" value={`v${config.data.configVersion}`} colors={colors} />
@@ -28,7 +28,7 @@ export default function ConfigurationScreen() {
           <ConfigRow label="Quiet hours" value={`${config.data.quietHours.start}–${config.data.quietHours.end} ${config.data.quietHours.timezone}`} colors={colors} />
         </View> : null}
         <Pressable disabled={!telegramUrl} onPress={() => telegramUrl ? Linking.openURL(telegramUrl) : undefined} style={({ pressed }) => [styles.button, { backgroundColor: colors.primary }, !telegramUrl ? styles.disabled : undefined, pressed && telegramUrl ? styles.pressed : undefined]}>
-          <Text style={styles.buttonText}>{telegramUrl ? "Open Telegram controls" : "Telegram bot link not configured"}</Text>
+          <Text style={styles.buttonText}>{telegramUrl ? "Open Telegram integration" : "Telegram integration is optional"}</Text>
         </Pressable>
       </ScrollView>
     </ScreenContainer>

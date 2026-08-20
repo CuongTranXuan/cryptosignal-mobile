@@ -34,9 +34,9 @@ export function getTelegramPollingHealth(): TelegramPollingHealth {
   return { ...pollingHealth };
 }
 
-/** Development intentionally runs polling in-process; production requires the Docker poller to opt in explicitly. */
+/** The web app remains usable without Telegram; polling begins only when a configured deployment explicitly opts in. */
 export function shouldStartTelegramPolling(environment: NodeJS.ProcessEnv = process.env) {
-  return environment.NODE_ENV !== "production" || environment.TELEGRAM_POLLING_ENABLED === "true";
+  return Boolean(environment.TELEGRAM_BOT_TOKEN && environment.TELEGRAM_POLLING_ENABLED === "true");
 }
 
 /** Telegram reserves getUpdates for one active consumer; conflicts use a slower retry to avoid log and API churn. */
