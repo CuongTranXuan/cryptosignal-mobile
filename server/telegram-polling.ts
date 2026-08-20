@@ -1,5 +1,5 @@
 import { getBotConfig, getTelegramUpdateOffset, hasRecentSignalAlert, listSignalSnapshots, recordAuditEvent, setBotPaused, setTelegramUpdateOffset, updateBotConfig } from "./db";
-import type { SignalSnapshotInput } from "../shared/signal-types";
+import { CANDLE_PATTERNS, METHODOLOGY_RULES, RULE_FAMILY_IDS, type CandlePatternRuleId, type MethodologyRuleId, type RuleFamilyId, type SignalSnapshotInput } from "../shared/signal-types";
 
 type TelegramMessage = {
   chat: { id: number };
@@ -73,6 +73,23 @@ function parseCooldownMinutes(value: string) {
   return minutes >= 1 && minutes <= 1440 ? minutes : null;
 }
 
+const RULE_DETAILS = new Map<string, { label: string; explanation: string }>([...CANDLE_PATTERNS, ...METHODOLOGY_RULES].map((rule) => [rule.id, rule]));
+
+function resolveRuleId(value: string, allowed: readonly string[]) {
+  const normalized = value.trim().toUpperCase().replace(/[^A-Z0-9]/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, "");
+  return allowed.find((ruleId) => ruleId === normalized || ruleId.replace(/_V1$/, "") === normalized) ?? null;
+}
+
+export function formatSignalFindings(findings: SignalSnapshotInput["findings"], limit = 5) {
+  const summaries = findings.slice(0, limit).map((finding) => {
+    const detail = RULE_DETAILS.get(finding.ruleId);
+    const label = detail?.label ?? finding.ruleId.replace(/_V1$/, "").replaceAll("_", " ");
+    const explanation = detail?.explanation ?? "Closed-candle research evidence recorded.";
+    return `• ${label} — ${finding.direction.toLowerCase()}: ${explanation}`;
+  });
+  return summaries.join("\n") || "• No enabled closed-candle confirmation was recorded.";
+}
+
 async function telegramRequest(method: string, payload: Record<string, unknown>) {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) throw new Error("TELEGRAM_BOT_TOKEN is not configured");
@@ -109,14 +126,15 @@ export async function deliverSignalAlert(snapshot: SignalSnapshotInput) {
   const config = await getBotConfig();
   if (config.isPaused) return { delivered: false, reason: "PAUSED" as const };
   if (Math.abs(snapshot.score) < config.alertThreshold) return { delivered: false, reason: "BELOW_THRESHOLD" as const };
-  const alertKey = `${snapshot.assetSymbol}:${snapshot.timeframe}:${snapshot.state}`;
+  const confirmedFindingIds = snapshot.findings.filter((finding) => finding.direction !== "NEUTRAL").map((finding) => finding.ruleId).sort();
+  if (confirmedFindingIds.length === 0) return { delivered: false, reason: "NO_CONFIRMED_CONDITION" as const };
+  const alertKey = `${snapshot.assetSymbol}:${snapshot.timeframe}:${snapshot.state}:${confirmedFindingIds.join(",")}`;
   if (await hasRecentSignalAlert(alertKey, config.cooldownMinutes)) {
     return { delivered: false, reason: "COOLDOWN" as const };
   }
   const recipients = [...allowedUserIds()].map(Number).filter(Number.isSafeInteger);
   if (recipients.length === 0) return { delivered: false, reason: "NO_ALLOWED_RECIPIENT" as const };
-  const findingText = snapshot.findings.map((finding) => finding.ruleId).join(", ") || "No confirming pattern";
-  const message = `Signal snapshot\n${snapshot.assetSymbol} · ${snapshot.timeframe}\n${snapshot.state.replaceAll("_", " ")} | score ${snapshot.score.toFixed(2)} | confidence ${Math.round(snapshot.confidence * 100)}%\nFindings: ${findingText}\nData: ${snapshot.dataQualityState}\nSignals-only: no order was placed.`;
+  const message = `Confirmed closed-candle research\n${snapshot.assetSymbol} · ${snapshot.timeframe}\n${snapshot.state.replaceAll("_", " ")} | score ${snapshot.score.toFixed(2)} | confidence ${Math.round(snapshot.confidence * 100)}%\n\nEnabled evidence\n${formatSignalFindings(snapshot.findings)}\n\nData: ${snapshot.dataQualityState}\nSignals-only: no order was placed; this is not personal financial advice.`;
   const outcomes = await Promise.allSettled(recipients.map((chatId) => sendMessage(chatId, message)));
   const deliveredRecipients = recipients.filter((_chatId, index) => outcomes[index]?.status === "fulfilled");
   const failures = outcomes
@@ -144,7 +162,7 @@ async function handleCommand(message: TelegramMessage) {
   if (command === "/start" || command === "/help") {
     await sendMessage(
       message.chat.id,
-      "CryptoSignal is in signals-only mode. Commands: /status, /signal [SYMBOL], /watchlist [add|remove] SYMBOL, /timeframes [add|remove] 30m|1h|4h, /threshold 0.55, /cooldown 60m, /methodology [enable|disable] FAMILY, /pause, /resume, /web, /help. Telegram and the web dashboard share the same configuration. It does not place orders or use exchange private keys.",
+      "CryptoSignal is in signals-only mode. Commands: /status, /signal [SYMBOL], /watchlist [add|remove] SYMBOL, /timeframes [add|remove] 30m|1h|4h, /threshold 0.55, /cooldown 60m, /methodology [enable|disable] FAMILY, /patterns [enable|disable] PATTERN, /rules [enable|disable] RULE, /pause, /resume, /web, /help. Telegram and the web dashboard share the same configuration. It does not place orders or use exchange private keys.",
     );
     return;
   }
@@ -239,8 +257,8 @@ async function handleCommand(message: TelegramMessage) {
   if (command === "/methodology") {
     const config = await getBotConfig();
     const action = args[0]?.toLowerCase();
-    const family = args[1]?.toUpperCase();
-    const allowedFamilies = new Set(["TREND", "MOMENTUM", "VOLUME", "CANDLE_PATTERN", "WYCKOFF", "SMC", "ELLIOTT_EXPERIMENTAL"]);
+    const family = args[1]?.toUpperCase() as RuleFamilyId | undefined;
+    const allowedFamilies = new Set<RuleFamilyId>(RULE_FAMILY_IDS);
     if ((action === "enable" || action === "disable") && family) {
       if (!allowedFamilies.has(family)) {
         await sendMessage(message.chat.id, `Unknown family. Supported: ${[...allowedFamilies].join(", ")}`);
@@ -256,6 +274,44 @@ async function handleCommand(message: TelegramMessage) {
     return;
   }
 
+  if (command === "/patterns") {
+    const config = await getBotConfig();
+    const action = args[0]?.toLowerCase();
+    const pattern = resolveRuleId(args[1] ?? "", CANDLE_PATTERNS.map((item) => item.id)) as CandlePatternRuleId | null;
+    if ((action === "enable" || action === "disable") && pattern) {
+      const enabled = config.enabledPatterns.includes(pattern);
+      if (action === "disable" && config.enabledPatterns.length === 1 && enabled) {
+        await sendMessage(message.chat.id, "At least one candle pattern must remain enabled.");
+        return;
+      }
+      const enabledPatterns = action === "enable" ? (enabled ? config.enabledPatterns : [...config.enabledPatterns, pattern]) : config.enabledPatterns.filter((item) => item !== pattern);
+      const next = await updateBotConfig({ enabledPatterns }, actorId, config);
+      await sendMessage(message.chat.id, `Patterns v${next.configVersion}: ${next.enabledPatterns.map((ruleId) => RULE_DETAILS.get(ruleId)?.label ?? ruleId).join(", ")}`);
+      return;
+    }
+    await sendMessage(message.chat.id, `Enabled patterns: ${config.enabledPatterns.map((ruleId) => RULE_DETAILS.get(ruleId)?.label ?? ruleId).join(", ")}\nUse /patterns disable HAMMER or /patterns enable BULLISH_ENGULFING.`);
+    return;
+  }
+
+  if (command === "/rules") {
+    const config = await getBotConfig();
+    const action = args[0]?.toLowerCase();
+    const rule = resolveRuleId(args[1] ?? "", METHODOLOGY_RULES.map((item) => item.id)) as MethodologyRuleId | null;
+    if ((action === "enable" || action === "disable") && rule) {
+      const enabled = config.enabledMethodologies.includes(rule);
+      if (action === "disable" && config.enabledMethodologies.length === 1 && enabled) {
+        await sendMessage(message.chat.id, "At least one methodology rule must remain enabled.");
+        return;
+      }
+      const enabledMethodologies = action === "enable" ? (enabled ? config.enabledMethodologies : [...config.enabledMethodologies, rule]) : config.enabledMethodologies.filter((item) => item !== rule);
+      const next = await updateBotConfig({ enabledMethodologies }, actorId, config);
+      await sendMessage(message.chat.id, `Methodology rules v${next.configVersion}: ${next.enabledMethodologies.map((ruleId) => RULE_DETAILS.get(ruleId)?.label ?? ruleId).join(", ")}`);
+      return;
+    }
+    await sendMessage(message.chat.id, `Enabled methodology rules: ${config.enabledMethodologies.map((ruleId) => RULE_DETAILS.get(ruleId)?.label ?? ruleId).join(", ")}\nUse /rules enable SMC_BULLISH_BOS_PROXY or /rules disable EMA_TREND.`);
+    return;
+  }
+
   if (command === "/signal") {
     const requested = args[0]?.toUpperCase();
     const signals = await listSignalSnapshots(30);
@@ -263,7 +319,7 @@ async function handleCommand(message: TelegramMessage) {
     await sendMessage(
       message.chat.id,
       latest
-        ? `${latest.assetSymbol} ${latest.timeframe}\n${latest.state} | score ${latest.score.toFixed(2)} | confidence ${latest.confidence.toFixed(2)}\nData: ${latest.dataQualityState}\nFindings: ${(latest.findings as Array<{ ruleId?: string }>).map((finding) => finding.ruleId ?? "rule").join(", ") || "none"}`
+        ? `${latest.assetSymbol} ${latest.timeframe}\n${latest.state} | score ${latest.score.toFixed(2)} | confidence ${latest.confidence.toFixed(2)}\nData: ${latest.dataQualityState}\nEnabled evidence:\n${formatSignalFindings(latest.findings as SignalSnapshotInput["findings"])}`
         : "No matching closed-candle signal has been recorded yet. Run the local signal cycle first.",
     );
     return;

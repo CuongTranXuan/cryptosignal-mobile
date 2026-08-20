@@ -74,7 +74,7 @@ def main() -> None:
         for timeframe in config["timeframes"]:
             try:
                 candles = load_closed_candles(symbol, timeframe, args.limit)
-                snapshot = build_snapshot(symbol, timeframe, candles, config["configVersion"])
+                snapshot = build_snapshot(symbol, timeframe, candles, config["configVersion"], config)
                 history = build_candle_history(symbol, timeframe, candles, config["configVersion"])
                 history_response = requests.post(
                     f"{api_base_url}/api/signals/candles",

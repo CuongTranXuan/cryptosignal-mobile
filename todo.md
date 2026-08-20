@@ -83,3 +83,13 @@
 - [x] Present refresh progress, completion, and non-sensitive failure feedback in the web dashboard.
 - [x] Validate the public-data refresh workflow without exchange credentials or order execution.
 - [x] Batch public candle-history persistence so dashboard refreshes complete within an interactive request window.
+- [x] Restart the development server and verify dashboard and API health responses.
+- [x] Replace global Python dependency installation with uv sync and a project virtual environment in Docker deployment.
+- [x] Provide host, VPS, and local Docker deployment configuration for the web application and optional signal runner.
+- [x] Update deployment documentation and scripts for uv-managed environment setup.
+- [ ] Validate and synchronize the uv-based Docker deployment artifacts to GitHub.
+- [x] Audit existing candlestick-pattern and methodology rule coverage against the dashboard configuration model.
+- [x] Add explicit user toggles for recognized candlestick patterns and research methodologies.
+- [x] Generate explainable closed-candle confirmed-pattern alerts through the configured delivery surface.
+- [x] Show active pattern and methodology evidence in the dashboard signal explanation.
+- [ ] Validate and synchronize configurable pattern alerts and methodology controls to GitHub.

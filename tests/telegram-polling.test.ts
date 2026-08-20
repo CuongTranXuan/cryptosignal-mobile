@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeConfiguredSymbol, parseTelegramCommand, shouldStartTelegramPolling, telegramPollingBackoffMs } from "../server/telegram-polling";
+import { formatSignalFindings, normalizeConfiguredSymbol, parseTelegramCommand, shouldStartTelegramPolling, telegramPollingBackoffMs } from "../server/telegram-polling";
 
 describe("Telegram long-polling commands", () => {
   it("normalizes bot suffixes and preserves command arguments", () => {
@@ -21,6 +21,17 @@ describe("Telegram long-polling commands", () => {
   it("normalizes only the explicitly supported public market symbols", () => {
     expect(normalizeConfiguredSymbol("ethusdt")).toBe("ETH/USDT");
     expect(normalizeConfiguredSymbol("DOGEUSDT")).toBeNull();
+  });
+
+  it("renders named confirmed pattern evidence with its closed-candle explanation", () => {
+    expect(formatSignalFindings([{
+      findingId: "confirmed-hammer",
+      ruleFamily: "CANDLE_PATTERN",
+      ruleId: "HAMMER_V1",
+      direction: "BULLISH",
+      strength: 0.06,
+      evidence: { closedCandle: true },
+    }])).toContain("Hammer — bullish: A lower shadow");
   });
 
   it("backs off after a getUpdates conflict instead of retrying the same token every few seconds", () => {
