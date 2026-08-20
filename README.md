@@ -91,7 +91,7 @@ The following Nginx shape serves the exported web bundle and proxies the API on 
 server {
   listen 443 ssl http2;
   server_name signals.example.com;
-  root /srv/cryptosignal/dist-web;
+  root /srv/cryptosignal/dist/web;
   index index.html;
 
   location /api/ {
