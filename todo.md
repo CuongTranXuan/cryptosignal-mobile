@@ -69,3 +69,5 @@
 - [x] Checkpoint and synchronize the web-first test-surface update to GitHub.
 - [x] Remove avoidable browser debug logging from the publish-ready web dashboard.
 - [x] Align README web-first testing guidance with optional Telegram integration.
+- [x] Diagnose and restore browser access to the deployed web dashboard.
+- [x] Serve the built web bundle from the deployed Node root path and ensure deployment builds it.

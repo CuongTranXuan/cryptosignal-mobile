@@ -2,6 +2,8 @@ import "dotenv/config";
 import express from "express";
 import { createServer } from "http";
 import net from "net";
+import fs from "node:fs";
+import path from "node:path";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
 import { registerStorageProxy } from "./storageProxy";
@@ -74,6 +76,18 @@ async function startServer() {
       createContext,
     }),
   );
+
+  const webBundlePath = path.resolve(process.cwd(), "dist-web");
+  if (process.env.NODE_ENV === "production" && fs.existsSync(webBundlePath)) {
+    app.use(express.static(webBundlePath, { index: false, maxAge: "1h" }));
+    app.get("*", (req, res, next) => {
+      if (req.path.includes(".")) {
+        next();
+        return;
+      }
+      res.sendFile(path.join(webBundlePath, "index.html"));
+    });
+  }
 
   const preferredPort = parseInt(process.env.PORT || "3000");
   const port = await findAvailablePort(preferredPort);
