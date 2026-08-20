@@ -63,3 +63,9 @@
 - [x] Add a browser audit-history view for shared configuration and runner operations.
 - [x] Perform a clean application startup check and capture any actionable runtime blockers.
 - [x] Validate and push the production operations and audit-history expansion.
+- [x] Remove Telegram deployment assumptions from the current web-app test surface while preserving integration readiness.
+- [x] Refine web dashboard messaging and health states for Telegram-unconfigured testing.
+- [x] Validate the core web dashboard flows and produce publish-ready static and server build artifacts.
+- [ ] Checkpoint and synchronize the web-first test-surface update to GitHub.
+- [x] Remove avoidable browser debug logging from the publish-ready web dashboard.
+- [x] Align README web-first testing guidance with optional Telegram integration.

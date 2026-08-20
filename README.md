@@ -1,6 +1,6 @@
 # CryptoSignal
 
-CryptoSignal is a **signals-only crypto-market research system**. It stores completed public OHLCV candles for BTC/USDT, ETH/USDT, and BNB/USDT; analyzes evidence with a pinned Freqtrade strategy; displays protected browser research dashboards; and uses Telegram long polling as the owner-allowlisted operational surface.
+CryptoSignal is a **signals-only crypto-market research web application**. It stores completed public OHLCV candles for BTC/USDT, ETH/USDT, and BNB/USDT; analyzes evidence with a pinned Freqtrade strategy; and displays protected browser research dashboards. Telegram long polling is an optional owner-allowlisted integration for alert delivery and mirrored controls.
 
 > **No orders are placed.** The system has no exchange private keys, portfolio access, or order-execution capability. Chart scenarios are research conditions, not price targets, guarantees, or personalized recommendations.
 
@@ -44,8 +44,8 @@ The browser receives only an HTTP-only session cookie. Passwords are stored as s
 |---|---:|---|
 | `DATABASE_URL` | Yes | MySQL/TiDB connection string with TLS in production. |
 | `DASHBOARD_BOOTSTRAP_TOKEN` | Yes | One-time first-admin setup key; use at least 32 random characters. |
-| `TELEGRAM_BOT_TOKEN` | Yes | Bot API token used only by the single long-polling API process. |
-| `TELEGRAM_ALLOWED_USER_IDS` | Yes | Comma-separated Telegram numeric user-ID allowlist. |
+| `TELEGRAM_BOT_TOKEN` | Optional | Bot API token used only when the optional long-polling integration is enabled. |
+| `TELEGRAM_ALLOWED_USER_IDS` | With Telegram | Comma-separated Telegram numeric user-ID allowlist. |
 | `SIGNAL_INGEST_TOKEN` | Yes | Private token authorizing Freqtrade closed-candle signal and history submissions. |
 | `PORT` | Yes | API listen port; use `3000` behind the reverse proxy. |
 | `NODE_ENV` | Yes | Set to `production` on the persistent host. |
@@ -64,9 +64,9 @@ pnpm build:all
 NODE_ENV=production PORT=3000 pnpm start
 ```
 
-### Docker-owned Telegram poller
+### Optional Docker-owned Telegram poller
 
-The production Telegram poller is the **only** process that sets `TELEGRAM_POLLING_ENABLED=true`. It is intentionally isolated in the Docker deployment below. Other production API instances retain the same dashboard/API behavior but leave polling disabled, while development continues to poll in process by default.
+The web app does not require Telegram to run or to test its core dashboard features. When alert delivery is needed, the production Telegram poller is the **only** process that sets `TELEGRAM_POLLING_ENABLED=true`. It is intentionally isolated in the Docker deployment below. Other API instances retain dashboard/API behavior with polling disabled.
 
 ```bash
 chmod +x scripts/configure-production-poller.sh scripts/run-configured-cycle-quiet.sh
@@ -107,7 +107,7 @@ server {
 
 ## Operations
 
-Telegram and the dashboard share the versioned configuration surface. The browser dashboard also displays runner health and an immutable operational audit history without logging background health polling to the browser console. Use `/help` for bot commands, `/web` for the dashboard link, and make every allowed user send `/start` before expecting alerts. Run a backup for the database and environment file before migrations or engine upgrades.
+The browser dashboard is the primary test surface and owns the versioned configuration, runner health, and immutable operational audit history. When enabled, Telegram shares that configuration and delivers eligible signals without logging background health polling to the browser console. Use `/help` for bot commands and `/web` for the dashboard link only after configuring the integration. Run a backup for the database and environment file before migrations or engine upgrades.
 
 ## Validation
 
