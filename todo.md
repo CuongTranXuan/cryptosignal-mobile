@@ -78,7 +78,7 @@
 - [x] Add an English-default and Vietnamese i18n provider with persisted language preference.
 - [x] Translate the dashboard login, navigation, controls, health, audit, and research surfaces.
 - [x] Add an accessible English/Vietnamese language selector to the web dashboard.
-- [ ] Validate and synchronize the bilingual web dashboard update to GitHub.
+- [x] Validate and synchronize the bilingual web dashboard update to GitHub.
 - [x] Add a dashboard-triggered public closed-candle refresh and signals-only calculation action.
 - [x] Present refresh progress, completion, and non-sensitive failure feedback in the web dashboard.
 - [x] Validate the public-data refresh workflow without exchange credentials or order execution.
