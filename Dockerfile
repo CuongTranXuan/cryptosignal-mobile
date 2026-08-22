@@ -47,4 +47,4 @@ COPY --from=python-build /app/engines/freqtrade/.venv ./engines/freqtrade/.venv
 
 USER cryptosignal
 EXPOSE 3000
-CMD ["node", "dist/index.js"]
+CMD ["node", "dist/server/_core/index.js"]

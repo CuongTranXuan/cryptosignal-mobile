@@ -123,5 +123,5 @@
 - [x] Complete Task 12 local operations hardening for market-data backup, restore, and health monitoring.
 - [x] Run final integration validation and prepare the reviewed feature branch for merge.
 - [x] Consolidate documentation to the completed live-market architecture and remove redundant or superseded documents without losing required operating guidance.
-- [ ] Rewrite eligible repository commit authors to cuongtranxuan.pfiev@gmail.com and force-push the corrected published history.
-- [ ] Repair the deployed production startup artifact path and validate the service health after the author-history correction.
+- [x] Rewrite eligible repository commit authors to cuongtranxuan.pfiev@gmail.com and force-push the corrected published history.
+- [x] Repair the deployed production startup artifact path and validate the service health after the author-history correction.
