@@ -117,6 +117,22 @@ services:
       - default
       - market-internal
 
+  mcp-research-adapter:
+    <<: *cryptosignal-service
+    container_name: cryptosignal-mcp-research-adapter
+    profiles: ["mcp-research"]
+    restart: unless-stopped
+    depends_on:
+      web:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      BINANCE_MCP_ENABLED: ${BINANCE_MCP_ENABLED:-false}
+      BINANCE_MCP_PUBLIC_TOOL_IDS: ${BINANCE_MCP_PUBLIC_TOOL_IDS:-}
+    command: ["node", "dist/scripts/run-mcp-research-adapter.js"]
+    networks:
+      - default
+
   clickhouse:
     image: clickhouse/clickhouse-server:25.7
     container_name: cryptosignal-market-clickhouse

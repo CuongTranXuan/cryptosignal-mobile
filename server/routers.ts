@@ -3,8 +3,9 @@ import { z } from "zod";
 import { COOKIE_NAME } from "../shared/const";
 import { LIVE_ASSET_SYMBOLS, LIVE_CONDITION_IDS, type MarketComponentHealth } from "../shared/live-market-types";
 import { CANDLE_PATTERN_RULE_IDS, METHODOLOGY_RULE_IDS, RULE_FAMILY_IDS } from "../shared/signal-types";
-import { getBotConfig, getChartWindow, getMarketPipelineHealth, getRunnerHealth, listAuditEvents, listLiveObservations, listSignalSnapshots, recordMarketPipelineHealth, recordSignalSnapshot, setBotPaused, updateBotConfig } from "./db";
+import { getBotConfig, getChartWindow, getMarketPipelineHealth, getRunnerHealth, listAuditEvents, listLiveObservations, listSignalSnapshots, recordAuditEvent, recordMarketPipelineHealth, recordSignalSnapshot, setBotPaused, updateBotConfig } from "./db";
 import { createConfiguredReplayService, MAX_REPLAY_EVENTS, MAX_REPLAY_WINDOW_MS, MarketCacheUnavailableError, readConfiguredLiveSnapshot } from "./market-data/replay";
+import { createConfiguredPublicMcpClient, McpPublicUnavailableError } from "./market-data/mcp-public-client";
 import { signalSnapshotSchema } from "./signal-ingest";
 import { getCachedTelegramBotLink, getTelegramPollingHealth } from "./telegram-polling";
 import { refreshPublicCandleResearch } from "./public-candle-refresh";
@@ -33,6 +34,15 @@ const replayWindowSchema = z
       ctx.addIssue({ code: "custom", message: "Replay window cannot exceed seven days" });
     }
   });
+
+function safeMcpPreview(value: unknown) {
+  try {
+    const serialized = JSON.stringify(value);
+    return serialized.length > 2_000 ? `${serialized.slice(0, 2_000)}…` : serialized;
+  } catch {
+    return "[unserializable public MCP result]";
+  }
+}
 
 function completeMarketHealth(rows: MarketComponentHealth[]): MarketComponentHealth[] {
   const byComponent = new Map(rows.map((row) => [row.component, row]));
@@ -117,6 +127,29 @@ export const appRouter = router({
     }),
     health: dashboardProtectedProcedure.query(async () => sanitizeMarketHealth(await getMarketPipelineHealth())),
     liveObservations: dashboardProtectedProcedure.input(z.object({ limit: z.number().int().min(1).max(30).default(10) })).query(({ input }) => listLiveObservations(input.limit)),
+    mcpStatus: dashboardProtectedProcedure.query(async () => {
+      const client = createConfiguredPublicMcpClient();
+      return { enabled: client.enabled, publicToolIds: client.publicToolIds(), automaticRequests: false };
+    }),
+    mcpResearch: dashboardProtectedProcedure.input(z.object({ confirmed: z.literal(true), toolName: z.string().min(1).max(120), args: z.record(z.string(), z.unknown()).default({}) })).mutation(async ({ input }) => {
+      const client = createConfiguredPublicMcpClient();
+      const startedAt = Date.now();
+      try {
+        const result = await client.invokePublicTool(input.toolName, input.args);
+        const latencyMs = Date.now() - startedAt;
+        await recordAuditEvent("MCP_PUBLIC_TOOL_INVOKED", "DASHBOARD", "dashboard", { toolName: input.toolName, args: input.args, latencyMs, status: "SUCCESS" });
+        await recordMarketPipelineHealth({ component: "MCP", state: "RUNNING", lastSuccessAt: new Date(), lastError: null, lagMs: latencyMs, summary: { toolName: input.toolName, status: "SUCCESS" } });
+        return { status: "SUCCESS" as const, toolName: input.toolName, latencyMs, resultPreview: safeMcpPreview(result) };
+      } catch (error) {
+        if (error instanceof McpPublicUnavailableError) {
+          const latencyMs = Date.now() - startedAt;
+          await recordAuditEvent("MCP_PUBLIC_TOOL_UNAVAILABLE", "DASHBOARD", "dashboard", { toolName: input.toolName, latencyMs, status: "UNAVAILABLE" });
+          await recordMarketPipelineHealth({ component: "MCP", state: "DEGRADED", lastSuccessAt: null, lastError: error.message, lagMs: latencyMs, summary: { toolName: input.toolName, status: "UNAVAILABLE" } });
+          return { status: "UNAVAILABLE" as const, toolName: input.toolName, latencyMs };
+        }
+        throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "MCP research request is invalid" });
+      }
+    }),
   }),
   bot: router({
     status: dashboardProtectedProcedure.query(async () => {
