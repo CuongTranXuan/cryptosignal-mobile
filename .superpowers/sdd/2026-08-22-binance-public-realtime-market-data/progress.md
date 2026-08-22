@@ -41,3 +41,5 @@
 - Task 4: complete (focused spool recovery tests, full test suite, TypeScript, lint, and whitespace checks pass; segments remain until both ClickHouse and archive acknowledgements exist)
 - Task 5: fix round 1/5 (freshness chooses the latest parsed instant rather than timestamp string order; commits `fcf16c2..123f83a`)
 - Task 5: complete (focused normalization/cache tests and serial full regression suite pass; Redis failures remain typed and the cache is not a prerequisite for spooling)
+- Task 6: fix round 1/5 (collector rejects normalized kline events outside its configured timeframe subscription; commits `9b00c6f..d2b4bd4`)
+- Task 6: complete (collector lifecycle tests, serial full regression suite, TypeScript, lint, and production server bundle checks pass; Docker Compose execution remains an external acceptance gate because Docker is unavailable in this sandbox)
