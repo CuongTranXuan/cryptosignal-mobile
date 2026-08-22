@@ -63,6 +63,15 @@ describe("durable market event spool", () => {
     await expect(recovered.readSegment(segment.path)).resolves.toEqual([eventFixture()]);
   });
 
+  it("preserves a complete final record even when it has no trailing newline", async () => {
+    const spool = await createMarketSpool({ directory: temporaryDirectories[0], maxBytes: 4_096, maxAgeMs: 60_000 });
+    await spool.append(eventFixture());
+    const [segment] = await spool.listPendingSegments();
+    await writeFile(segment.path, JSON.stringify(eventFixture()));
+
+    await expect(spool.readSegment(segment.path)).resolves.toEqual([eventFixture()]);
+  });
+
   it("continues segment ordering after a restart", async () => {
     const firstSpool = await createMarketSpool({ directory: temporaryDirectories[0], maxBytes: 1, maxAgeMs: 60_000 });
     await firstSpool.append(eventFixture("event-1"));
