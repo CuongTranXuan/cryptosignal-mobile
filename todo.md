@@ -100,6 +100,7 @@
 - [x] Self-review, validate, checkpoint, and synchronize the detailed Binance implementation plan before execution begins.
 - [ ] Execute the approved Binance market-data plan through isolated test-first tasks with an atomic GitHub commit after each validated deliverable.
 - [x] Complete Phase 0: public live-market contracts, deterministic fixtures, and dependency boundaries without enabling a live connection.
+- [x] Complete isolated live-alert configuration, control-plane persistence, health, observations, and archive-manifest support with a non-destructive migration.
 - [x] Replace global Python dependency installation with uv sync and a project virtual environment in Docker deployment.
 - [x] Provide host, VPS, and local Docker deployment configuration for the web application and optional signal runner.
 - [x] Update deployment documentation and scripts for uv-managed environment setup.
