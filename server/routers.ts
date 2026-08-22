@@ -1,6 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { COOKIE_NAME } from "../shared/const";
+import { CANDLE_PATTERN_RULE_IDS, METHODOLOGY_RULE_IDS, RULE_FAMILY_IDS } from "../shared/signal-types";
 import { getBotConfig, getChartWindow, getRunnerHealth, listAuditEvents, listSignalSnapshots, recordSignalSnapshot, setBotPaused, updateBotConfig } from "./db";
 import { signalSnapshotSchema } from "./signal-ingest";
 import { getCachedTelegramBotLink, getTelegramPollingHealth } from "./telegram-polling";
@@ -68,9 +69,17 @@ export const appRouter = router({
         const current = await getBotConfig();
         return updateBotConfig({ cooldownMinutes: input.cooldownMinutes }, "dashboard", current, "DASHBOARD");
       }),
-      setRuleFamilies: dashboardProtectedProcedure.input(z.object({ ruleFamilies: z.array(z.enum(["TREND", "MOMENTUM", "VOLUME", "CANDLE_PATTERN", "WYCKOFF", "SMC", "ELLIOTT_EXPERIMENTAL"])) .max(7) })).mutation(async ({ input }) => {
+      setRuleFamilies: dashboardProtectedProcedure.input(z.object({ ruleFamilies: z.array(z.enum(RULE_FAMILY_IDS)).max(7) })).mutation(async ({ input }) => {
         const current = await getBotConfig();
         return updateBotConfig({ ruleFamilies: input.ruleFamilies }, "dashboard", current, "DASHBOARD");
+      }),
+      setEnabledPatterns: dashboardProtectedProcedure.input(z.object({ enabledPatterns: z.array(z.string().refine((ruleId) => CANDLE_PATTERN_RULE_IDS.includes(ruleId as typeof CANDLE_PATTERN_RULE_IDS[number]), "Unsupported candle pattern")).min(1).max(CANDLE_PATTERN_RULE_IDS.length) })).mutation(async ({ input }) => {
+        const current = await getBotConfig();
+        return updateBotConfig({ enabledPatterns: input.enabledPatterns as typeof current.enabledPatterns }, "dashboard", current, "DASHBOARD");
+      }),
+      setEnabledMethodologies: dashboardProtectedProcedure.input(z.object({ enabledMethodologies: z.array(z.string().refine((ruleId) => METHODOLOGY_RULE_IDS.includes(ruleId as typeof METHODOLOGY_RULE_IDS[number]), "Unsupported methodology rule")).min(1).max(METHODOLOGY_RULE_IDS.length) })).mutation(async ({ input }) => {
+        const current = await getBotConfig();
+        return updateBotConfig({ enabledMethodologies: input.enabledMethodologies as typeof current.enabledMethodologies }, "dashboard", current, "DASHBOARD");
       }),
     }),
   }),

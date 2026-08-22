@@ -36,6 +36,20 @@
       "when": 1787182124376,
       "tag": "0004_pink_bruce_banner",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1787238599856,
+      "tag": "0005_spooky_newton_destine",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1787238747698,
+      "tag": "0006_puzzling_kitty_pryde",
+      "breakpoints": true
     }
   ]
 }

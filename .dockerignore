@@ -9,4 +9,5 @@ dist-web
 !*.example
 __pycache__
 *.pyc
+.venv
 ideas.md

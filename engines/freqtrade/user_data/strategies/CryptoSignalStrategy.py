@@ -64,6 +64,38 @@ class CryptoSignalStrategy(IStrategy):
         dataframe["tweezer_bottom_raw"] = (
             (dataframe["low"] - dataframe["low"].shift(1)).abs() <= dataframe["atr_14"] * 0.10
         ) & (dataframe["close"].shift(1) < dataframe["open"].shift(1)) & (dataframe["close"] > dataframe["open"])
+        dataframe["prior_range_high_20"] = dataframe["high"].rolling(20).max().shift(1)
+        dataframe["prior_range_low_20"] = dataframe["low"].rolling(20).min().shift(1)
+        dataframe["wyckoff_spring_proxy_raw"] = (
+            (dataframe["low"] < dataframe["prior_range_low_20"])
+            & (dataframe["close"] > dataframe["prior_range_low_20"])
+            & (dataframe["relative_volume"] >= 1.0)
+        )
+        dataframe["wyckoff_upthrust_proxy_raw"] = (
+            (dataframe["high"] > dataframe["prior_range_high_20"])
+            & (dataframe["close"] < dataframe["prior_range_high_20"])
+            & (dataframe["relative_volume"] >= 1.0)
+        )
+        dataframe["smc_bullish_bos_proxy_raw"] = (
+            (dataframe["close"] > dataframe["prior_range_high_20"])
+            & (dataframe["relative_volume"] >= 1.0)
+        )
+        dataframe["smc_bearish_bos_proxy_raw"] = (
+            (dataframe["close"] < dataframe["prior_range_low_20"])
+            & (dataframe["relative_volume"] >= 1.0)
+        )
+        dataframe["elliott_bullish_impulse_proxy_raw"] = (
+            (dataframe["close"] > dataframe["close"].shift(1))
+            & (dataframe["close"].shift(1) > dataframe["close"].shift(2))
+            & (dataframe["close"].shift(2) > dataframe["close"].shift(3))
+            & (dataframe["ema_20"] > dataframe["ema_50"])
+        )
+        dataframe["elliott_bearish_impulse_proxy_raw"] = (
+            (dataframe["close"] < dataframe["close"].shift(1))
+            & (dataframe["close"].shift(1) < dataframe["close"].shift(2))
+            & (dataframe["close"].shift(2) < dataframe["close"].shift(3))
+            & (dataframe["ema_20"] < dataframe["ema_50"])
+        )
 
         trend_bullish = (dataframe["ema_20"] > dataframe["ema_50"]) & (
             dataframe["ema_50"] > dataframe["ema_200"]
@@ -98,6 +130,12 @@ class CryptoSignalStrategy(IStrategy):
         dataframe.loc[dataframe["three_inside_down_raw"] > 0, "signal_score"] -= 0.12
         dataframe.loc[dataframe["tweezer_bottom_raw"], "signal_score"] += 0.10
         dataframe.loc[dataframe["tweezer_top_raw"], "signal_score"] -= 0.10
+        dataframe.loc[dataframe["wyckoff_spring_proxy_raw"], "signal_score"] += 0.16
+        dataframe.loc[dataframe["wyckoff_upthrust_proxy_raw"], "signal_score"] -= 0.16
+        dataframe.loc[dataframe["smc_bullish_bos_proxy_raw"], "signal_score"] += 0.18
+        dataframe.loc[dataframe["smc_bearish_bos_proxy_raw"], "signal_score"] -= 0.18
+        dataframe.loc[dataframe["elliott_bullish_impulse_proxy_raw"], "signal_score"] += 0.12
+        dataframe.loc[dataframe["elliott_bearish_impulse_proxy_raw"], "signal_score"] -= 0.12
         dataframe["signal_score"] = dataframe["signal_score"].clip(lower=-1.0, upper=1.0)
 
         dataframe["signal_state"] = np.select(

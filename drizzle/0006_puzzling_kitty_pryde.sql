@@ -1,0 +1,1 @@
+ALTER TABLE `bot_configs` ADD `enabledMethodologiesJson` text NOT NULL;

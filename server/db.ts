@@ -13,7 +13,7 @@ import {
   telegramPollingState,
   users,
 } from "../drizzle/schema";
-import type { AuditEventView, BotConfigView, CandlePointInput, ConditionalScenario, RunnerHealthState, RunnerHealthView, SignalSnapshotInput } from "../shared/signal-types";
+import { CANDLE_PATTERN_RULE_IDS, METHODOLOGY_RULE_IDS, type AuditEventView, type BotConfigView, type CandlePatternRuleId, type CandlePointInput, type ConditionalScenario, type MethodologyRuleId, type RuleFamilyId, type RunnerHealthState, type RunnerHealthView, type SignalSnapshotInput } from "../shared/signal-types";
 import { ENV } from "./_core/env";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -25,6 +25,8 @@ export const DEFAULT_BOT_CONFIG: BotConfigView = {
   watchlist: ["BTC/USDT", "ETH/USDT", "BNB/USDT"],
   timeframes: ["30m", "1h", "4h"],
   ruleFamilies: ["TREND", "MOMENTUM", "VOLUME", "CANDLE_PATTERN"],
+  enabledPatterns: [...CANDLE_PATTERN_RULE_IDS] as CandlePatternRuleId[],
+  enabledMethodologies: [...METHODOLOGY_RULE_IDS] as MethodologyRuleId[],
   alertThreshold: 0.55,
   cooldownMinutes: 60,
   quietHours: { start: "22:00", end: "07:00", timezone: "UTC" },
@@ -49,6 +51,20 @@ function parseJson<T>(value: string, fallback: T): T {
   } catch {
     return fallback;
   }
+}
+
+function parseEnabledPatterns(value: string | null | undefined): CandlePatternRuleId[] {
+  const parsed = parseJson<string[]>(value ?? "", DEFAULT_BOT_CONFIG.enabledPatterns);
+  const allowed = new Set<string>(CANDLE_PATTERN_RULE_IDS);
+  const filtered = parsed.filter((ruleId): ruleId is CandlePatternRuleId => allowed.has(ruleId));
+  return filtered.length ? filtered : [...DEFAULT_BOT_CONFIG.enabledPatterns];
+}
+
+function parseEnabledMethodologies(value: string | null | undefined): MethodologyRuleId[] {
+  const parsed = parseJson<string[]>(value ?? "", DEFAULT_BOT_CONFIG.enabledMethodologies);
+  const allowed = new Set<string>(METHODOLOGY_RULE_IDS);
+  const filtered = parsed.filter((ruleId): ruleId is MethodologyRuleId => allowed.has(ruleId));
+  return filtered.length ? filtered : [...DEFAULT_BOT_CONFIG.enabledMethodologies];
 }
 
 export async function getDb() {
@@ -108,7 +124,9 @@ export async function getBotConfig(): Promise<BotConfigView> {
     isPaused: row.isPaused,
     watchlist: parseJson(row.watchlistJson, DEFAULT_BOT_CONFIG.watchlist),
     timeframes: parseJson(row.timeframesJson, DEFAULT_BOT_CONFIG.timeframes),
-    ruleFamilies: parseJson(row.ruleFamiliesJson, DEFAULT_BOT_CONFIG.ruleFamilies),
+    ruleFamilies: parseJson<RuleFamilyId[]>(row.ruleFamiliesJson, DEFAULT_BOT_CONFIG.ruleFamilies),
+    enabledPatterns: parseEnabledPatterns(row.enabledPatternsJson),
+    enabledMethodologies: parseEnabledMethodologies(row.enabledMethodologiesJson),
     alertThreshold: row.alertThreshold,
     cooldownMinutes: row.cooldownMinutes,
     quietHours: parseJson(row.quietHoursJson, DEFAULT_BOT_CONFIG.quietHours),
@@ -191,6 +209,8 @@ export async function updateBotConfig(
       watchlistJson: JSON.stringify(next.watchlist),
       timeframesJson: JSON.stringify(next.timeframes),
       ruleFamiliesJson: JSON.stringify(next.ruleFamilies),
+      enabledPatternsJson: JSON.stringify(next.enabledPatterns),
+      enabledMethodologiesJson: JSON.stringify(next.enabledMethodologies),
       alertThreshold: next.alertThreshold,
       cooldownMinutes: next.cooldownMinutes,
       quietHoursJson: JSON.stringify(next.quietHours),
@@ -202,6 +222,8 @@ export async function updateBotConfig(
         watchlistJson: JSON.stringify(next.watchlist),
         timeframesJson: JSON.stringify(next.timeframes),
         ruleFamiliesJson: JSON.stringify(next.ruleFamilies),
+        enabledPatternsJson: JSON.stringify(next.enabledPatterns),
+        enabledMethodologiesJson: JSON.stringify(next.enabledMethodologies),
         alertThreshold: next.alertThreshold,
         cooldownMinutes: next.cooldownMinutes,
         quietHoursJson: JSON.stringify(next.quietHours),

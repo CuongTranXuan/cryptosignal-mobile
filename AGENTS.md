@@ -27,9 +27,9 @@ The first admin requires `DASHBOARD_BOOTSTRAP_TOKEN`. The bootstrap path is one-
 
 ## Telegram and runtime rules
 
-Development starts polling in process. In production, only the Docker poller (`infra/docker-compose.poller.yml`) may set `TELEGRAM_POLLING_ENABLED=true`; all other API instances must leave polling disabled. This guarantees exactly one `getUpdates` consumer per bot token. Every bot command must verify `TELEGRAM_ALLOWED_USER_IDS`, persist configuration changes through `updateBotConfig`, and record auditable events.
+Development starts polling in process. In production, only the `telegram` profile of `infra/docker-compose.yml` may set `TELEGRAM_POLLING_ENABLED=true`; web and runner services must leave polling disabled. This guarantees exactly one `getUpdates` consumer per bot token. Every bot command must verify `TELEGRAM_ALLOWED_USER_IDS`, persist configuration changes through `updateBotConfig`, and record auditable events.
 
-The Freqtrade runner may retrieve public market data and submit closed-candle snapshots and compact runner health through `SIGNAL_INGEST_TOKEN`. Production scheduling uses `scripts/run-configured-cycle-quiet.sh` and `infra/cron/cryptosignal.crontab`; it must not write routine output or overlap runs. It must not use `freqtrade trade`, exchange API keys, or any order capability.
+The Freqtrade runner may retrieve public market data and submit closed-candle snapshots and compact runner health through `SIGNAL_INGEST_TOKEN`. The primary production runtime is the `runner` Compose profile, which uses the project-local uv-managed `engines/freqtrade/.venv`; `scripts/run-configured-cycle-quiet.sh` and `infra/cron/cryptosignal.crontab` remain a host-side alternative. Neither option may write routine output or overlap runs. It must not use `freqtrade trade`, exchange API keys, or any order capability.
 
 ## Database changes
 
@@ -54,4 +54,4 @@ Add every new feature, defect, and operational change to `todo.md` before implem
 
 ## Persistent-host deployment checklist
 
-Use HTTPS, a single same-origin reverse proxy for `/api/`, TLS for the database, protected environment files, regular database backups, one Docker-owned polling service, and a separate scheduled Freqtrade cycle. Build the static web bundle with `pnpm build:web` and the Node service with `pnpm build`. Do not rely on the development Metro process for production.
+Use HTTPS, a single same-origin reverse proxy for `/api/`, TLS for the database, protected environment files, regular database backups, one Docker-owned polling service, and either the Compose runner profile or a separate scheduled Freqtrade cycle. Docker Python dependencies must be installed only by `uv sync --no-dev --frozen` into the project virtual environment; do not use `pip install --system` or any global Python installation. Do not rely on the development Metro process for production.

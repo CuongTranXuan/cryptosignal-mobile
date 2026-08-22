@@ -94,3 +94,12 @@
 - [x] Document a pinned, attributed Superpowers skill-vendoring strategy without activating third-party instructions at runtime.
 - [x] Revise the Binance live-data plan so every storage, analytics, cache, and operations component is self-hosted and open source.
 - [x] Compare MinIO, ClickHouse, PostgreSQL/TimescaleDB, and local file storage for the self-hosted replay architecture.
+- [x] Replace global Python dependency installation with uv sync and a project virtual environment in Docker deployment.
+- [x] Provide host, VPS, and local Docker deployment configuration for the web application and optional signal runner.
+- [x] Update deployment documentation and scripts for uv-managed environment setup.
+- [x] Validate and synchronize the uv-based Docker deployment artifacts to GitHub.
+- [x] Audit existing candlestick-pattern and methodology rule coverage against the dashboard configuration model.
+- [x] Add explicit user toggles for recognized candlestick patterns and research methodologies.
+- [x] Generate explainable closed-candle confirmed-pattern alerts through the configured delivery surface.
+- [x] Show active pattern and methodology evidence in the dashboard signal explanation.
+- [x] Validate and synchronize configurable pattern alerts and methodology controls to GitHub.
