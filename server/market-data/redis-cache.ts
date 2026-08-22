@@ -92,12 +92,14 @@ export function createMarketCache(client: RedisMarketClient, options: MarketCach
           }
         });
 
-        const eventTimes = [latestTrade, latestBookTicker, ...Object.values(latestKlines)]
+        const freshestEvent = [latestTrade, latestBookTicker, ...Object.values(latestKlines)]
           .filter((event): event is LiveMarketEvent => event !== null && event !== undefined)
-          .map((event) => event.exchangeEventTime)
-          .sort();
-        const freshestEventTime = eventTimes.at(-1) ?? null;
-        const stale = freshestEventTime ? now().getTime() - new Date(freshestEventTime).getTime() > staleAfterMs : true;
+          .map((event) => ({ event, epochMs: Date.parse(event.exchangeEventTime) }))
+          .filter((candidate) => Number.isFinite(candidate.epochMs))
+          .sort((left, right) => left.epochMs - right.epochMs)
+          .at(-1);
+        const freshestEventTime = freshestEvent?.event.exchangeEventTime ?? null;
+        const stale = freshestEvent ? now().getTime() - freshestEvent.epochMs > staleAfterMs : true;
 
         return { assetSymbol, latestTrade, latestBookTicker, latestKlines, freshestEventTime, stale };
       } catch (error) {

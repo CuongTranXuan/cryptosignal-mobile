@@ -55,6 +55,24 @@ describe("market Redis cache", () => {
     await expect(cache.readSnapshot("BTC/USDT")).resolves.toMatchObject({ stale: true });
   });
 
+  it("selects the freshest source instant without relying on timestamp string ordering", async () => {
+    const redis = createRedisDouble();
+    const cache = createMarketCache(redis, { now: () => new Date("2026-08-22T04:05:00.000Z"), staleAfterMs: 600_000 });
+    await cache.writeLatest(eventFixture({ exchangeEventTime: "2026-08-22T03:30:00.000Z" }));
+    await cache.writeLatest(
+      eventFixture({
+        eventId: "book-event-1",
+        streamType: "BOOK_TICKER",
+        exchangeEventTime: "2026-08-22T03:00:00.000-01:00",
+      }),
+    );
+
+    await expect(cache.readSnapshot("BTC/USDT")).resolves.toMatchObject({
+      freshestEventTime: "2026-08-22T03:00:00.000-01:00",
+      stale: false,
+    });
+  });
+
   it("surfaces Redis failures as a typed availability error", async () => {
     const cache = createMarketCache({
       get: vi.fn(async () => {
