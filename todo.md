@@ -96,6 +96,8 @@
 - [x] Compare MinIO, ClickHouse, PostgreSQL/TimescaleDB, and local file storage for the self-hosted replay architecture.
 - [x] Vendor the complete pinned upstream Superpowers skill set under `skills/superpowers/` with licence and provenance records.
 - [x] Validate, isolate, checkpoint, and synchronize the imported Superpowers inventory without application-runtime references.
+- [x] Create a detailed, test-driven, phased implementation plan for the approved self-hosted Binance real-time market-data architecture.
+- [x] Self-review, validate, checkpoint, and synchronize the detailed Binance implementation plan before execution begins.
 - [x] Replace global Python dependency installation with uv sync and a project virtual environment in Docker deployment.
 - [x] Provide host, VPS, and local Docker deployment configuration for the web application and optional signal runner.
 - [x] Update deployment documentation and scripts for uv-managed environment setup.
