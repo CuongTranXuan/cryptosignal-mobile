@@ -1,0 +1,1 @@
+ALTER TABLE `bot_configs` ADD `enabledPatternsJson` text NOT NULL;

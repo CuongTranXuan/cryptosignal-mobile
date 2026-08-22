@@ -56,6 +56,8 @@ export const botConfigs = mysqlTable("bot_configs", {
   watchlistJson: text("watchlistJson").notNull(),
   timeframesJson: text("timeframesJson").notNull(),
   ruleFamiliesJson: text("ruleFamiliesJson").notNull(),
+  enabledPatternsJson: text("enabledPatternsJson").notNull(),
+  enabledMethodologiesJson: text("enabledMethodologiesJson").notNull(),
   alertThreshold: double("alertThreshold").notNull(),
   cooldownMinutes: int("cooldownMinutes").notNull(),
   quietHoursJson: text("quietHoursJson").notNull(),

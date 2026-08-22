@@ -1,35 +1,47 @@
 # CryptoSignal
 
-CryptoSignal is a **signals-only crypto-market research web application**. It stores completed public OHLCV candles for BTC/USDT, ETH/USDT, and BNB/USDT; analyzes evidence with a pinned Freqtrade strategy; and displays protected browser research dashboards. Telegram long polling is an optional owner-allowlisted integration for alert delivery and mirrored controls.
+CryptoSignal is a **signals-only crypto-market research web application**. It retrieves completed public OHLCV candles for BTC/USDT, ETH/USDT, and BNB/USDT; evaluates named candlestick patterns and configurable research rules; records immutable evidence; and displays it in a protected browser dashboard. Telegram long polling is an optional owner-allowlisted surface for alerts and shared controls.
 
-> **No orders are placed.** The system has no exchange private keys, portfolio access, or order-execution capability. Chart scenarios are research conditions, not price targets, guarantees, or personalized recommendations.
+> **No orders are placed.** The system has no exchange private keys, portfolio access, or order-execution capability. Every pattern and methodology result is a completed-candle research observation, not a price target, guarantee, or personalized recommendation.
 
 ## Architecture
 
 | Component | Responsibility |
 |---|---|
-| Browser dashboard | Username/password-protected charts, signal history, indicator evidence, shared controls, runner health, and audit history. |
-| Express/tRPC API | First-party password session endpoints, protected dashboard data, signal ingestion, and health checks. |
-| MySQL/TiDB | Credentials, hashed sessions, immutable signals, candle history, configuration, runner health, and audit records. |
-| Freqtrade adapter | Runs local public-market closed-candle analysis without trading commands or credentials. |
-| Telegram long polling | Owner-allowlisted alerts and all operational configuration commands. |
+| Browser dashboard | Password-protected charts, indicator history, enabled-rule controls, runner health, and audit history. |
+| Express/tRPC API | Dashboard data, configuration, signal ingestion, sessions, and health checks. |
+| MySQL/TiDB | Credentials, sessions, immutable signals, candle history, rule selections, runner health, and audit events. |
+| Freqtrade adapter | Pinned, public-market, closed-candle analysis with no order commands or exchange credentials. |
+| Telegram long polling | Optional owner-allowlisted alerts and synchronized configuration controls. |
+
+## Configurable research rules
+
+The dashboard and Telegram share one versioned configuration. Users can enable or disable every named candlestick pattern as well as individual methodology rules. A rule must be selected **and** its parent family must be enabled before it can contribute to an eligible alert.
+
+| Family | Individually selectable rules |
+|---|---|
+| Candlestick patterns | Doji, Hammer, Inverted Hammer, Shooting Star, Hanging Man, Spinning Top, Engulfing, Harami, Tweezers, Morning/Evening Star, Three White Soldiers/Black Crows, and Three Inside Up/Down. |
+| Trend, momentum, volume | EMA alignment, RSI + MACD agreement, and relative-volume confirmation. |
+| Wyckoff / SMC / Elliott | Explicitly labelled closed-candle research proxies for spring/upthrust, break of structure, and impulse structure. These are not discretionary wave counts or trade instructions. |
+
+Telegram commands include `/patterns enable HAMMER`, `/patterns disable BULLISH_ENGULFING`, `/rules enable SMC_BULLISH_BOS_PROXY`, and `/rules disable EMA_TREND`. Use `/methodology enable SMC` to enable the parent family. `/help` lists all controls.
 
 ## Local development
 
-Install Node.js 22+, pnpm 9+, Python 3.12+, and the pinned Freqtrade runtime. Then install JavaScript dependencies and start the API/web development processes.
+Install Node.js 22+, pnpm 9+, Python 3.11 or 3.12, and [uv](https://docs.astral.sh/uv/). JavaScript and Python dependencies remain isolated: Node dependencies stay in the pnpm workspace and the signal engine uses `engines/freqtrade/.venv`.
 
 ```bash
 pnpm install --frozen-lockfile
-sudo uv pip install --system freqtrade==2026.7 pytest
+(cd engines/freqtrade && uv sync --all-groups)
 pnpm dev
 ```
 
-Create a database migration whenever `drizzle/schema.ts` changes. Review the generated SQL before applying it.
+Create a database migration whenever `drizzle/schema.ts` changes. Review generated SQL before applying it.
 
 ```bash
 pnpm drizzle-kit generate
 # Review drizzle/<new_migration>.sql
-# Apply reviewed statements using the deployment database migration process.
+# Apply reviewed statements through the deployment database migration process.
 ```
 
 ## First owner bootstrap
@@ -44,70 +56,66 @@ The browser receives only an HTTP-only session cookie. Passwords are stored as s
 |---|---:|---|
 | `DATABASE_URL` | Yes | MySQL/TiDB connection string with TLS in production. |
 | `DASHBOARD_BOOTSTRAP_TOKEN` | Yes | One-time first-admin setup key; use at least 32 random characters. |
-| `TELEGRAM_BOT_TOKEN` | Optional | Bot API token used only when the optional long-polling integration is enabled. |
-| `TELEGRAM_ALLOWED_USER_IDS` | With Telegram | Comma-separated Telegram numeric user-ID allowlist. |
-| `SIGNAL_INGEST_TOKEN` | Yes | Private token authorizing Freqtrade closed-candle signal and history submissions. |
-| `PORT` | Yes | API listen port; use `3000` behind the reverse proxy. |
-| `NODE_ENV` | Yes | Set to `production` on the persistent host. |
-| `TELEGRAM_POLLING_ENABLED` | Docker poller only | Set to `true` only in the single production polling container. Production API processes default to polling disabled. |
-| `CRYPTO_SIGNAL_API_BASE_URL` | Runner host | HTTPS API base URL used by the cron-driven Freqtrade runner. |
+| `SIGNAL_INGEST_TOKEN` | Yes | Private token authorizing closed-candle history and signal submissions. |
+| `TELEGRAM_BOT_TOKEN` | Telegram profile only | Bot API token used only by the optional long-polling profile. |
+| `TELEGRAM_ALLOWED_USER_IDS` | Telegram profile only | Comma-separated numeric owner allowlist. |
+| `PORT` | Container default | API listen port, set to `3000` in the deployment image. |
+| `TELEGRAM_POLLING_ENABLED` | Set by Compose | `false` for web and runner; `true` only for the one Telegram poller. |
+| `CRYPTO_SIGNAL_API_BASE_URL` | Runner profile | API base URL used by the configured closed-candle runner. |
 
-`JWT_SECRET` remains required only if the template’s legacy OAuth endpoints are retained. It is not used for the first-party username/password session implementation.
+## Docker deployment for a host, VPS, or local machine
 
-## Persistent-host deployment
+The production image is multi-stage. Its Python stage runs `uv sync --no-dev --frozen` and copies the resulting `engines/freqtrade/.venv` into the final image; it never uses `pip install --system` or a global Python package installation. The same image runs the web API, the optional Telegram poller, and the optional Freqtrade runner through separate Compose services.
 
-Build the Node API and static browser bundle on the host or CI artifact, then serve both through HTTPS on one domain. The browser uses relative `/api` paths in production, so the reverse proxy must route `/api/` to the Node API.
+First copy the example environment file to a protected location outside the checkout.
 
 ```bash
-pnpm install --frozen-lockfile
-pnpm build:all
-NODE_ENV=production PORT=3000 pnpm start
+sudo install -d -m 700 /etc/cryptosignal
+sudo cp infra/cryptosignal.env.example /etc/cryptosignal/production.env
+sudo chmod 600 /etc/cryptosignal/production.env
+# Edit the file securely and replace every placeholder.
 ```
 
-### Optional Docker-owned Telegram poller
-
-The web app does not require Telegram to run or to test its core dashboard features. When alert delivery is needed, the production Telegram poller is the **only** process that sets `TELEGRAM_POLLING_ENABLED=true`. It is intentionally isolated in the Docker deployment below. Other API instances retain dashboard/API behavior with polling disabled.
+Start the dashboard/API only:
 
 ```bash
-chmod +x scripts/configure-production-poller.sh scripts/run-configured-cycle-quiet.sh
-scripts/configure-production-poller.sh /etc/cryptosignal/poller.env
+scripts/configure-production.sh /etc/cryptosignal/production.env
 ```
 
-The Docker host needs Docker Compose, and `/etc/cryptosignal/poller.env` must be readable by the deployment user and contain `DATABASE_URL`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_USER_IDS`, and `SIGNAL_INGEST_TOKEN`. The service binds to `127.0.0.1:3000` by default for a same-host reverse proxy. Use `docker compose -f infra/docker-compose.poller.yml ps` to check service health.
-
-### Quiet cron runner
-
-Install the provided cron template on the host that has the pinned Freqtrade runtime. The wrapper takes a non-blocking lock, prevents overlap, suppresses cron output, and reports compact health data back to the dashboard API. It must run on the same private network as the API or use an explicit HTTPS `CRYPTO_SIGNAL_API_BASE_URL` and `SIGNAL_INGEST_TOKEN`.
+Add the configured public closed-candle runner, which evaluates the selected watchlist every five minutes inside the container:
 
 ```bash
+scripts/configure-production.sh /etc/cryptosignal/production.env --with-runner
+```
+
+Add Telegram long polling only when the environment file includes the token and owner allowlist. Run this profile once only; parallel pollers using the same token are intentionally prohibited.
+
+```bash
+scripts/configure-production.sh /etc/cryptosignal/production.env --with-runner --with-telegram
+```
+
+The API binds to `127.0.0.1:3000` by default. Set `CRYPTO_SIGNAL_API_BIND=0.0.0.0:3000` only for local testing or when a firewall and network policy make that appropriate. On a public host, keep the bind private and use one HTTPS reverse proxy for the dashboard and `/api/`.
+
+```bash
+docker compose -f infra/docker-compose.yml ps
+docker compose -f infra/docker-compose.yml --profile runner --profile telegram logs --tail=100
+```
+
+### Host-side runner alternative
+
+If containers are not used for the scheduler, create the same isolated environment before installing the existing cron template. The wrapper uses `engines/freqtrade/.venv/bin/python` by default, takes a non-blocking lock, and suppresses normal cron output.
+
+```bash
+(cd engines/freqtrade && uv sync --no-dev)
 chmod 600 /etc/cryptosignal/runner.env
 crontab infra/cron/cryptosignal.crontab
-# The scheduled wrapper runs: scripts/run-configured-cycle-quiet.sh
-```
-
-The following Nginx shape serves the exported web bundle and proxies the API on a single HTTPS domain. Replace paths and hostname.
-
-```nginx
-server {
-  listen 443 ssl http2;
-  server_name signals.example.com;
-  root /srv/cryptosignal/dist/web;
-  index index.html;
-
-  location /api/ {
-    proxy_pass http://127.0.0.1:3000;
-    proxy_set_header Host $host;
-    proxy_set_header X-Forwarded-Proto https;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-  }
-
-  location / { try_files $uri $uri/ /index.html; }
-}
 ```
 
 ## Operations
 
-The browser dashboard is the primary test surface and owns the versioned configuration, runner health, and immutable operational audit history. When enabled, Telegram shares that configuration and delivers eligible signals without logging background health polling to the browser console. Use `/help` for bot commands and `/web` for the dashboard link only after configuring the integration. Run a backup for the database and environment file before migrations or engine upgrades.
+The dashboard is the primary test surface and owns the versioned configuration, runner health, and immutable operational audit history. Telegram shares the same configuration only when the optional profile is enabled. Back up the database and protected environment file before schema migrations or engine upgrades.
+
+Use an HTTPS reverse proxy with one same-origin domain. The browser uses relative `/api` paths in production, so proxy `/api/` to the private web service while serving the static browser bundle through the Node application.
 
 ## Validation
 
@@ -121,4 +129,4 @@ freqtrade show-config --config engines/freqtrade/config/signals-only.json --user
 
 ## Project conventions
 
-Read [`AGENTS.md`](AGENTS.md) before changing this repository. It contains mandatory security boundaries, database migration workflow, required tests, deployment constraints, and the source-of-truth file map for future coding agents.
+Read [`AGENTS.md`](AGENTS.md) before changing this repository. It contains security boundaries, database migration workflow, required tests, deployment constraints, and the source-of-truth file map for future coding agents.

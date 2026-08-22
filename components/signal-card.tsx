@@ -1,6 +1,9 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import { useColors } from "@/hooks/use-colors";
+import { CANDLE_PATTERNS, METHODOLOGY_RULES, type SignalFinding } from "@/shared/signal-types";
+
+const RULE_LABELS = new Map<string, string>([...CANDLE_PATTERNS, ...METHODOLOGY_RULES].map((rule) => [rule.id, rule.label]));
 
 export type SignalCardData = {
   id: string;
@@ -11,6 +14,7 @@ export type SignalCardData = {
   confidence: number;
   candleCloseTime: string | Date;
   dataQualityState: string;
+  findings?: SignalFinding[];
 };
 
 function toneForState(state: string, colors: ReturnType<typeof useColors>) {
@@ -50,6 +54,7 @@ export function SignalCard({ signal, onPress }: { signal: SignalCardData; onPres
         <Metric label="Confidence" value={`${Math.round(signal.confidence * 100)}%`} colors={colors} />
         <Metric label="Data" value={signal.dataQualityState.replaceAll("_", " ")} colors={colors} />
       </View>
+      {signal.findings?.length ? <View style={[styles.evidence, { borderTopColor: colors.border }]}><Text style={[styles.evidenceTitle, { color: colors.foreground }]}>Enabled closed-candle evidence</Text>{signal.findings.slice(0, 5).map((finding) => <Text key={finding.findingId} style={[styles.evidenceItem, { color: finding.direction === "BULLISH" ? colors.success : finding.direction === "BEARISH" ? colors.error : colors.muted }]}>{finding.direction === "BULLISH" ? "Bullish" : finding.direction === "BEARISH" ? "Bearish" : "Neutral"} · {RULE_LABELS.get(finding.ruleId) ?? finding.ruleId.replace(/_V1$/, "").replaceAll("_", " ")}</Text>)}</View> : null}
     </Pressable>
   );
 }
@@ -72,6 +77,9 @@ const styles = StyleSheet.create({
   statePill: { alignSelf: "flex-start", borderRadius: 999, paddingHorizontal: 9, paddingVertical: 6, maxWidth: "50%" },
   stateText: { fontSize: 11, fontWeight: "800", textAlign: "right" },
   metricsRow: { flexDirection: "row", gap: 12 },
+  evidence: { gap: 5, paddingTop: 12, borderTopWidth: 1 },
+  evidenceTitle: { fontSize: 11, fontWeight: "800" },
+  evidenceItem: { fontSize: 11, lineHeight: 16 },
   metric: { flex: 1 },
   metricLabel: { fontSize: 11, marginBottom: 4 },
   metricValue: { fontSize: 13, fontWeight: "700", textTransform: "capitalize" },
