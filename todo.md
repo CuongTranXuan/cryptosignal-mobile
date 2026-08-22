@@ -127,3 +127,6 @@
 - [x] Repair the deployed production startup artifact path and validate the service health after the author-history correction.
 - [x] Diagnose and restore the published dashboard root route after the reported blank public response.
 - [x] Harden managed-deployment static-bundle resolution after the public root continued returning Cannot GET.
+- [x] Audit and repair live-data usability so the dashboard exposes clear connected, unavailable, and stale states with actionable controls.
+- [x] Redesign the dashboard around a focused research workspace using selected patterns from maintained open-source crypto interfaces.
+- [x] Validate the redesigned dashboard flows and publish the completed usability overhaul to GitHub.

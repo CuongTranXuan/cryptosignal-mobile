@@ -10,7 +10,8 @@ CryptoSignal researches public crypto-market data for **BTC/USDT, ETH/USDT, and 
 
 | Layer | Current responsibility | Storage or transport boundary |
 |---|---|---|
-| Browser dashboard | Authenticated signal history, chart evidence, controls for confirmed and live alerts, live snapshot, component health, and audit history. | Uses protected tRPC only. |
+| Browser dashboard | Authenticated signal history, chart evidence, focused Research/Live monitor/Controls workspaces, controls for confirmed and live alerts, cache state, and audit history. | Uses protected tRPC only. |
+| On-demand public quote | A user-triggered current best bid/ask request to Binance’s market-data-only REST endpoint. | No credentials; not persisted; never a collector, evaluator, archival, or replay fallback. |
 | Telegram long polling | Optional owner-allowlisted command and alert surface. It uses `getUpdates`; webhooks are not used. | Shares versioned controls with the dashboard. |
 | Closed-candle analysis | Freqtrade adapter consumes public spot OHLCV and submits completed-candle evidence. | Persists confirmed signal data through the API. |
 | Public live collector | Binance public combined WebSocket streams for trades, book tickers, and configured klines. | Spools before caching; no Binance credentials. |
@@ -28,6 +29,7 @@ CryptoSignal researches public crypto-market data for **BTC/USDT, ETH/USDT, and 
 3. The writer inserts a spool segment into ClickHouse, creates partitioned Parquet payloads, uploads and verifies SeaweedFS objects, then records all archive manifests before acknowledging the segment.
 4. The evaluator reads only Redis snapshots and records condition evidence with `LIVE_UNCONFIRMED`. Its cooldown is independent from confirmed closed-candle alerts.
 5. The replay API reads only ClickHouse within an enforced seven-day, 5,000-event maximum window. It has no public REST or exchange fallback.
+6. The dashboard may separately request a current public book ticker only when a user selects **Refresh quote**. Its response is labelled on-demand, is not treated as a durable event, and cannot repair or mask a missing Redis collector cache.
 
 ## Control model
 
