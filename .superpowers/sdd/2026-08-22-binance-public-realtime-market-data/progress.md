@@ -39,3 +39,5 @@
 - Task 3: complete (Compose contracts, full test suite, TypeScript, lint, and whitespace checks pass; Docker Compose rendering remains an external acceptance gate because Docker is unavailable in this sandbox)
 - Task 4: fix round 1/5 (preserved valid final NDJSON records without a trailing newline; commits `cb34539..3505212`)
 - Task 4: complete (focused spool recovery tests, full test suite, TypeScript, lint, and whitespace checks pass; segments remain until both ClickHouse and archive acknowledgements exist)
+- Task 5: fix round 1/5 (freshness chooses the latest parsed instant rather than timestamp string order; commits `fcf16c2..123f83a`)
+- Task 5: complete (focused normalization/cache tests and serial full regression suite pass; Redis failures remain typed and the cache is not a prerequisite for spooling)
