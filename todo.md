@@ -83,3 +83,14 @@
 - [x] Present refresh progress, completion, and non-sensitive failure feedback in the web dashboard.
 - [x] Validate the public-data refresh workflow without exchange credentials or order execution.
 - [x] Batch public candle-history persistence so dashboard refreshes complete within an interactive request window.
+- [x] Restart the development server and verify dashboard and API health responses.
+- [x] Review the requested Binance MCP and real-time market-data capabilities without activating external runtime access.
+- [ ] Evaluate and package the requested Superpowers brainstorming and reusable skill guidance for repository use.
+- [x] Produce a reviewable Binance MCP and real-time market-data architecture, security, and implementation plan under `docs/`.
+- [ ] Validate, checkpoint, and synchronize the reviewed planning materials to GitHub after owner approval.
+- [x] Define a public-only Binance WebSocket live-data scope for BTC/USDT, ETH/USDT, and BNB/USDT, retaining the existing signals-only boundary.
+- [x] Design separated confirmed closed-candle and unconfirmed live-observation alert paths for dashboard and Telegram.
+- [x] Compare durable replay storage options for at least two years of event-level public data, including database, object storage, and file-oriented alternatives.
+- [x] Document a pinned, attributed Superpowers skill-vendoring strategy without activating third-party instructions at runtime.
+- [x] Revise the Binance live-data plan so every storage, analytics, cache, and operations component is self-hosted and open source.
+- [x] Compare MinIO, ClickHouse, PostgreSQL/TimescaleDB, and local file storage for the self-hosted replay architecture.
