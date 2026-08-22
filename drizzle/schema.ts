@@ -58,6 +58,7 @@ export const botConfigs = mysqlTable("bot_configs", {
   ruleFamiliesJson: text("ruleFamiliesJson").notNull(),
   enabledPatternsJson: text("enabledPatternsJson").notNull(),
   enabledMethodologiesJson: text("enabledMethodologiesJson").notNull(),
+  liveAlertsJson: text("liveAlertsJson").notNull(),
   alertThreshold: double("alertThreshold").notNull(),
   cooldownMinutes: int("cooldownMinutes").notNull(),
   quietHoursJson: text("quietHoursJson").notNull(),
@@ -161,6 +162,56 @@ export const runnerHealth = mysqlTable(
   (table) => [index("runner_health_updated_idx").on(table.updatedAt)],
 );
 
+export const liveObservations = mysqlTable(
+  "live_observations",
+  {
+    id: varchar("id", { length: 96 }).primaryKey(),
+    assetSymbol: varchar("assetSymbol", { length: 32 }).notNull(),
+    observedAt: timestamp("observedAt").notNull(),
+    conditionId: varchar("conditionId", { length: 64 }).notNull(),
+    direction: varchar("direction", { length: 16 }).notNull(),
+    score: double("score").notNull(),
+    dataQualityState: varchar("dataQualityState", { length: 32 }).notNull(),
+    evidenceJson: text("evidenceJson").notNull(),
+    sourceEventIdsJson: text("sourceEventIdsJson").notNull(),
+    configVersion: int("configVersion").notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  (table) => [index("live_observations_asset_time_idx").on(table.assetSymbol, table.observedAt)],
+);
+
+export const marketPipelineHealth = mysqlTable(
+  "market_pipeline_health",
+  {
+    component: varchar("component", { length: 24 }).primaryKey(),
+    state: varchar("state", { length: 24 }).notNull(),
+    lastSuccessAt: timestamp("lastSuccessAt"),
+    lastError: text("lastError"),
+    lagMs: int("lagMs"),
+    summaryJson: text("summaryJson").notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (table) => [index("market_pipeline_health_state_updated_idx").on(table.state, table.updatedAt)],
+);
+
+export const marketArchiveManifests = mysqlTable(
+  "market_archive_manifests",
+  {
+    id: varchar("id", { length: 96 }).primaryKey(),
+    streamType: varchar("streamType", { length: 24 }).notNull(),
+    assetSymbol: varchar("assetSymbol", { length: 32 }).notNull(),
+    partitionStart: timestamp("partitionStart").notNull(),
+    partitionEnd: timestamp("partitionEnd").notNull(),
+    objectKey: varchar("objectKey", { length: 512 }).notNull().unique(),
+    rowCount: int("rowCount").notNull(),
+    sha256: varchar("sha256", { length: 64 }).notNull(),
+    clickhouseBatchId: varchar("clickhouseBatchId", { length: 96 }).notNull(),
+    state: varchar("state", { length: 24 }).notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  (table) => [index("market_archive_manifests_partition_idx").on(table.assetSymbol, table.partitionStart)],
+);
+
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 export type BotConfig = typeof botConfigs.$inferSelect;
@@ -168,3 +219,6 @@ export type SignalSnapshot = typeof signalSnapshots.$inferSelect;
 export type CandleHistory = typeof candleHistory.$inferSelect;
 export type DashboardCredential = typeof dashboardCredentials.$inferSelect;
 export type RunnerHealth = typeof runnerHealth.$inferSelect;
+export type LiveObservationRecord = typeof liveObservations.$inferSelect;
+export type MarketPipelineHealth = typeof marketPipelineHealth.$inferSelect;
+export type MarketArchiveManifest = typeof marketArchiveManifests.$inferSelect;

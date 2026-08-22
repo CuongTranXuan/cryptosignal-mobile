@@ -1,4 +1,5 @@
 import { getBotConfig, getTelegramUpdateOffset, hasRecentSignalAlert, listSignalSnapshots, recordAuditEvent, setBotPaused, setTelegramUpdateOffset, updateBotConfig } from "./db";
+import { LIVE_CONDITION_IDS, type LiveAlertConfig } from "../shared/live-market-types";
 import { CANDLE_PATTERNS, METHODOLOGY_RULES, RULE_FAMILY_IDS, type CandlePatternRuleId, type MethodologyRuleId, type RuleFamilyId, type SignalSnapshotInput } from "../shared/signal-types";
 
 type TelegramMessage = {
@@ -73,6 +74,22 @@ function parseCooldownMinutes(value: string) {
   return minutes >= 1 && minutes <= 1440 ? minutes : null;
 }
 
+export function parseLiveControlCommand(args: string[], liveAlerts: LiveAlertConfig): { kind: "PATCH"; patch: { liveAlerts: LiveAlertConfig } } | { kind: "STATUS" | "CONDITIONS" | "INVALID" } {
+  const action = args[0]?.toLowerCase();
+  if (!action) return { kind: "STATUS" };
+  if (action === "conditions") return { kind: "CONDITIONS" };
+  if (action === "enable" || action === "disable") return { kind: "PATCH", patch: { liveAlerts: { ...liveAlerts, enabled: action === "enable" } } };
+  if (action === "threshold") {
+    const threshold = Number(args[1]);
+    if (Number.isFinite(threshold) && threshold >= 0 && threshold <= 1) return { kind: "PATCH", patch: { liveAlerts: { ...liveAlerts, threshold } } };
+  }
+  if (action === "cooldown") {
+    const cooldownMinutes = parseCooldownMinutes(args[1] ?? "");
+    if (cooldownMinutes !== null) return { kind: "PATCH", patch: { liveAlerts: { ...liveAlerts, cooldownMinutes } } };
+  }
+  return { kind: "INVALID" };
+}
+
 const RULE_DETAILS = new Map<string, { label: string; explanation: string }>([...CANDLE_PATTERNS, ...METHODOLOGY_RULES].map((rule) => [rule.id, rule]));
 
 function resolveRuleId(value: string, allowed: readonly string[]) {
@@ -122,6 +139,14 @@ async function sendMessage(chatId: number, text: string) {
   return telegramRequest("sendMessage", { chat_id: chatId, text, disable_web_page_preview: true });
 }
 
+export function getAllowedTelegramRecipientIds() {
+  return [...allowedUserIds()].map(Number).filter(Number.isSafeInteger);
+}
+
+export async function sendTelegramMessage(chatId: number, text: string) {
+  return sendMessage(chatId, text);
+}
+
 export async function deliverSignalAlert(snapshot: SignalSnapshotInput) {
   const config = await getBotConfig();
   if (config.isPaused) return { delivered: false, reason: "PAUSED" as const };
@@ -162,7 +187,7 @@ async function handleCommand(message: TelegramMessage) {
   if (command === "/start" || command === "/help") {
     await sendMessage(
       message.chat.id,
-      "CryptoSignal is in signals-only mode. Commands: /status, /signal [SYMBOL], /watchlist [add|remove] SYMBOL, /timeframes [add|remove] 30m|1h|4h, /threshold 0.55, /cooldown 60m, /methodology [enable|disable] FAMILY, /patterns [enable|disable] PATTERN, /rules [enable|disable] RULE, /pause, /resume, /web, /help. Telegram and the web dashboard share the same configuration. It does not place orders or use exchange private keys.",
+      "CryptoSignal is in signals-only mode. Commands: /status, /signal [SYMBOL], /watchlist [add|remove] SYMBOL, /timeframes [add|remove] 30m|1h|4h, /threshold 0.55, /cooldown 60m, /live [enable|disable|conditions|threshold 0.70|cooldown 15m], /methodology [enable|disable] FAMILY, /patterns [enable|disable] PATTERN, /rules [enable|disable] RULE, /pause, /resume, /web, /help. Telegram and the web dashboard share the same configuration. It does not place orders or use exchange private keys.",
     );
     return;
   }
@@ -172,13 +197,33 @@ async function handleCommand(message: TelegramMessage) {
     const last = latest[0];
     await sendMessage(
       message.chat.id,
-      `Status: ${config.isPaused ? "PAUSED" : "MONITORING"}\nWatchlist: ${config.watchlist.join(", ")}\nLatest: ${last ? `${last.assetSymbol} ${last.timeframe} ${last.state} (${last.score.toFixed(2)})` : "No closed-candle signal recorded yet."}`,
+      `Status: ${config.isPaused ? "PAUSED" : "MONITORING"}\nConfirmed closed-candle monitoring: ${config.isPaused ? "PAUSED" : "ACTIVE"}\nLive observations (unconfirmed): ${config.liveAlerts.enabled ? "ENABLED" : "DISABLED"} · threshold ${config.liveAlerts.threshold.toFixed(2)} · cooldown ${config.liveAlerts.cooldownMinutes}m\nWatchlist: ${config.watchlist.join(", ")}\nLatest confirmed: ${last ? `${last.assetSymbol} ${last.timeframe} ${last.state} (${last.score.toFixed(2)})` : "No closed-candle signal recorded yet."}`,
     );
     return;
   }
 
   if (command === "/web") {
     await sendMessage(message.chat.id, `Dashboard: ${WEB_DASHBOARD_URL}\nTelegram and dashboard controls share the same watchlist, timeframe, alert policy, methodology, pause, and resume configuration.`);
+    return;
+  }
+
+  if (command === "/live") {
+    const config = await getBotConfig();
+    const result = parseLiveControlCommand(args, config.liveAlerts);
+    if (result.kind === "STATUS") {
+      await sendMessage(message.chat.id, `Live observations are ${config.liveAlerts.enabled ? "ENABLED" : "DISABLED"} (unconfirmed only). Conditions: ${config.liveAlerts.conditionIds.join(", ") || "none"}. Threshold ${config.liveAlerts.threshold.toFixed(2)}; cooldown ${config.liveAlerts.cooldownMinutes}m.`);
+      return;
+    }
+    if (result.kind === "CONDITIONS") {
+      await sendMessage(message.chat.id, `Unconfirmed live conditions: ${LIVE_CONDITION_IDS.join(", ")}. These do not create confirmed closed-candle signals.`);
+      return;
+    }
+    if (result.kind === "PATCH") {
+      const next = await updateBotConfig(result.patch, actorId, config);
+      await sendMessage(message.chat.id, `Live observations v${next.configVersion}: ${next.liveAlerts.enabled ? "ENABLED" : "DISABLED"} (unconfirmed only), threshold ${next.liveAlerts.threshold.toFixed(2)}, cooldown ${next.liveAlerts.cooldownMinutes}m.`);
+      return;
+    }
+    await sendMessage(message.chat.id, "Usage: /live [enable|disable|conditions|threshold 0.70|cooldown 15m]. Live observations are unconfirmed and separate from closed-candle signals.");
     return;
   }
 
