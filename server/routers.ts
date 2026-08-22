@@ -3,7 +3,7 @@ import { z } from "zod";
 import { COOKIE_NAME } from "../shared/const";
 import { LIVE_ASSET_SYMBOLS, LIVE_CONDITION_IDS, type MarketComponentHealth } from "../shared/live-market-types";
 import { CANDLE_PATTERN_RULE_IDS, METHODOLOGY_RULE_IDS, RULE_FAMILY_IDS } from "../shared/signal-types";
-import { getBotConfig, getChartWindow, getMarketPipelineHealth, getRunnerHealth, listAuditEvents, listSignalSnapshots, recordMarketPipelineHealth, recordSignalSnapshot, setBotPaused, updateBotConfig } from "./db";
+import { getBotConfig, getChartWindow, getMarketPipelineHealth, getRunnerHealth, listAuditEvents, listLiveObservations, listSignalSnapshots, recordMarketPipelineHealth, recordSignalSnapshot, setBotPaused, updateBotConfig } from "./db";
 import { createConfiguredReplayService, MAX_REPLAY_EVENTS, MAX_REPLAY_WINDOW_MS, MarketCacheUnavailableError, readConfiguredLiveSnapshot } from "./market-data/replay";
 import { signalSnapshotSchema } from "./signal-ingest";
 import { getCachedTelegramBotLink, getTelegramPollingHealth } from "./telegram-polling";
@@ -49,9 +49,16 @@ function completeMarketHealth(rows: MarketComponentHealth[]): MarketComponentHea
   );
 }
 
-function sanitizeMarketHealth(rows: MarketComponentHealth[]) {
+export function sanitizeMarketHealthText(value: string) {
+  return value
+    .replace(/(?:https?|redis|mysql|postgres):\/\/[^\s]+/gi, "[endpoint redacted]")
+    .replace(/(token|password|secret|accesskey|signature|authorization)(\s*[=:]\s*)[^\s,;]+/gi, (_match, key: string, separator: string) => `${key}${separator}[redacted]`);
+}
+
+export function sanitizeMarketHealth(rows: MarketComponentHealth[]) {
   return completeMarketHealth(rows).map((row) => ({
     ...row,
+    lastError: row.lastError ? sanitizeMarketHealthText(row.lastError) : null,
     summary: Object.fromEntries(
       Object.entries(row.summary).filter(([key]) => !/(secret|password|token|credential|endpoint|url)/i.test(key)),
     ),
@@ -109,6 +116,7 @@ export const appRouter = router({
       }
     }),
     health: dashboardProtectedProcedure.query(async () => sanitizeMarketHealth(await getMarketPipelineHealth())),
+    liveObservations: dashboardProtectedProcedure.input(z.object({ limit: z.number().int().min(1).max(30).default(10) })).query(({ input }) => listLiveObservations(input.limit)),
   }),
   bot: router({
     status: dashboardProtectedProcedure.query(async () => {

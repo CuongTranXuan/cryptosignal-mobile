@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatSignalFindings, normalizeConfiguredSymbol, parseTelegramCommand, shouldStartTelegramPolling, telegramPollingBackoffMs } from "../server/telegram-polling";
+import { formatSignalFindings, normalizeConfiguredSymbol, parseLiveControlCommand, parseTelegramCommand, shouldStartTelegramPolling, telegramPollingBackoffMs } from "../server/telegram-polling";
 
 describe("Telegram long-polling commands", () => {
   it("normalizes bot suffixes and preserves command arguments", () => {
@@ -44,5 +44,12 @@ describe("Telegram long-polling commands", () => {
     expect(shouldStartTelegramPolling({ NODE_ENV: "development", TELEGRAM_BOT_TOKEN: "token" })).toBe(false);
     expect(shouldStartTelegramPolling({ NODE_ENV: "production", TELEGRAM_BOT_TOKEN: "token" })).toBe(false);
     expect(shouldStartTelegramPolling({ NODE_ENV: "production", TELEGRAM_BOT_TOKEN: "token", TELEGRAM_POLLING_ENABLED: "true" })).toBe(true);
+  });
+
+  it("parses /live cooldown as a live-only configuration patch", () => {
+    expect(parseLiveControlCommand(["cooldown", "15m"], { enabled: true, conditionIds: ["SPREAD_ANOMALY_V1"], threshold: 0.7, cooldownMinutes: 10 })).toEqual({
+      kind: "PATCH",
+      patch: { liveAlerts: { enabled: true, conditionIds: ["SPREAD_ANOMALY_V1"], threshold: 0.7, cooldownMinutes: 15 } },
+    });
   });
 });

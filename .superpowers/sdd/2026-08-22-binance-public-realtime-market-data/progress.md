@@ -49,3 +49,5 @@
 - Task 8: complete (bounded replay, Redis-only snapshot, secret-free component health, and isolated live-alert controls pass focused tests, serial full regression, TypeScript, lint, and production server bundle checks)
 - Task 9: fix round 1/5 (independent review corrected spread-anomaly scoring while retaining its explicitly neutral direction, adding regression coverage for the public book-spread formula)
 - Task 9: complete (deterministic LIVE_UNCONFIRMED observations, live-only Telegram cooldown and disclaimer path, Redis-only evaluator worker, focused tests, serial full regression, TypeScript, lint, and production evaluator-worker bundle checks pass)
+- Task 10: fix round 1/5 (independent review added defense-in-depth health-error redaction for endpoint and credential-like content before dashboard presentation, with regression coverage)
+- Task 10: complete (dashboard live-market panel and isolated controls, Telegram /live controls, sanitized component health panel, bilingual labels, focused tests, serial full regression, TypeScript, lint, and production bundle checks pass)
