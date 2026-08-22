@@ -85,7 +85,7 @@
 - [x] Batch public candle-history persistence so dashboard refreshes complete within an interactive request window.
 - [x] Restart the development server and verify dashboard and API health responses.
 - [x] Review the requested Binance MCP and real-time market-data capabilities without activating external runtime access.
-- [ ] Evaluate and package the requested Superpowers brainstorming and reusable skill guidance for repository use.
+- [x] Evaluate and package the requested Superpowers brainstorming and reusable skill guidance for repository use.
 - [x] Produce a reviewable Binance MCP and real-time market-data architecture, security, and implementation plan under `docs/`.
 - [ ] Validate, checkpoint, and synchronize the reviewed planning materials to GitHub after owner approval.
 - [x] Define a public-only Binance WebSocket live-data scope for BTC/USDT, ETH/USDT, and BNB/USDT, retaining the existing signals-only boundary.
@@ -94,6 +94,8 @@
 - [x] Document a pinned, attributed Superpowers skill-vendoring strategy without activating third-party instructions at runtime.
 - [x] Revise the Binance live-data plan so every storage, analytics, cache, and operations component is self-hosted and open source.
 - [x] Compare MinIO, ClickHouse, PostgreSQL/TimescaleDB, and local file storage for the self-hosted replay architecture.
+- [x] Vendor the complete pinned upstream Superpowers skill set under `skills/superpowers/` with licence and provenance records.
+- [x] Validate, isolate, checkpoint, and synchronize the imported Superpowers inventory without application-runtime references.
 - [x] Replace global Python dependency installation with uv sync and a project virtual environment in Docker deployment.
 - [x] Provide host, VPS, and local Docker deployment configuration for the web application and optional signal runner.
 - [x] Update deployment documentation and scripts for uv-managed environment setup.
