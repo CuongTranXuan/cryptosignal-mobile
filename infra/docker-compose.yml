@@ -58,3 +58,69 @@ services:
       CRYPTO_SIGNAL_RUNNER_INTERVAL_SECONDS: "300"
     working_dir: /app/engines/freqtrade
     command: ["sh", "-c", "while true; do python run_configured_cycle.py --api-base-url \"$${CRYPTO_SIGNAL_API_BASE_URL}\" --limit 500 --quiet >/dev/null 2>&1 || true; sleep \"$${CRYPTO_SIGNAL_RUNNER_INTERVAL_SECONDS}\"; done"]
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: cryptosignal-market-redis
+    profiles: ["market-live"]
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - market_redis_data:/data
+    networks:
+      - market-internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:25.7
+    container_name: cryptosignal-market-clickhouse
+    profiles: ["market-retain", "mcp-research"]
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_DB: marketdata
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-cryptosignal}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-replace-before-production}
+    volumes:
+      - market_clickhouse_data:/var/lib/clickhouse
+      - market_clickhouse_logs:/var/log/clickhouse-server
+      - ./clickhouse/init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - market-internal
+    healthcheck:
+      test: ["CMD-SHELL", "clickhouse-client --query 'SELECT 1'"]
+      interval: 20s
+      timeout: 10s
+      retries: 6
+      start_period: 20s
+
+  seaweedfs:
+    image: chrislusf/seaweedfs:3.90
+    container_name: cryptosignal-market-seaweedfs
+    profiles: ["market-retain", "mcp-research"]
+    restart: unless-stopped
+    command: ["server", "-dir=/data", "-filer", "-filer.config=/etc/seaweedfs/filer.toml"]
+    volumes:
+      - market_seaweedfs_data:/data
+      - ./seaweedfs/filer.toml:/etc/seaweedfs/filer.toml:ro
+    networks:
+      - market-internal
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9333/cluster/status >/dev/null 2>&1"]
+      interval: 20s
+      timeout: 10s
+      retries: 6
+      start_period: 20s
+
+networks:
+  market-internal:
+    internal: true
+
+volumes:
+  market_redis_data:
+  market_clickhouse_data:
+  market_clickhouse_logs:
+  market_seaweedfs_data:
