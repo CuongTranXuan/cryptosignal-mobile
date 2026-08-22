@@ -124,7 +124,7 @@ services:
     container_name: cryptosignal-market-seaweedfs
     profiles: ["market-retain", "mcp-research"]
     restart: unless-stopped
-    command: ["server", "-dir=/data", "-filer", "-filer.config=/etc/seaweedfs/filer.toml"]
+    command: ["server", "-dir=/data", "-filer", "-s3", "-filer.config=/etc/seaweedfs/filer.toml"]
     volumes:
       - market_seaweedfs_data:/data
       - ./seaweedfs/filer.toml:/etc/seaweedfs/filer.toml:ro
@@ -136,6 +136,31 @@ services:
       timeout: 10s
       retries: 6
       start_period: 20s
+
+  event-writer:
+    <<: *cryptosignal-service
+    container_name: cryptosignal-market-event-writer
+    profiles: ["market-retain"]
+    restart: unless-stopped
+    depends_on:
+      web:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      seaweedfs:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      MARKET_WRITER_ENABLED: "true"
+      MARKET_SPOOL_DIR: /var/lib/cryptosignal/market-spool
+      CLICKHOUSE_URL: http://clickhouse:8123
+      SEAWEEDFS_S3_ENDPOINT: http://seaweedfs:8333
+    command: ["node", "dist/scripts/run-event-writer.js"]
+    volumes:
+      - market_collector_spool:/var/lib/cryptosignal/market-spool
+    networks:
+      - default
+      - market-internal
 
 networks:
   market-internal:
