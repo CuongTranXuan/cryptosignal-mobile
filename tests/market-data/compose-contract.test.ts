@@ -21,6 +21,8 @@ describe("local market-data Compose contracts", () => {
     expect(compose.match(/healthcheck:/g)).toHaveLength(4);
     expect(clickhouseInit).toContain("ENGINE = AggregatingMergeTree");
     expect(clickhouseInit).not.toContain("SummingMergeTree");
+    expect(clickhouseInit).toContain("minState");
+    expect(clickhouseInit).toContain("argMinState");
     expect(clickhouseInit).toContain("TTL exchange_event_time + INTERVAL 90 DAY DELETE");
     expect(environmentTemplate).toContain("MARKET_REDIS_URL=redis://redis:6379/0");
     expect(environmentTemplate).toContain("SEAWEEDFS_S3_ENDPOINT=http://seaweedfs:8333");
