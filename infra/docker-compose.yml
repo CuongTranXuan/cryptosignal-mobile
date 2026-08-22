@@ -58,3 +58,153 @@ services:
       CRYPTO_SIGNAL_RUNNER_INTERVAL_SECONDS: "300"
     working_dir: /app/engines/freqtrade
     command: ["sh", "-c", "while true; do python run_configured_cycle.py --api-base-url \"$${CRYPTO_SIGNAL_API_BASE_URL}\" --limit 500 --quiet >/dev/null 2>&1 || true; sleep \"$${CRYPTO_SIGNAL_RUNNER_INTERVAL_SECONDS}\"; done"]
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: cryptosignal-market-redis
+    profiles: ["market-live"]
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - market_redis_data:/data
+    networks:
+      - market-internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  market-collector:
+    <<: *cryptosignal-service
+    container_name: cryptosignal-market-collector
+    profiles: ["market-live"]
+    restart: unless-stopped
+    depends_on:
+      web:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      MARKET_COLLECTOR_ENABLED: "true"
+      MARKET_REDIS_URL: redis://redis:6379/0
+      MARKET_SPOOL_DIR: /var/lib/cryptosignal/market-spool
+    command: ["node", "dist/scripts/run-market-collector.js"]
+    volumes:
+      - market_collector_spool:/var/lib/cryptosignal/market-spool
+    networks:
+      - default
+      - market-internal
+
+  live-evaluator:
+    <<: *cryptosignal-service
+    container_name: cryptosignal-live-evaluator
+    profiles: ["market-live"]
+    restart: unless-stopped
+    depends_on:
+      web:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      MARKET_EVALUATOR_ENABLED: "true"
+      MARKET_REDIS_URL: redis://redis:6379/0
+      MARKET_EVALUATOR_INTERVAL_MS: "1000"
+    command: ["node", "dist/scripts/run-live-evaluator.js"]
+    networks:
+      - default
+      - market-internal
+
+  mcp-research-adapter:
+    <<: *cryptosignal-service
+    container_name: cryptosignal-mcp-research-adapter
+    profiles: ["mcp-research"]
+    restart: unless-stopped
+    depends_on:
+      web:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      BINANCE_MCP_ENABLED: ${BINANCE_MCP_ENABLED:-false}
+      BINANCE_MCP_PUBLIC_TOOL_IDS: ${BINANCE_MCP_PUBLIC_TOOL_IDS:-}
+    command: ["node", "dist/scripts/run-mcp-research-adapter.js"]
+    networks:
+      - default
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:25.7
+    container_name: cryptosignal-market-clickhouse
+    profiles: ["market-retain", "mcp-research"]
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_DB: marketdata
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-cryptosignal}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-replace-before-production}
+    volumes:
+      - market_clickhouse_data:/var/lib/clickhouse
+      - market_clickhouse_logs:/var/log/clickhouse-server
+      - ./clickhouse/init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - market-internal
+    healthcheck:
+      test: ["CMD-SHELL", "clickhouse-client --query 'SELECT 1'"]
+      interval: 20s
+      timeout: 10s
+      retries: 6
+      start_period: 20s
+
+  seaweedfs:
+    image: chrislusf/seaweedfs:3.90
+    container_name: cryptosignal-market-seaweedfs
+    profiles: ["market-retain", "mcp-research"]
+    restart: unless-stopped
+    command: ["server", "-dir=/data", "-filer", "-s3", "-filer.config=/etc/seaweedfs/filer.toml"]
+    volumes:
+      - market_seaweedfs_data:/data
+      - ./seaweedfs/filer.toml:/etc/seaweedfs/filer.toml:ro
+    networks:
+      - market-internal
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9333/cluster/status >/dev/null 2>&1"]
+      interval: 20s
+      timeout: 10s
+      retries: 6
+      start_period: 20s
+
+  event-writer:
+    <<: *cryptosignal-service
+    container_name: cryptosignal-market-event-writer
+    profiles: ["market-retain"]
+    restart: unless-stopped
+    depends_on:
+      web:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      seaweedfs:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      MARKET_WRITER_ENABLED: "true"
+      MARKET_SPOOL_DIR: /var/lib/cryptosignal/market-spool
+      CLICKHOUSE_URL: http://clickhouse:8123
+      SEAWEEDFS_S3_ENDPOINT: http://seaweedfs:8333
+    command: ["node", "dist/scripts/run-event-writer.js"]
+    volumes:
+      - market_collector_spool:/var/lib/cryptosignal/market-spool
+    networks:
+      - default
+      - market-internal
+
+networks:
+  market-internal:
+    internal: true
+
+volumes:
+  market_redis_data:
+  market_collector_spool:
+  market_clickhouse_data:
+  market_clickhouse_logs:
+  market_seaweedfs_data:

@@ -10,13 +10,17 @@ The browser dashboard and Telegram long polling are dual, shared operational sur
 
 | Area | Files |
 |---|---|
-| Browser UI | `app/(tabs)/index.tsx`, `components/price-history-chart.tsx`, `components/dashboard-auth-screen.tsx` |
+| Browser UI | `app/(tabs)/index.tsx`, `components/price-history-chart.tsx`, `components/live-market-panel.tsx`, `components/dashboard-auth-screen.tsx` |
 | Browser session hook | `hooks/use-dashboard-auth.ts` |
 | Password/session server logic | `server/dashboard-auth.ts` |
 | Protected research API | `server/routers.ts`, `server/_core/context.ts`, `server/_core/trpc.ts` |
 | Database schema and queries | `drizzle/schema.ts`, `server/db.ts` |
 | Engine and candle ingestion | `engines/freqtrade/`, `server/signal-ingest.ts` |
 | Telegram bot | `server/telegram-polling.ts` |
+| Public live-market collector and cache | `server/market-data/binance-collector.ts`, `server/market-data/redis-cache.ts`, `server/market-data/spool.ts` |
+| Durable local replay and archive | `server/market-data/event-writer.ts`, `server/market-data/archive.ts`, `server/market-data/replay.ts` |
+| Unconfirmed live evaluator and alerts | `server/market-data/live-evaluator.ts`, `server/market-data/live-alerts.ts` |
+| Local operations | `scripts/backup-market-data.sh`, `scripts/restore-market-data.sh`, `scripts/verify-market-archive.sh`, `docs/operations/` |
 | Documentation | `README.md`, `docs/` |
 
 ## Authentication requirements
@@ -30,6 +34,10 @@ The first admin requires `DASHBOARD_BOOTSTRAP_TOKEN`. The bootstrap path is one-
 Development starts polling in process. In production, only the `telegram` profile of `infra/docker-compose.yml` may set `TELEGRAM_POLLING_ENABLED=true`; web and runner services must leave polling disabled. This guarantees exactly one `getUpdates` consumer per bot token. Every bot command must verify `TELEGRAM_ALLOWED_USER_IDS`, persist configuration changes through `updateBotConfig`, and record auditable events.
 
 The Freqtrade runner may retrieve public market data and submit closed-candle snapshots and compact runner health through `SIGNAL_INGEST_TOKEN`. The primary production runtime is the `runner` Compose profile, which uses the project-local uv-managed `engines/freqtrade/.venv`; `scripts/run-configured-cycle-quiet.sh` and `infra/cron/cryptosignal.crontab` remain a host-side alternative. Neither option may write routine output or overlap runs. It must not use `freqtrade trade`, exchange API keys, or any order capability.
+
+Live-market services are public-data-only. `market-live` runs the Binance public collector, Redis cache, and evaluator; `market-retain` runs ClickHouse, SeaweedFS, and the writer. Redis, ClickHouse, SeaweedFS, collector, writer, evaluator, and optional MCP adapter ports must remain internal to Compose. Raw events never enter MySQL/TiDB; only control-plane records, health, observations, and archive manifests do. Every live observation and alert must retain the exact `LIVE_UNCONFIRMED` boundary and must never create, suppress, or overwrite a confirmed closed-candle signal.
+
+The optional `mcp-research` profile is disabled by default. It may only reach the fixed public MCP endpoint through the denylist-first adapter, an exact public tool allowlist, and an explicit dashboard-confirmed action. Do not enable connectors, add private Binance credentials, or route MCP output into a worker automatically.
 
 ## Database changes
 
@@ -48,6 +56,8 @@ PYTHONPATH=engines/freqtrade pytest -q engines/freqtrade/tests/test_strategy_con
 
 When touching secrets, validate them only through a lightweight endpoint or test. Do not print secret values. When touching a database model, verify the generated migration. When touching the browser UI, capture and inspect a responsive browser preview if the development renderer is available.
 
+When touching market operations, run the focused script contracts plus `bash -n scripts/backup-market-data.sh scripts/restore-market-data.sh scripts/verify-market-archive.sh scripts/configure-production.sh`. A Docker profile render, backup/restore drill, and 24-hour three-symbol public stream soak require a Docker-capable host with network access. Record measured capacity evidence in `docs/operations/market-data-capacity-report-template.md`; never invent a storage budget.
+
 ## Documentation and task hygiene
 
 Add every new feature, defect, and operational change to `todo.md` before implementation. Mark it complete only after validation. Keep `README.md` accurate for persistent-host deployment and update the relevant document in `docs/` whenever behavior, commands, authentication, or deployment changes.
@@ -55,3 +65,5 @@ Add every new feature, defect, and operational change to `todo.md` before implem
 ## Persistent-host deployment checklist
 
 Use HTTPS, a single same-origin reverse proxy for `/api/`, TLS for the database, protected environment files, regular database backups, one Docker-owned polling service, and either the Compose runner profile or a separate scheduled Freqtrade cycle. Docker Python dependencies must be installed only by `uv sync --no-dev --frozen` into the project virtual environment; do not use `pip install --system` or any global Python installation. Do not rely on the development Metro process for production.
+
+For market-retain backups, use timestamped non-destructive archives. `restore-market-data.sh` requires both `--source` and `--target-empty-dir`, refuses a nonempty target, and only stages data for review. Verify archive checksums before any manual import; never delete an archive object or replace a running volume as part of a restore script.

@@ -1,14 +1,79 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { COOKIE_NAME } from "../shared/const";
+import { LIVE_ASSET_SYMBOLS, LIVE_CONDITION_IDS, type MarketComponentHealth } from "../shared/live-market-types";
 import { CANDLE_PATTERN_RULE_IDS, METHODOLOGY_RULE_IDS, RULE_FAMILY_IDS } from "../shared/signal-types";
-import { getBotConfig, getChartWindow, getRunnerHealth, listAuditEvents, listSignalSnapshots, recordSignalSnapshot, setBotPaused, updateBotConfig } from "./db";
+import { getBotConfig, getChartWindow, getMarketPipelineHealth, getRunnerHealth, listAuditEvents, listLiveObservations, listSignalSnapshots, recordAuditEvent, recordMarketPipelineHealth, recordSignalSnapshot, setBotPaused, updateBotConfig } from "./db";
+import { createConfiguredReplayService, MAX_REPLAY_EVENTS, MAX_REPLAY_WINDOW_MS, MarketCacheUnavailableError, readConfiguredLiveSnapshot } from "./market-data/replay";
+import { createConfiguredPublicMcpClient, McpPublicUnavailableError } from "./market-data/mcp-public-client";
 import { signalSnapshotSchema } from "./signal-ingest";
 import { getCachedTelegramBotLink, getTelegramPollingHealth } from "./telegram-polling";
 import { refreshPublicCandleResearch } from "./public-candle-refresh";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { dashboardProtectedProcedure, publicProcedure, router } from "./_core/trpc";
+
+const liveAssetSymbolSchema = z.enum(LIVE_ASSET_SYMBOLS);
+const marketComponentIds = ["COLLECTOR", "EVALUATOR", "MCP", "WRITER"] as const;
+
+const replayWindowSchema = z
+  .object({
+    assetSymbol: liveAssetSymbolSchema,
+    from: z.string().min(1),
+    to: z.string().min(1),
+    limit: z.number().int().min(1).max(MAX_REPLAY_EVENTS).default(1_000),
+  })
+  .superRefine((value, ctx) => {
+    const from = Date.parse(value.from);
+    const to = Date.parse(value.to);
+    if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) {
+      ctx.addIssue({ code: "custom", message: "Replay requires an increasing ISO-8601 time range" });
+      return;
+    }
+    if (to - from > MAX_REPLAY_WINDOW_MS) {
+      ctx.addIssue({ code: "custom", message: "Replay window cannot exceed seven days" });
+    }
+  });
+
+function safeMcpPreview(value: unknown) {
+  try {
+    const serialized = JSON.stringify(value);
+    return serialized.length > 2_000 ? `${serialized.slice(0, 2_000)}…` : serialized;
+  } catch {
+    return "[unserializable public MCP result]";
+  }
+}
+
+function completeMarketHealth(rows: MarketComponentHealth[]): MarketComponentHealth[] {
+  const byComponent = new Map(rows.map((row) => [row.component, row]));
+  return marketComponentIds.map((component) =>
+    byComponent.get(component) ?? {
+      component,
+      state: "IDLE",
+      lastSuccessAt: null,
+      lastError: null,
+      lagMs: null,
+      summary: {},
+      updatedAt: null,
+    },
+  );
+}
+
+export function sanitizeMarketHealthText(value: string) {
+  return value
+    .replace(/(?:https?|redis|mysql|postgres):\/\/[^\s]+/gi, "[endpoint redacted]")
+    .replace(/(token|password|secret|accesskey|signature|authorization)(\s*[=:]\s*)[^\s,;]+/gi, (_match, key: string, separator: string) => `${key}${separator}[redacted]`);
+}
+
+export function sanitizeMarketHealth(rows: MarketComponentHealth[]) {
+  return completeMarketHealth(rows).map((row) => ({
+    ...row,
+    lastError: row.lastError ? sanitizeMarketHealthText(row.lastError) : null,
+    summary: Object.fromEntries(
+      Object.entries(row.summary).filter(([key]) => !/(secret|password|token|credential|endpoint|url)/i.test(key)),
+    ),
+  }));
+}
 
 export const appRouter = router({
   system: systemRouter,
@@ -26,8 +91,65 @@ export const appRouter = router({
   }),
   market: router({
     chart: dashboardProtectedProcedure
-      .input(z.object({ assetSymbol: z.enum(["BTC/USDT", "ETH/USDT", "BNB/USDT"]), timeframe: z.enum(["30m", "1h", "4h"]), limit: z.number().int().min(30).max(500).default(180) }))
+      .input(z.object({ assetSymbol: liveAssetSymbolSchema, timeframe: z.enum(["30m", "1h", "4h"]), limit: z.number().int().min(30).max(500).default(180) }))
       .query(({ input }) => getChartWindow(input.assetSymbol, input.timeframe, input.limit)),
+    liveSnapshot: dashboardProtectedProcedure.input(z.object({ assetSymbol: liveAssetSymbolSchema })).query(async ({ input }) => {
+      try {
+        return await readConfiguredLiveSnapshot(input.assetSymbol);
+      } catch (error) {
+        if (error instanceof MarketCacheUnavailableError) {
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Live market cache is temporarily unavailable" });
+        }
+        throw error;
+      }
+    }),
+    replay: dashboardProtectedProcedure.input(replayWindowSchema).query(async ({ input }) => {
+      const replay = createConfiguredReplayService();
+      try {
+        return await replay.queryReplayWindow(input);
+      } catch (error) {
+        try {
+          await recordMarketPipelineHealth({
+            component: "WRITER",
+            state: "DEGRADED",
+            lastSuccessAt: null,
+            lastError: error instanceof Error ? error.message : "ClickHouse replay failure",
+            lagMs: null,
+            summary: { operation: "replay" },
+          });
+        } catch {
+          // Preserve the primary ClickHouse failure even if the control-plane database is also unavailable.
+        }
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Historical market replay is temporarily unavailable" });
+      } finally {
+        await replay.close();
+      }
+    }),
+    health: dashboardProtectedProcedure.query(async () => sanitizeMarketHealth(await getMarketPipelineHealth())),
+    liveObservations: dashboardProtectedProcedure.input(z.object({ limit: z.number().int().min(1).max(30).default(10) })).query(({ input }) => listLiveObservations(input.limit)),
+    mcpStatus: dashboardProtectedProcedure.query(async () => {
+      const client = createConfiguredPublicMcpClient();
+      return { enabled: client.enabled, publicToolIds: client.publicToolIds(), automaticRequests: false };
+    }),
+    mcpResearch: dashboardProtectedProcedure.input(z.object({ confirmed: z.literal(true), toolName: z.string().min(1).max(120), args: z.record(z.string(), z.unknown()).default({}) })).mutation(async ({ input }) => {
+      const client = createConfiguredPublicMcpClient();
+      const startedAt = Date.now();
+      try {
+        const result = await client.invokePublicTool(input.toolName, input.args);
+        const latencyMs = Date.now() - startedAt;
+        await recordAuditEvent("MCP_PUBLIC_TOOL_INVOKED", "DASHBOARD", "dashboard", { toolName: input.toolName, args: input.args, latencyMs, status: "SUCCESS" });
+        await recordMarketPipelineHealth({ component: "MCP", state: "RUNNING", lastSuccessAt: new Date(), lastError: null, lagMs: latencyMs, summary: { toolName: input.toolName, status: "SUCCESS" } });
+        return { status: "SUCCESS" as const, toolName: input.toolName, latencyMs, resultPreview: safeMcpPreview(result) };
+      } catch (error) {
+        if (error instanceof McpPublicUnavailableError) {
+          const latencyMs = Date.now() - startedAt;
+          await recordAuditEvent("MCP_PUBLIC_TOOL_UNAVAILABLE", "DASHBOARD", "dashboard", { toolName: input.toolName, latencyMs, status: "UNAVAILABLE" });
+          await recordMarketPipelineHealth({ component: "MCP", state: "DEGRADED", lastSuccessAt: null, lastError: error.message, lagMs: latencyMs, summary: { toolName: input.toolName, status: "UNAVAILABLE" } });
+          return { status: "UNAVAILABLE" as const, toolName: input.toolName, latencyMs };
+        }
+        throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "MCP research request is invalid" });
+      }
+    }),
   }),
   bot: router({
     status: dashboardProtectedProcedure.query(async () => {
@@ -49,7 +171,7 @@ export const appRouter = router({
     config: dashboardProtectedProcedure.query(() => getBotConfig()),
     auditHistory: dashboardProtectedProcedure.input(z.object({ limit: z.number().int().min(1).max(100).default(30) })).query(({ input }) => listAuditEvents(input.limit)),
     refreshPublicData: dashboardProtectedProcedure
-      .input(z.object({ assetSymbol: z.enum(["BTC/USDT", "ETH/USDT", "BNB/USDT"]), timeframe: z.enum(["30m", "1h", "4h"]) }))
+      .input(z.object({ assetSymbol: liveAssetSymbolSchema, timeframe: z.enum(["30m", "1h", "4h"]) }))
       .mutation(({ input }) => refreshPublicCandleResearch(input)),
     controls: router({
       setPaused: dashboardProtectedProcedure.input(z.object({ isPaused: z.boolean() })).mutation(({ input }) => setBotPaused(input.isPaused, "dashboard", "DASHBOARD")),
@@ -69,6 +191,21 @@ export const appRouter = router({
         const current = await getBotConfig();
         return updateBotConfig({ cooldownMinutes: input.cooldownMinutes }, "dashboard", current, "DASHBOARD");
       }),
+      setLiveAlerts: dashboardProtectedProcedure
+        .input(
+          z
+            .object({
+              enabled: z.boolean(),
+              conditionIds: z.array(z.enum(LIVE_CONDITION_IDS)).max(LIVE_CONDITION_IDS.length),
+              threshold: z.number().min(0).max(1),
+              cooldownMinutes: z.number().int().min(1).max(1440),
+            })
+            .refine((value) => !value.enabled || value.conditionIds.length > 0, "Enabled live alerts require at least one condition"),
+        )
+        .mutation(async ({ input }) => {
+          const current = await getBotConfig();
+          return updateBotConfig({ liveAlerts: input }, "dashboard", current, "DASHBOARD");
+        }),
       setRuleFamilies: dashboardProtectedProcedure.input(z.object({ ruleFamilies: z.array(z.enum(RULE_FAMILY_IDS)).max(7) })).mutation(async ({ input }) => {
         const current = await getBotConfig();
         return updateBotConfig({ ruleFamilies: input.ruleFamilies }, "dashboard", current, "DASHBOARD");

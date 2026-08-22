@@ -1,27 +1,16 @@
-# CryptoSignal Documentation Package
+# CryptoSignal Documentation
 
-This documentation set is the **implementation source of truth** for CryptoSignal. The product is a Telegram-controlled, signals-only OHLCV analysis system with a protected browser dashboard. It does not place orders, store exchange private keys, or manage funds.
+CryptoSignal is a **signals-only, public-market research system**. It analyzes completed OHLCV candles and can observe public Binance market streams in real time. It has no exchange private keys, account access, order execution, portfolio controls, or personalized financial advice.
 
-## Reading order
+## Current documentation map
 
-| Order | File | Review purpose |
-|---:|---|---|
-| 1 | `FRAMEWORK_DECISION.md` | The maintainable foundation: **Freqtrade + FastAPI + aiogram**, with a strict no-fork boundary. |
-| 2 | `crypto_signal_bot_design.md` | Product scope, rule families, Telegram UX, architecture, evaluation, and security requirements. |
-| 3 | `IMPLEMENTATION_PLAYBOOK.md` | Agent-ready repository layout, interfaces, milestones, test gates, deployment boundary, and acceptance criteria. |
-| 4 | `framework_architecture.png` and `framework_architecture.mmd` | Revised component boundary diagram. The Mermaid file is the editable source. |
-| 5 | `crypto_signal_bot_research_notes.md` | Verified commercial, open-source, methodology, and integration research. |
-| 6 | `mobile_interface_design.md` | Historical mobile companion planning reference; superseded by the browser-first implementation. |
-| 7 | `implementation_backlog.md` | Current completed and planned work register. |
-| 8 | `crypto_signal_bot_architecture.png` and `crypto_signal_bot_architecture.mmd` | Original product architecture diagram and editable source. |
-| 9 | `LOCAL_OPERATION.md` | Current command-line validation steps, environment requirements, and durable-host boundary. |
-| 10 | `CHARTING_AND_SCENARIOS.md` | Candle-history model, browser chart behavior, conditional research-outlook contract, and operations. |
-| 11 | `WEB_AND_TELEGRAM_SURFACES.md` | Browser-first dashboard scope, Telegram command reference, and single-poller operating boundary. |
-| 12 | `AUTHENTICATION.md` | Username/password session design, one-time owner bootstrap, and credential operations. |
-| 13 | `CURRENT_ARCHITECTURE.md` | Current browser-first, Telegram-first implementation and historical-document boundary. |
+| Document | Purpose | Authority |
+|---|---|---|
+| [`../README.md`](../README.md) | Installation, environment configuration, deployment profiles, backup, restore, and validation commands. | Primary operator guide. |
+| [`../AGENTS.md`](../AGENTS.md) | Mandatory coding boundaries, file ownership map, and validation requirements. | Primary agent guide. |
+| [`CURRENT_ARCHITECTURE.md`](CURRENT_ARCHITECTURE.md) | Current runtime design, data lifecycle, safety boundaries, and control surfaces. | Primary architecture guide. |
+| [`operations/market-data-capacity-report-template.md`](operations/market-data-capacity-report-template.md) | Evidence template for the required three-symbol storage and replay pilot. | Required before capacity decisions. |
+| [`research/2026-08-22-binance-superpowers-source-notes.md`](research/2026-08-22-binance-superpowers-source-notes.md) | Historical source notes for the public-data architecture decision. | Reference only. |
+| [`superpowers/plans/2026-08-22-binance-public-realtime-market-data.md`](superpowers/plans/2026-08-22-binance-public-realtime-market-data.md) | Completed implementation plan and acceptance rationale. | Historical implementation record. |
 
-## Non-negotiable implementation rules
-
-The coding team must pin framework and dependency versions, integrate Freqtrade as an unmodified upstream dependency, and keep all custom logic in the defined adapter, strategy, control-plane, and Telegram gateway modules. A signal must originate from **closed candles only**, contain a reproducible evidence ledger, and be persisted before any Telegram delivery attempt. The Telegram gateway is the authoritative control interface; the protected browser dashboard only mirrors read-only state and links users back to Telegram.
-
-Any proposal for exchange execution, balance retrieval, leverage, or private keys is a separate product change. It requires an explicit security, risk, legal, and user-consent design review before implementation.
+The former design proposals, framework comparisons, interface sketches, and overlapping feature backlogs were removed because they described superseded mobile-first or Telegram-authoritative designs. Use the documents above and the codebase as the only current sources of truth.
