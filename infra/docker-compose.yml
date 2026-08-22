@@ -75,6 +75,28 @@ services:
       timeout: 5s
       retries: 5
 
+  market-collector:
+    <<: *cryptosignal-service
+    container_name: cryptosignal-market-collector
+    profiles: ["market-live"]
+    restart: unless-stopped
+    depends_on:
+      web:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      MARKET_COLLECTOR_ENABLED: "true"
+      MARKET_REDIS_URL: redis://redis:6379/0
+      MARKET_SPOOL_DIR: /var/lib/cryptosignal/market-spool
+    command: ["node", "dist/scripts/run-market-collector.js"]
+    volumes:
+      - market_collector_spool:/var/lib/cryptosignal/market-spool
+    networks:
+      - default
+      - market-internal
+
   clickhouse:
     image: clickhouse/clickhouse-server:25.7
     container_name: cryptosignal-market-clickhouse
@@ -121,6 +143,7 @@ networks:
 
 volumes:
   market_redis_data:
+  market_collector_spool:
   market_clickhouse_data:
   market_clickhouse_logs:
   market_seaweedfs_data:
