@@ -103,6 +103,7 @@
 - [x] Complete isolated live-alert configuration, control-plane persistence, health, observations, and archive-manifest support with a non-destructive migration.
 - [x] Provision internal Redis, ClickHouse, and SeaweedFS Docker profiles with a disabled-by-default market-data worker foundation.
 - [x] Implement the durable local at-least-once market-event spool with separate ClickHouse and archive acknowledgements.
+- [x] Normalize approved public Binance stream payloads into lossless canonical events and cache the latest snapshots in Redis.
 - [x] Replace global Python dependency installation with uv sync and a project virtual environment in Docker deployment.
 - [x] Provide host, VPS, and local Docker deployment configuration for the web application and optional signal runner.
 - [x] Update deployment documentation and scripts for uv-managed environment setup.
