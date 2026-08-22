@@ -122,4 +122,4 @@
 - [x] Complete Task 11 disabled-by-default public MCP research adapter with signals-only denylist protections.
 - [x] Complete Task 12 local operations hardening for market-data backup, restore, and health monitoring.
 - [ ] Run final integration validation and prepare the reviewed feature branch for merge.
-- [ ] Consolidate documentation to the completed live-market architecture and remove redundant or superseded documents without losing required operating guidance.
+- [x] Consolidate documentation to the completed live-market architecture and remove redundant or superseded documents without losing required operating guidance.
