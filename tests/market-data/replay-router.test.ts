@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createMarketCache } from "../../server/market-data/redis-cache";
 import { createMarketReplayService } from "../../server/market-data/replay";
-import { appRouter } from "../../server/routers";
+import { appRouter, sanitizeMarketHealth } from "../../server/routers";
 
 function createCaller() {
   return appRouter.createCaller({ user: null, dashboardUser: { id: 1, username: "test-owner", role: "admin" }, req: {} as never, res: {} as never });
@@ -42,6 +42,20 @@ describe("live market replay router", () => {
     const health = await market.health();
     expect(health.map((entry) => entry.component)).toEqual(["COLLECTOR", "EVALUATOR", "MCP", "WRITER"]);
     expect(JSON.stringify(health)).not.toMatch(/secret|password|token/i);
+  });
+
+  it("redacts endpoint and credential-like content from market health errors before API presentation", () => {
+    const health = sanitizeMarketHealth([{
+      component: "WRITER",
+      state: "DEGRADED",
+      lastSuccessAt: null,
+      lastError: "redis://cache.internal:6379 password=archive-secret X-Amz-Signature=abc",
+      lagMs: null,
+      summary: { endpoint: "http://clickhouse:8123", operation: "replay" },
+      updatedAt: null,
+    }]);
+
+    expect(JSON.stringify(health)).not.toMatch(/redis:\/\/|clickhouse|archive-secret|X-Amz-Signature=abc/i);
   });
 
   it("marks a Redis-only snapshot stale when its cache has no live event and does not call any external market source", async () => {

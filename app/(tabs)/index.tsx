@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { ActivityIndicator, LayoutChangeEvent, Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { DashboardAuthScreen } from "@/components/dashboard-auth-screen";
+import { LiveMarketPanel } from "@/components/live-market-panel";
 import { OperationalAuditPanel } from "@/components/operational-audit-panel";
 import { PriceHistoryChart } from "@/components/price-history-chart";
 import { ScreenContainer } from "@/components/screen-container";
@@ -10,6 +11,7 @@ import { useDashboardAuth } from "@/hooks/use-dashboard-auth";
 import { useColors } from "@/hooks/use-colors";
 import { useI18n } from "@/lib/i18n";
 import { trpc } from "@/lib/trpc";
+import { LIVE_CONDITION_IDS } from "@/shared/live-market-types";
 import { CANDLE_PATTERNS, METHODOLOGY_RULES } from "@/shared/signal-types";
 
 const ASSETS = ["BTC/USDT", "ETH/USDT", "BNB/USDT"] as const;
@@ -24,6 +26,7 @@ const RULE_FAMILIES = [
   { id: "ELLIOTT_EXPERIMENTAL", label: "Elliott (experimental)" },
 ] as const;
 const PATTERN_GROUPS = ["Single-candle", "Two-candle", "Three-candle"] as const;
+const LIVE_CONDITION_LABELS = Object.fromEntries(LIVE_CONDITION_IDS.map((condition) => [condition, `${condition.replace(/_V1$/, "").replaceAll("_", " ")} · unconfirmed`]));
 type ControlNotice = { tone: "success" | "error"; text: string } | null;
 
 export default function WebDashboard() {
@@ -40,11 +43,15 @@ function AuthenticatedDashboard({ username, onSignOut }: { username: string; onS
   const [assetSymbol, setAssetSymbol] = useState<(typeof ASSETS)[number]>("BTC/USDT");
   const [timeframe, setTimeframe] = useState<(typeof TIMEFRAMES)[number]>("1h");
   const [cooldownDraft, setCooldownDraft] = useState("60");
+  const [liveCooldownDraft, setLiveCooldownDraft] = useState("15");
   const [controlNotice, setControlNotice] = useState<ControlNotice>(null);
   const status = trpc.bot.status.useQuery(undefined, { refetchInterval: 30_000, refetchIntervalInBackground: true });
   const configuration = trpc.bot.config.useQuery();
   const latest = trpc.signal.latest.useQuery();
   const chart = trpc.market.chart.useQuery({ assetSymbol, timeframe, limit: 180 });
+  const liveSnapshot = trpc.market.liveSnapshot.useQuery({ assetSymbol }, { refetchInterval: 5_000, refetchIntervalInBackground: true });
+  const liveHealth = trpc.market.health.useQuery(undefined, { refetchInterval: 5_000, refetchIntervalInBackground: true });
+  const liveObservations = trpc.market.liveObservations.useQuery({ limit: 1 }, { refetchInterval: 5_000, refetchIntervalInBackground: true });
   const refreshSharedState = async () => {
     await Promise.all([configuration.refetch(), status.refetch()]);
   };
@@ -61,6 +68,7 @@ function AuthenticatedDashboard({ username, onSignOut }: { username: string; onS
   const timeframesMutation = trpc.bot.controls.setTimeframes.useMutation({ onSuccess: () => confirmControl("Timeframe selection saved for the web app and optional Telegram integration."), onError: reportControlError });
   const thresholdMutation = trpc.bot.controls.setThreshold.useMutation({ onSuccess: () => confirmControl("Alert threshold updated."), onError: reportControlError });
   const cooldownMutation = trpc.bot.controls.setCooldown.useMutation({ onSuccess: () => confirmControl("Alert cooldown updated."), onError: reportControlError });
+  const liveAlertsMutation = trpc.bot.controls.setLiveAlerts.useMutation({ onSuccess: () => confirmControl("Unconfirmed live observation controls updated."), onError: reportControlError });
   const rulesMutation = trpc.bot.controls.setRuleFamilies.useMutation({ onSuccess: () => confirmControl("Research rule families updated."), onError: reportControlError });
   const patternsMutation = trpc.bot.controls.setEnabledPatterns.useMutation({ onSuccess: () => confirmControl("Named candlestick pattern selection updated."), onError: reportControlError });
   const methodologiesMutation = trpc.bot.controls.setEnabledMethodologies.useMutation({ onSuccess: () => confirmControl("Methodology rule selection updated."), onError: reportControlError });
@@ -73,11 +81,14 @@ function AuthenticatedDashboard({ username, onSignOut }: { username: string; onS
   });
   const config = configuration.data;
   const configuredCooldownMinutes = config?.cooldownMinutes;
-  const isSaving = pauseMutation.isPending || watchlistMutation.isPending || timeframesMutation.isPending || thresholdMutation.isPending || cooldownMutation.isPending || rulesMutation.isPending || patternsMutation.isPending || methodologiesMutation.isPending || publicRefreshMutation.isPending;
+  const isSaving = pauseMutation.isPending || watchlistMutation.isPending || timeframesMutation.isPending || thresholdMutation.isPending || cooldownMutation.isPending || liveAlertsMutation.isPending || rulesMutation.isPending || patternsMutation.isPending || methodologiesMutation.isPending || publicRefreshMutation.isPending;
 
   useEffect(() => {
     if (configuredCooldownMinutes !== undefined) setCooldownDraft(String(configuredCooldownMinutes));
   }, [configuredCooldownMinutes]);
+  useEffect(() => {
+    if (config?.liveAlerts.cooldownMinutes !== undefined) setLiveCooldownDraft(String(config.liveAlerts.cooldownMinutes));
+  }, [config?.liveAlerts.cooldownMinutes]);
 
   const telegramUrl = status.data?.telegramBotUrl;
   const openTelegram = async () => telegramUrl && Linking.openURL(telegramUrl);
@@ -89,6 +100,14 @@ function AuthenticatedDashboard({ username, onSignOut }: { username: string; onS
       return;
     }
     setControlNotice({ tone: "error", text: "Cooldown must be a whole number from 1 to 1,440 minutes." });
+  };
+  const saveLiveCooldown = () => {
+    const cooldownMinutes = Number(liveCooldownDraft);
+    if (config && Number.isInteger(cooldownMinutes) && cooldownMinutes >= 1 && cooldownMinutes <= 1440) {
+      liveAlertsMutation.mutate({ ...config.liveAlerts, cooldownMinutes });
+      return;
+    }
+    setControlNotice({ tone: "error", text: t("cooldownValidation") });
   };
 
   return <ScreenContainer edges={["top", "left", "right", "bottom"]}><ScrollView contentContainerStyle={styles.page} showsVerticalScrollIndicator={false}><View style={styles.shell}>
@@ -106,6 +125,7 @@ function AuthenticatedDashboard({ username, onSignOut }: { username: string; onS
     {status.data ? <View style={[styles.status, { backgroundColor: colors.surface, borderColor: colors.border }]}><View style={[styles.statusDot, { backgroundColor: status.data.isPaused ? colors.warning : colors.success }]} /><View style={styles.statusMain}><Text style={[styles.statusTitle, { color: colors.foreground }]}>{status.data.isPaused ? "Signal processing paused" : "Monitoring completed candles"}</Text><Text style={[styles.statusCopy, { color: colors.muted }]}>{status.data.watchlist.join(" · ")} · {status.data.timeframes.join(" · ")} · runner {status.data.runnerHealth.state.toLowerCase()}</Text></View><Text style={[styles.noExecution, { color: colors.primary }]}>NO EXECUTION</Text></View> : null}
     <View style={styles.grid}>
       <View style={styles.primaryColumn}>
+        <LiveMarketPanel snapshot={liveSnapshot.data} health={liveHealth.data ?? []} observation={liveObservations.data?.[0] ?? null} />
         <Panel title={t("historicalEvidence")} subtitle={t("historicalEvidenceSubtitle")} colors={colors}>
           <Segmented items={ASSETS} selected={assetSymbol} onSelect={setAssetSymbol} colors={colors} />
           <Segmented items={TIMEFRAMES} selected={timeframe} onSelect={setTimeframe} colors={colors} />
@@ -125,6 +145,7 @@ function AuthenticatedDashboard({ username, onSignOut }: { username: string; onS
             <ControlGroup label="Timeframes" help="30m, 1h, and 4h use closed candles only."><ToggleGrid items={TIMEFRAMES} values={config.timeframes} onToggle={(value) => { const next = toggleConfigValue(config.timeframes, value); if (next.length) timeframesMutation.mutate({ timeframes: next as (typeof TIMEFRAMES)[number][] }); }} colors={colors} disabled={isSaving} /></ControlGroup>
             <ControlGroup label={`Alert threshold · ${Math.round(config.alertThreshold * 100)}%`} help="Minimum normalized evidence score before an enabled delivery integration is attempted."><ThresholdRail value={config.alertThreshold} onChange={(alertThreshold) => thresholdMutation.mutate({ alertThreshold })} colors={colors} disabled={isSaving} /></ControlGroup>
             <ControlGroup label="Alert cooldown" help="Minutes before the same signal state can be alerted again."><View style={styles.cooldownRow}><TextInput value={cooldownDraft} onChangeText={setCooldownDraft} onSubmitEditing={saveCooldown} keyboardType="number-pad" accessibilityLabel="Alert cooldown in minutes" style={[styles.cooldownInput, { color: colors.foreground, backgroundColor: colors.background, borderColor: colors.border }]} /><Text style={[styles.cooldownUnit, { color: colors.muted }]}>min</Text><Pressable disabled={isSaving} onPress={saveCooldown} style={({ pressed }) => [styles.saveButton, { backgroundColor: colors.primary }, pressed && styles.pressed, isSaving && styles.disabled]}><Text style={styles.saveButtonText}>Save</Text></Pressable></View></ControlGroup>
+            <ControlGroup label={t("liveObservations")} help={t("liveObservationsHelp")}><Pressable accessibilityLabel={config.liveAlerts.enabled ? t("liveDisable") : t("liveEnable")} disabled={isSaving} onPress={() => liveAlertsMutation.mutate({ ...config.liveAlerts, enabled: !config.liveAlerts.enabled })} style={({ pressed }) => [styles.pauseButton, { backgroundColor: config.liveAlerts.enabled ? colors.warning : colors.success }, pressed && styles.pressed, isSaving && styles.disabled]}><Text style={styles.pauseButtonText}>{config.liveAlerts.enabled ? t("liveDisable") : t("liveEnable")}</Text></Pressable><ControlGroup label={t("liveConditions")} help={t("liveUnconfirmedBadge")}><ToggleGrid items={LIVE_CONDITION_IDS} labels={LIVE_CONDITION_LABELS} values={config.liveAlerts.conditionIds} onToggle={(value) => { const next = toggleConfigValue(config.liveAlerts.conditionIds, value); if (next.length || !config.liveAlerts.enabled) liveAlertsMutation.mutate({ ...config.liveAlerts, conditionIds: next as typeof config.liveAlerts.conditionIds }); }} colors={colors} disabled={isSaving} /></ControlGroup><ControlGroup label={t("liveThreshold", { value: Math.round(config.liveAlerts.threshold * 100) })} help={t("liveUnconfirmedBadge")}><ThresholdRail value={config.liveAlerts.threshold} onChange={(threshold) => liveAlertsMutation.mutate({ ...config.liveAlerts, threshold })} colors={colors} disabled={isSaving} /></ControlGroup><ControlGroup label={t("liveCooldown")} help={t("liveUnconfirmedBadge")}><View style={styles.cooldownRow}><TextInput value={liveCooldownDraft} onChangeText={setLiveCooldownDraft} onSubmitEditing={saveLiveCooldown} keyboardType="number-pad" accessibilityLabel={t("liveCooldown")} style={[styles.cooldownInput, { color: colors.foreground, backgroundColor: colors.background, borderColor: colors.border }]} /><Text style={[styles.cooldownUnit, { color: colors.muted }]}>{t("minutes")}</Text><Pressable disabled={isSaving} onPress={saveLiveCooldown} style={({ pressed }) => [styles.saveButton, { backgroundColor: colors.primary }, pressed && styles.pressed, isSaving && styles.disabled]}><Text style={styles.saveButtonText}>{t("save")}</Text></Pressable></View></ControlGroup></ControlGroup>
             <ControlGroup label="Rule families" help="Enables explainable research evidence families; experimental proxies are clearly labeled."><ToggleGrid items={RULE_FAMILIES.map((family) => family.id)} labels={Object.fromEntries(RULE_FAMILIES.map((family) => [family.id, family.label]))} values={config.ruleFamilies} onToggle={(value) => rulesMutation.mutate({ ruleFamilies: toggleConfigValue(config.ruleFamilies, value) as (typeof RULE_FAMILIES)[number]["id"][] })} colors={colors} disabled={isSaving} /></ControlGroup>
             <ControlGroup label={`Named candlestick patterns · ${config.enabledPatterns.length}/${CANDLE_PATTERNS.length}`} help="Only enabled, closed-candle patterns are evaluated. Keep the Candle patterns family enabled to use these selections.">
               {PATTERN_GROUPS.map((group) => { const patterns = CANDLE_PATTERNS.filter((pattern) => pattern.group === group); return <View key={group} style={styles.ruleSubgroup}><Text style={[styles.ruleSubgroupTitle, { color: colors.muted }]}>{group}</Text><ToggleGrid items={patterns.map((pattern) => pattern.id)} labels={Object.fromEntries(patterns.map((pattern) => [pattern.id, pattern.label]))} values={config.enabledPatterns} onToggle={(value) => { const next = toggleConfigValue(config.enabledPatterns, value); if (next.length) patternsMutation.mutate({ enabledPatterns: next }); }} colors={colors} disabled={isSaving} /></View>; })}
