@@ -13,6 +13,7 @@ const config: BotConfigView = {
   ruleFamilies: ["TREND", "MOMENTUM", "VOLUME", "CANDLE_PATTERN"],
   enabledPatterns: [...CANDLE_PATTERN_RULE_IDS],
   enabledMethodologies: [...METHODOLOGY_RULE_IDS],
+  liveAlerts: { enabled: false, conditionIds: [], threshold: 0.65, cooldownMinutes: 15 },
   alertThreshold: 0.35,
   cooldownMinutes: 60,
   quietHours: { start: "22:00", end: "07:00", timezone: "UTC" },
