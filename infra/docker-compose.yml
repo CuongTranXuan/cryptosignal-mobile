@@ -97,6 +97,26 @@ services:
       - default
       - market-internal
 
+  live-evaluator:
+    <<: *cryptosignal-service
+    container_name: cryptosignal-live-evaluator
+    profiles: ["market-live"]
+    restart: unless-stopped
+    depends_on:
+      web:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      MARKET_EVALUATOR_ENABLED: "true"
+      MARKET_REDIS_URL: redis://redis:6379/0
+      MARKET_EVALUATOR_INTERVAL_MS: "1000"
+    command: ["node", "dist/scripts/run-live-evaluator.js"]
+    networks:
+      - default
+      - market-internal
+
   clickhouse:
     image: clickhouse/clickhouse-server:25.7
     container_name: cryptosignal-market-clickhouse

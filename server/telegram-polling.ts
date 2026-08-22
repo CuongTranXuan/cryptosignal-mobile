@@ -122,6 +122,14 @@ async function sendMessage(chatId: number, text: string) {
   return telegramRequest("sendMessage", { chat_id: chatId, text, disable_web_page_preview: true });
 }
 
+export function getAllowedTelegramRecipientIds() {
+  return [...allowedUserIds()].map(Number).filter(Number.isSafeInteger);
+}
+
+export async function sendTelegramMessage(chatId: number, text: string) {
+  return sendMessage(chatId, text);
+}
+
 export async function deliverSignalAlert(snapshot: SignalSnapshotInput) {
   const config = await getBotConfig();
   if (config.isPaused) return { delivered: false, reason: "PAUSED" as const };
