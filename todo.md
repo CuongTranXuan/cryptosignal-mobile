@@ -87,7 +87,7 @@
 - [x] Review the requested Binance MCP and real-time market-data capabilities without activating external runtime access.
 - [x] Evaluate and package the requested Superpowers brainstorming and reusable skill guidance for repository use.
 - [x] Produce a reviewable Binance MCP and real-time market-data architecture, security, and implementation plan under `docs/`.
-- [ ] Validate, checkpoint, and synchronize the reviewed planning materials to GitHub after owner approval.
+- [x] Validate, checkpoint, and synchronize the reviewed planning materials to GitHub after owner approval.
 - [x] Define a public-only Binance WebSocket live-data scope for BTC/USDT, ETH/USDT, and BNB/USDT, retaining the existing signals-only boundary.
 - [x] Design separated confirmed closed-candle and unconfirmed live-observation alert paths for dashboard and Telegram.
 - [x] Compare durable replay storage options for at least two years of event-level public data, including database, object storage, and file-oriented alternatives.
@@ -98,7 +98,7 @@
 - [x] Validate, isolate, checkpoint, and synchronize the imported Superpowers inventory without application-runtime references.
 - [x] Create a detailed, test-driven, phased implementation plan for the approved self-hosted Binance real-time market-data architecture.
 - [x] Self-review, validate, checkpoint, and synchronize the detailed Binance implementation plan before execution begins.
-- [ ] Execute the approved Binance market-data plan through isolated test-first tasks with an atomic GitHub commit after each validated deliverable.
+- [x] Execute the approved Binance market-data plan through isolated test-first tasks with an atomic GitHub commit after each validated deliverable.
 - [x] Complete Phase 0: public live-market contracts, deterministic fixtures, and dependency boundaries without enabling a live connection.
 - [x] Complete isolated live-alert configuration, control-plane persistence, health, observations, and archive-manifest support with a non-destructive migration.
 - [x] Provision internal Redis, ClickHouse, and SeaweedFS Docker profiles with a disabled-by-default market-data worker foundation.
@@ -121,5 +121,5 @@
 - [x] Complete Task 10 dashboard and Telegram live-observation controls across both configured surfaces.
 - [x] Complete Task 11 disabled-by-default public MCP research adapter with signals-only denylist protections.
 - [x] Complete Task 12 local operations hardening for market-data backup, restore, and health monitoring.
-- [ ] Run final integration validation and prepare the reviewed feature branch for merge.
+- [x] Run final integration validation and prepare the reviewed feature branch for merge.
 - [x] Consolidate documentation to the completed live-market architecture and remove redundant or superseded documents without losing required operating guidance.
