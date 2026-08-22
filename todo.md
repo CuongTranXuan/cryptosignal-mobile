@@ -117,7 +117,7 @@
 - [x] Validate and synchronize configurable pattern alerts and methodology controls to GitHub.
 - [x] Complete Task 7 production wiring for ClickHouse persistence, verified SeaweedFS Parquet archives, and replay-safe spool acknowledgement.
 - [x] Complete Task 8 bounded ClickHouse replay API with request limits and public-data safeguards.
-- [ ] Complete Task 9 live-condition evaluator that emits only LIVE_UNCONFIRMED observations and alerts.
+- [x] Complete Task 9 live-condition evaluator that emits only LIVE_UNCONFIRMED observations and alerts.
 - [ ] Complete Task 10 dashboard and Telegram live-observation controls across both configured surfaces.
 - [ ] Complete Task 11 disabled-by-default public MCP research adapter with signals-only denylist protections.
 - [ ] Complete Task 12 local operations hardening for market-data backup, restore, and health monitoring.
