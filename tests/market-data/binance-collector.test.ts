@@ -98,6 +98,31 @@ describe("public Binance combined-stream collector", () => {
     await collector.stop();
   });
 
+  it("drops a valid but non-configured kline interval received outside its explicit subscription", async () => {
+    const deps = createDependencies();
+    const collector = createBinanceCollector({
+      ...deps,
+      config: { assetSymbols: ["BNB/USDT"], timeframes: ["30m"], endpoint: "ws://test.local/stream" },
+    });
+    await collector.start();
+    deps.socket.emit(
+      "message",
+      JSON.stringify({
+        ...bnbOpenThirtyMinuteKlineCombinedStream,
+        stream: "bnbusdt@kline_1h",
+        data: {
+          ...bnbOpenThirtyMinuteKlineCombinedStream.data,
+          k: { ...bnbOpenThirtyMinuteKlineCombinedStream.data.k, i: "1h" },
+        },
+      }),
+    );
+    await flushCollector();
+
+    expect(deps.spool.append).not.toHaveBeenCalled();
+    expect(deps.cache.writeLatest).not.toHaveBeenCalled();
+    await collector.stop();
+  });
+
   it("records degraded health but continues from the durable spool path when Redis fails", async () => {
     const deps = createDependencies();
     deps.cache.writeLatest.mockRejectedValueOnce(new Error("redis down"));

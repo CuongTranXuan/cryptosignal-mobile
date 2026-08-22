@@ -88,6 +88,13 @@ export function createBinanceCollector(dependencies: CollectorDependencies): Bin
       const input = JSON.parse(value) as unknown;
       const event = normalize(input, { ingestedAt: now().toISOString(), sourceConnectionId: connectionId });
       if (!event) return;
+      if (!dependencies.config.assetSymbols.includes(event.assetSymbol)) return;
+      if (
+        event.streamType === "KLINE_UPDATE" &&
+        (typeof event.payload.interval !== "string" || !dependencies.config.timeframes.includes(event.payload.interval as MarketCollectorConfig["timeframes"][number]))
+      ) {
+        return;
+      }
 
       await dependencies.spool.append(event);
       try {
