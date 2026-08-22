@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_BOT_CONFIG, listLiveObservations, recordLiveObservation, updateBotConfig } from "../../server/db";
+import { DEFAULT_BOT_CONFIG, listLiveObservations, parseLiveAlerts, recordLiveObservation, updateBotConfig } from "../../server/db";
 
 describe("live observation configuration", () => {
   it("persists live cooldown independently from confirmed cooldown", async () => {
@@ -21,6 +21,12 @@ describe("live observation configuration", () => {
 
     expect(next.cooldownMinutes).toBe(60);
     expect(next.liveAlerts.cooldownMinutes).toBe(15);
+  });
+
+  it("falls back to the isolated default policy when persisted live alert JSON is invalid", () => {
+    expect(parseLiveAlerts('{"enabled":true,"conditionIds":["NOT_ALLOWED"],"threshold":2,"cooldownMinutes":0}')).toEqual(
+      DEFAULT_BOT_CONFIG.liveAlerts,
+    );
   });
 
   it("records an unconfirmed observation once and keeps its evidence out of audit-facing fields", async () => {
