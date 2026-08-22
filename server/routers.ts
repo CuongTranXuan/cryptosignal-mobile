@@ -6,6 +6,7 @@ import { CANDLE_PATTERN_RULE_IDS, METHODOLOGY_RULE_IDS, RULE_FAMILY_IDS } from "
 import { getBotConfig, getChartWindow, getMarketPipelineHealth, getRunnerHealth, listAuditEvents, listLiveObservations, listSignalSnapshots, recordAuditEvent, recordMarketPipelineHealth, recordSignalSnapshot, setBotPaused, updateBotConfig } from "./db";
 import { createConfiguredReplayService, MAX_REPLAY_EVENTS, MAX_REPLAY_WINDOW_MS, MarketCacheUnavailableError, readConfiguredLiveSnapshot } from "./market-data/replay";
 import { createConfiguredPublicMcpClient, McpPublicUnavailableError } from "./market-data/mcp-public-client";
+import { createConfiguredPublicQuoteService, PublicQuoteUnavailableError } from "./market-data/public-quote";
 import { signalSnapshotSchema } from "./signal-ingest";
 import { getCachedTelegramBotLink, getTelegramPollingHealth } from "./telegram-polling";
 import { refreshPublicCandleResearch } from "./public-candle-refresh";
@@ -99,6 +100,16 @@ export const appRouter = router({
       } catch (error) {
         if (error instanceof MarketCacheUnavailableError) {
           throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Live market cache is temporarily unavailable" });
+        }
+        throw error;
+      }
+    }),
+    liveQuote: dashboardProtectedProcedure.input(z.object({ assetSymbol: liveAssetSymbolSchema })).query(async ({ input }) => {
+      try {
+        return await createConfiguredPublicQuoteService().getQuote(input.assetSymbol);
+      } catch (error) {
+        if (error instanceof PublicQuoteUnavailableError) {
+          throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: error.message });
         }
         throw error;
       }
