@@ -242,16 +242,21 @@ class LocalMarketSpool implements MarketSpool {
     this.assertSegmentPath(segmentPath);
     const contents = await readFile(segmentPath, "utf8");
     const lines = contents.split("\n");
-    const hasTrailingNewline = contents.endsWith("\n");
-    const completeLineCount = hasTrailingNewline ? lines.length - 1 : lines.length - 1;
     const events: LiveMarketEvent[] = [];
 
-    for (let index = 0; index < completeLineCount; index += 1) {
+    for (let index = 0; index < lines.length; index += 1) {
       const line = lines[index];
       if (!line) {
         continue;
       }
-      events.push(JSON.parse(line) as LiveMarketEvent);
+      try {
+        events.push(JSON.parse(line) as LiveMarketEvent);
+      } catch (error) {
+        if (index === lines.length - 1) {
+          break;
+        }
+        throw error;
+      }
     }
 
     return events;
