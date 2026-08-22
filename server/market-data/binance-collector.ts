@@ -32,6 +32,10 @@ export type BinanceCollector = {
 const MAX_CONNECTION_AGE_MS = 23 * 60 * 60 * 1_000 + 50 * 60 * 1_000;
 const MAX_RECONNECT_DELAY_MS = 60_000;
 
+function unrefTimer(timer: ReturnType<typeof setTimeout>) {
+  (timer as unknown as { unref?: () => void }).unref?.();
+}
+
 export function createBinanceCollector(dependencies: CollectorDependencies): BinanceCollector {
   const now = dependencies.now ?? (() => new Date());
   const normalize = dependencies.normalize ?? normalizeBinanceCombinedStream;
@@ -79,7 +83,7 @@ export function createBinanceCollector(dependencies: CollectorDependencies): Bin
       reconnectTimer = null;
       void connect();
     }, delayMs);
-    reconnectTimer.unref?.();
+    unrefTimer(reconnectTimer);
   };
 
   const handleMessage = async (rawMessage: unknown) => {
@@ -140,7 +144,7 @@ export function createBinanceCollector(dependencies: CollectorDependencies): Bin
       scheduleReconnect();
     });
     rotationTimer = schedule(() => socket?.close(), MAX_CONNECTION_AGE_MS);
-    rotationTimer.unref?.();
+    unrefTimer(rotationTimer);
   };
 
   return {
