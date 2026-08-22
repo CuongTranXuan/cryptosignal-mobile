@@ -37,3 +37,5 @@
 - Task 2: complete (focused persistence tests, Drizzle generation/migration, TypeScript, and whitespace checks pass; confirmed and live cooldown helpers query distinct audit actions)
 - Task 3: fix round 1/5 (added aggregate-state function regression coverage after independent review; commits `1a9a5f3..4edc901`)
 - Task 3: complete (Compose contracts, full test suite, TypeScript, lint, and whitespace checks pass; Docker Compose rendering remains an external acceptance gate because Docker is unavailable in this sandbox)
+- Task 4: fix round 1/5 (preserved valid final NDJSON records without a trailing newline; commits `cb34539..3505212`)
+- Task 4: complete (focused spool recovery tests, full test suite, TypeScript, lint, and whitespace checks pass; segments remain until both ClickHouse and archive acknowledgements exist)
