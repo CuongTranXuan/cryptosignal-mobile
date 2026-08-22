@@ -120,6 +120,6 @@
 - [x] Complete Task 9 live-condition evaluator that emits only LIVE_UNCONFIRMED observations and alerts.
 - [x] Complete Task 10 dashboard and Telegram live-observation controls across both configured surfaces.
 - [x] Complete Task 11 disabled-by-default public MCP research adapter with signals-only denylist protections.
-- [ ] Complete Task 12 local operations hardening for market-data backup, restore, and health monitoring.
+- [x] Complete Task 12 local operations hardening for market-data backup, restore, and health monitoring.
 - [ ] Run final integration validation and prepare the reviewed feature branch for merge.
 - [ ] Consolidate documentation to the completed live-market architecture and remove redundant or superseded documents without losing required operating guidance.
