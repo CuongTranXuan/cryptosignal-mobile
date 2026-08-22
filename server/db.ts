@@ -72,18 +72,18 @@ function parseEnabledMethodologies(value: string | null | undefined): Methodolog
   return filtered.length ? filtered : [...DEFAULT_BOT_CONFIG.enabledMethodologies];
 }
 
-function parseLiveAlerts(value: string | null | undefined): LiveAlertConfig {
+export function parseLiveAlerts(value: string | null | undefined): LiveAlertConfig {
   const parsed = parseJson<Partial<LiveAlertConfig>>(value ?? "", DEFAULT_LIVE_ALERT_CONFIG);
   const allowed = new Set<string>(LIVE_CONDITION_IDS);
-  const conditionIds = (parsed.conditionIds ?? []).filter((conditionId): conditionId is LiveAlertConfig["conditionIds"][number] => allowed.has(conditionId));
-  const threshold = typeof parsed.threshold === "number" && Number.isFinite(parsed.threshold) && parsed.threshold >= 0 && parsed.threshold <= 1
-    ? parsed.threshold
-    : DEFAULT_LIVE_ALERT_CONFIG.threshold;
+  const rawConditionIds = parsed.conditionIds ?? [];
+  const conditionIds = rawConditionIds.filter((conditionId): conditionId is LiveAlertConfig["conditionIds"][number] => allowed.has(conditionId));
+  const parsedThreshold = parsed.threshold;
+  const thresholdIsValid = typeof parsedThreshold === "number" && Number.isFinite(parsedThreshold) && parsedThreshold >= 0 && parsedThreshold <= 1;
   const parsedCooldownMinutes = parsed.cooldownMinutes;
-  const cooldownMinutes = typeof parsedCooldownMinutes === "number" && Number.isInteger(parsedCooldownMinutes) && parsedCooldownMinutes >= 1 && parsedCooldownMinutes <= 1440
-    ? parsedCooldownMinutes
-    : DEFAULT_LIVE_ALERT_CONFIG.cooldownMinutes;
-  return { enabled: parsed.enabled === true, conditionIds, threshold, cooldownMinutes };
+  const cooldownIsValid = typeof parsedCooldownMinutes === "number" && Number.isInteger(parsedCooldownMinutes) && parsedCooldownMinutes >= 1 && parsedCooldownMinutes <= 1440;
+  const idsAreValid = rawConditionIds.length === conditionIds.length;
+  if (!idsAreValid || !thresholdIsValid || !cooldownIsValid) return { ...DEFAULT_LIVE_ALERT_CONFIG };
+  return { enabled: parsed.enabled === true, conditionIds, threshold: parsedThreshold, cooldownMinutes: parsedCooldownMinutes };
 }
 
 export async function getDb() {
