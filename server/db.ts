@@ -82,7 +82,8 @@ export function parseLiveAlerts(value: string | null | undefined): LiveAlertConf
   const parsedCooldownMinutes = parsed.cooldownMinutes;
   const cooldownIsValid = typeof parsedCooldownMinutes === "number" && Number.isInteger(parsedCooldownMinutes) && parsedCooldownMinutes >= 1 && parsedCooldownMinutes <= 1440;
   const idsAreValid = rawConditionIds.length === conditionIds.length;
-  if (!idsAreValid || !thresholdIsValid || !cooldownIsValid) return { ...DEFAULT_LIVE_ALERT_CONFIG };
+  const enabledWithoutConditions = parsed.enabled === true && conditionIds.length === 0;
+  if (!idsAreValid || !thresholdIsValid || !cooldownIsValid || enabledWithoutConditions) return { ...DEFAULT_LIVE_ALERT_CONFIG };
   return { enabled: parsed.enabled === true, conditionIds, threshold: parsedThreshold, cooldownMinutes: parsedCooldownMinutes };
 }
 

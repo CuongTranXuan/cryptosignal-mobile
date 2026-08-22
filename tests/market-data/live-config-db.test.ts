@@ -27,6 +27,9 @@ describe("live observation configuration", () => {
     expect(parseLiveAlerts('{"enabled":true,"conditionIds":["NOT_ALLOWED"],"threshold":2,"cooldownMinutes":0}')).toEqual(
       DEFAULT_BOT_CONFIG.liveAlerts,
     );
+    expect(parseLiveAlerts('{"enabled":true,"conditionIds":[],"threshold":0.72,"cooldownMinutes":15}')).toEqual(
+      DEFAULT_BOT_CONFIG.liveAlerts,
+    );
   });
 
   it("records an unconfirmed observation once and keeps its evidence out of audit-facing fields", async () => {
