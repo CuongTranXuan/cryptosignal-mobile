@@ -1,5 +1,7 @@
 export const SIGNAL_STATES = ["BULLISH_SETUP", "BEARISH_SETUP", "NEUTRAL"] as const;
 
+import type { LiveAlertConfig } from "./live-market-types";
+
 export const CANDLE_PATTERNS = [
   { id: "DOJI_V1", label: "Doji", group: "Single-candle", explanation: "A small real body signals market indecision after the candle has closed." },
   { id: "HAMMER_V1", label: "Hammer", group: "Single-candle", explanation: "A lower shadow with a closed upper body can show rejected lower prices." },
@@ -80,6 +82,7 @@ export type BotConfigView = {
   ruleFamilies: RuleFamilyId[];
   enabledPatterns: CandlePatternRuleId[];
   enabledMethodologies: MethodologyRuleId[];
+  liveAlerts: LiveAlertConfig;
   alertThreshold: number;
   cooldownMinutes: number;
   quietHours: { start: string; end: string; timezone: string };
