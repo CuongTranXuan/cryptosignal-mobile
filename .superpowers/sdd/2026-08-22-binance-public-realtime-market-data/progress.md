@@ -43,3 +43,5 @@
 - Task 5: complete (focused normalization/cache tests and serial full regression suite pass; Redis failures remain typed and the cache is not a prerequisite for spooling)
 - Task 6: fix round 1/5 (collector rejects normalized kline events outside its configured timeframe subscription; commits `9b00c6f..d2b4bd4`)
 - Task 6: complete (collector lifecycle tests, serial full regression suite, TypeScript, lint, and production server bundle checks pass; Docker Compose execution remains an external acceptance gate because Docker is unavailable in this sandbox)
+- Task 7: fix round 1/5 (independent review hardened canonical archive digests, collision-resistant ClickHouse batch identifiers, full archive-set acknowledgements, and SeaweedFS bucket readiness before event processing)
+- Task 7: complete (Parquet serialization, local S3 upload and HeadObject verification, ClickHouse persistence, replay-safe spool acknowledgements, worker profile, focused tests, serial full regression suite, TypeScript, lint, and production server bundle checks pass; Docker Compose execution remains an external acceptance gate because Docker is unavailable in this sandbox)

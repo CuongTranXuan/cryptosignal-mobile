@@ -28,4 +28,11 @@ describe("local market-data Compose contracts", () => {
     expect(environmentTemplate).toContain("SEAWEEDFS_S3_ENDPOINT=http://seaweedfs:8333");
     expect(environmentTemplate).not.toMatch(/BINANCE.*(?:KEY|SECRET)|BINANCE_API/i);
   });
+
+  it("runs the durable event writer only in the internal market-retain profile with healthy local-store dependencies", () => {
+    expect(compose).toMatch(/event-writer:[\s\S]*?profiles: \["market-retain"\][\s\S]*?clickhouse:[\s\S]*?condition: service_healthy[\s\S]*?seaweedfs:[\s\S]*?condition: service_healthy/);
+    expect(compose).toContain('command: ["node", "dist/scripts/run-event-writer.js"]');
+    expect(compose).toContain("- market_collector_spool:/var/lib/cryptosignal/market-spool");
+    expect(compose).not.toMatch(/event-writer:[\s\S]*?ports:/);
+  });
 });

@@ -105,6 +105,7 @@
 - [x] Implement the durable local at-least-once market-event spool with separate ClickHouse and archive acknowledgements.
 - [x] Normalize approved public Binance stream payloads into lossless canonical events and cache the latest snapshots in Redis.
 - [x] Collect only allowlisted public Binance combined streams with spool-before-cache processing, reconnection controls, and non-confirming closed-kline audit notices.
+- [x] Persist pending spool segments through ClickHouse and verified SeaweedFS archives before recording a local manifest and archive acknowledgement.
 - [x] Replace global Python dependency installation with uv sync and a project virtual environment in Docker deployment.
 - [x] Provide host, VPS, and local Docker deployment configuration for the web application and optional signal runner.
 - [x] Update deployment documentation and scripts for uv-managed environment setup.
@@ -114,3 +115,4 @@
 - [x] Generate explainable closed-candle confirmed-pattern alerts through the configured delivery surface.
 - [x] Show active pattern and methodology evidence in the dashboard signal explanation.
 - [x] Validate and synchronize configurable pattern alerts and methodology controls to GitHub.
+- [x] Complete Task 7 production wiring for ClickHouse persistence, verified SeaweedFS Parquet archives, and replay-safe spool acknowledgement.

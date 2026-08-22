@@ -8,7 +8,7 @@
     "dev:api": "pnpm dev:server",
     "dev:server": "cross-env NODE_ENV=development tsx watch server/_core/index.ts",
     "dev:metro": "cross-env EXPO_USE_METRO_WORKSPACE_ROOT=1 npx expo start --web --port ${EXPO_PORT:-8081}",
-    "build:server": "esbuild server/_core/index.ts scripts/run-market-collector.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
+    "build:server": "esbuild server/_core/index.ts scripts/run-market-collector.ts scripts/run-event-writer.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
     "build:web": "EXPO_NO_METRO_WORKSPACE_ROOT=1 npx expo export --platform web --output-dir dist/web --max-workers 1",
     "build": "pnpm build:server && pnpm build:web",
     "build:all": "pnpm build",
