@@ -77,8 +77,12 @@ async function startServer() {
     }),
   );
 
-  const webBundlePath = path.resolve(path.dirname(process.argv[1] ?? process.cwd()), "..", "..", "web");
-  if (process.env.NODE_ENV === "production" && fs.existsSync(webBundlePath)) {
+  const webBundleCandidates = [
+    path.resolve(process.cwd(), "dist", "web"),
+    path.resolve(path.dirname(process.argv[1] ?? process.cwd()), "..", "..", "web"),
+  ];
+  const webBundlePath = webBundleCandidates.find((candidate) => fs.existsSync(candidate));
+  if (process.env.NODE_ENV === "production" && webBundlePath) {
     app.use(express.static(webBundlePath, { index: false, maxAge: "1h" }));
     app.get("*", (req, res, next) => {
       if (req.path.includes(".")) {
