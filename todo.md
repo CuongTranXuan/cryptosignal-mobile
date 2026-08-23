@@ -131,3 +131,4 @@
 - [x] Redesign the dashboard around a focused research workspace using selected patterns from maintained open-source crypto interfaces.
 - [x] Validate the redesigned dashboard flows and publish the completed usability overhaul to GitHub.
 - [x] Make Docker the exclusive application testing and deployment workflow; update debug logic and operational documentation.
+- [x] Simplify local Docker-only onboarding: README rewrite, `.env.example`, bundled MySQL, and `pnpm docker:up` / `pnpm docker:down`.

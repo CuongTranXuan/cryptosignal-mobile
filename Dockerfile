@@ -28,7 +28,7 @@ RUN uv sync --no-dev --frozen --no-install-project
 
 FROM node:22-bookworm-slim AS node-runtime
 
-FROM ghcr.io/astral.sh/uv:python3.11-bookworm-slim AS runtime
+FROM ghcr.io/astral-sh/uv:python3.11-bookworm-slim AS runtime
 
 WORKDIR /app
 ENV NODE_ENV=production

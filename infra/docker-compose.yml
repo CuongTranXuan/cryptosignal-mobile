@@ -4,6 +4,7 @@ x-cryptosignal-service: &cryptosignal-service
   build:
     context: ..
     dockerfile: Dockerfile
+    target: runtime
   env_file:
     - ${CRYPTO_SIGNAL_ENV_FILE:-../.env}
   environment:

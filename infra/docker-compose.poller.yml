@@ -3,6 +3,7 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile
+      target: runtime
     container_name: cryptosignal-poller
     restart: unless-stopped
     env_file:

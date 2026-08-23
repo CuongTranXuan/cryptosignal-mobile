@@ -1,28 +1,21 @@
 {
-  "name": "app-template",
+  "name": "cryptosignal",
   "version": "1.0.0",
   "private": true,
   "main": "expo-router/entry",
   "scripts": {
-    "dev": "concurrently \"pnpm dev:server\" \"pnpm dev:metro\"",
-    "dev:api": "pnpm dev:server",
-    "dev:server": "cross-env NODE_ENV=development tsx watch server/_core/index.ts",
-    "dev:metro": "cross-env EXPO_USE_METRO_WORKSPACE_ROOT=1 npx expo start --web --port ${EXPO_PORT:-8081}",
     "build:server": "esbuild server/_core/index.ts scripts/run-market-collector.ts scripts/run-event-writer.ts scripts/run-live-evaluator.ts scripts/run-mcp-research-adapter.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
     "build:web": "EXPO_NO_METRO_WORKSPACE_ROOT=1 npx expo export --platform web --output-dir dist/web --max-workers 1",
     "build": "pnpm build:server && pnpm build:web",
-    "build:all": "pnpm build",
     "start": "NODE_ENV=production node dist/server/_core/index.js",
     "check": "tsc --noEmit",
     "lint": "expo lint",
     "format": "prettier --write .",
     "test": "vitest run",
     "test:docker": "docker compose -f infra/docker-compose.test.yml run --build --rm verification",
-    "deploy:docker": "scripts/configure-production.sh",
-    "db:push": "drizzle-kit generate && drizzle-kit migrate",
-    "android": "expo start --android",
-    "ios": "expo start --ios",
-    "qr": "node scripts/generate_qr.mjs"
+    "docker:up": "scripts/docker-up.sh",
+    "docker:down": "scripts/docker-down.sh",
+    "db:push": "drizzle-kit generate && drizzle-kit migrate"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1116.0",

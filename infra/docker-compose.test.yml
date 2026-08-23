@@ -18,3 +18,4 @@ services:
         PYTHONPATH=engines/freqtrade pytest -q engines/freqtrade/tests/test_strategy_contract.py &&
         bash -n scripts/backup-market-data.sh scripts/restore-market-data.sh
         scripts/verify-market-archive.sh scripts/configure-production.sh
+        scripts/docker-up.sh scripts/docker-down.sh

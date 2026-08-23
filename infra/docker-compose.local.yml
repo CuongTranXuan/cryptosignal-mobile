@@ -1,0 +1,57 @@
+# Local development overlay. Always use with infra/docker-compose.yml:
+#   docker compose -f infra/docker-compose.yml -f infra/docker-compose.local.yml ...
+
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: cryptosignal-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-local-root-password}
+      MYSQL_DATABASE: cryptosignal
+      MYSQL_USER: cryptosignal
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-cryptosignal}
+    ports:
+      - ${CRYPTO_SIGNAL_MYSQL_BIND:-127.0.0.1:3306}:3306
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./mysql/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "mysqladmin",
+          "ping",
+          "-h",
+          "127.0.0.1",
+          "-u",
+          "cryptosignal",
+          "-p${MYSQL_PASSWORD:-cryptosignal}",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  db-migrate:
+    profiles: ["migrate"]
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: test-runner
+    container_name: cryptosignal-db-migrate
+    env_file:
+      - ${CRYPTO_SIGNAL_ENV_FILE:-../.env}
+    depends_on:
+      mysql:
+        condition: service_healthy
+    command: ["npx", "drizzle-kit", "migrate"]
+    restart: "no"
+
+  web:
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+volumes:
+  mysql_data:
