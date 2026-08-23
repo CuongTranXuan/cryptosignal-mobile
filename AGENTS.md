@@ -59,6 +59,10 @@ When touching market operations, run `pnpm test:docker`. A Docker profile render
 
 Add every new feature, defect, and operational change to `todo.md` before implementation. Mark it complete only after validation. Keep `README.md` accurate for persistent-host deployment and update the relevant document in `docs/` whenever behavior, commands, authentication, or deployment changes.
 
+## Git authorship
+
+Every repository commit must set both author and committer to `CuongTranXuan <cuongtranxuan.pfiev@gmail.com>`. Before creating a commit in a new workspace, verify `git config user.name` and `git config user.email`; set them to this exact identity if they differ. Do not use an automation-provider, sandbox, or noreply identity.
+
 ## Persistent-host deployment checklist
 
 Use HTTPS, a single same-origin reverse proxy for `/api/`, TLS for the database, protected environment files, regular database backups, one Docker-owned polling service, and the Compose runner profile. Docker Python dependencies must be installed only by `uv sync --no-dev --frozen` into the project virtual environment; do not use `pip install --system` or any global Python installation. Do not rely on the development Metro process for production.
