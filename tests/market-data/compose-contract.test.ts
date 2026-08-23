@@ -4,6 +4,9 @@ import { describe, expect, it } from "vitest";
 
 const projectRoot = resolve(import.meta.dirname, "../..");
 const compose = readFileSync(resolve(projectRoot, "infra/docker-compose.yml"), "utf8");
+const testCompose = readFileSync(resolve(projectRoot, "infra/docker-compose.test.yml"), "utf8");
+const dockerfile = readFileSync(resolve(projectRoot, "Dockerfile"), "utf8");
+const packageJson = readFileSync(resolve(projectRoot, "package.json"), "utf8");
 const clickhouseInit = readFileSync(resolve(projectRoot, "infra/clickhouse/init/001_market_events.sql"), "utf8");
 const environmentTemplate = readFileSync(resolve(projectRoot, "infra/cryptosignal.env.example"), "utf8");
 
@@ -34,5 +37,15 @@ describe("local market-data Compose contracts", () => {
     expect(compose).toContain('command: ["node", "dist/scripts/run-event-writer.js"]');
     expect(compose).toContain("- market_collector_spool:/var/lib/cryptosignal/market-spool");
     expect(compose).not.toMatch(/event-writer:[\s\S]*?ports:/);
+  });
+
+  it("keeps the full verification suite in a Docker test-runner image", () => {
+    expect(testCompose).toContain("target: test-runner");
+    expect(testCompose).toContain("pnpm check && pnpm lint");
+    expect(testCompose).toContain("PYTHONPATH=engines/freqtrade pytest");
+    expect(dockerfile).toContain("AS python-test");
+    expect(dockerfile).toContain("uv sync --all-groups --frozen --no-install-project");
+    expect(dockerfile).toContain("AS test-runner");
+    expect(packageJson).toContain('"test:docker": "docker compose -f infra/docker-compose.test.yml run --build --rm verification"');
   });
 });

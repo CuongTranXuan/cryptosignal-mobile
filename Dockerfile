@@ -28,7 +28,7 @@ RUN uv sync --no-dev --frozen --no-install-project
 
 FROM node:22-bookworm-slim AS node-runtime
 
-FROM ghcr.io/astral-sh/uv:python3.11-bookworm-slim AS runtime
+FROM ghcr.io/astral.sh/uv:python3.11-bookworm-slim AS runtime
 
 WORKDIR /app
 ENV NODE_ENV=production
@@ -48,3 +48,21 @@ COPY --from=python-build /app/engines/freqtrade/.venv ./engines/freqtrade/.venv
 USER cryptosignal
 EXPOSE 3000
 CMD ["node", "dist/server/_core/index.js"]
+
+# A deterministic test image. It keeps the pnpm development dependencies from
+# node-build and adds the locked Freqtrade virtual environment so the complete
+# validation suite can run through Docker rather than the operator host.
+FROM python-build AS python-test
+
+WORKDIR /app/engines/freqtrade
+RUN uv sync --all-groups --frozen --no-install-project
+
+FROM ghcr.io/astral-sh/uv:python3.11-bookworm-slim AS test-runner
+
+WORKDIR /app
+ENV NODE_ENV=test
+ENV PATH="/app/engines/freqtrade/.venv/bin:${PATH}"
+
+COPY --from=node-runtime /usr/local/ /usr/local/
+COPY --from=node-build /app /app
+COPY --from=python-test /app/engines/freqtrade/.venv ./engines/freqtrade/.venv

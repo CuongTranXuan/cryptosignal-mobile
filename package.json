@@ -17,6 +17,8 @@
     "lint": "expo lint",
     "format": "prettier --write .",
     "test": "vitest run",
+    "test:docker": "docker compose -f infra/docker-compose.test.yml run --build --rm verification",
+    "deploy:docker": "scripts/configure-production.sh",
     "db:push": "drizzle-kit generate && drizzle-kit migrate",
     "android": "expo start --android",
     "ios": "expo start --ios",

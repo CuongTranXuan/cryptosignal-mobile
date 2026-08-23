@@ -41,4 +41,4 @@ The optional MCP route is not called by page load, polling worker, collector, wr
 
 Compose profiles keep data services internal: `market-live` runs Redis, collector, and evaluator; `market-retain` runs ClickHouse, SeaweedFS, and writer; `mcp-research` is optional and disabled by default. The production guide documents non-destructive backup, empty-directory restore staging, and local or remote archive checksum verification. A measured three-symbol pilot is required before setting a storage budget or expanding streams.
 
-Docker Compose rendering, image builds, a backup/restore drill, and a 24-hour stream soak remain host-side acceptance gates because they require Docker and outbound network access.
+Docker Compose rendering, image builds, a backup/restore drill, and a 24-hour stream soak remain Docker-host acceptance gates because they require Docker and outbound network access.
