@@ -29,7 +29,7 @@ The dashboard and Telegram share one versioned configuration. Users can enable o
 
 Telegram commands include `/patterns enable HAMMER`, `/patterns disable BULLISH_ENGULFING`, `/rules enable SMC_BULLISH_BOS_PROXY`, and `/rules disable EMA_TREND`. Use `/methodology enable SMC` to enable the parent family. `/help` lists all controls.
 
-## Local development
+## Local debugging (not a test or deployment path)
 
 Install Node.js 22+, pnpm 9+, Python 3.11 or 3.12, and [uv](https://docs.astral.sh/uv/). JavaScript and Python dependencies remain isolated: Node dependencies stay in the pnpm workspace and the signal engine uses `engines/freqtrade/.venv`.
 
@@ -38,6 +38,8 @@ pnpm install --frozen-lockfile
 (cd engines/freqtrade && uv sync --all-groups)
 pnpm dev
 ```
+
+Use this mode only for interactive debugging and browser inspection. It does not start durable market services, the production runner, or Telegram polling. All supported test and deployment commands use Docker so they run against the same locked Node, Python, and uv environment as the deployed application.
 
 Create a database migration whenever `drizzle/schema.ts` changes. Review generated SQL before applying it.
 
@@ -70,9 +72,15 @@ The browser receives only an HTTP-only session cookie. Passwords are stored as s
 | `SEAWEEDFS_S3_ENDPOINT`, `SEAWEEDFS_S3_BUCKET`, `SEAWEEDFS_S3_ACCESS_KEY`, `SEAWEEDFS_S3_SECRET_KEY` | `market-retain` | Local SeaweedFS archive connection; these are storage credentials, not exchange credentials. |
 | `BINANCE_MCP_ENABLED`, `BINANCE_MCP_PUBLIC_TOOL_IDS` | `mcp-research` only | Disabled-by-default optional public research adapter; never configure Binance account credentials. |
 
-## Docker deployment for a host, VPS, or local machine
+## Docker-only verification and deployment
 
-The production image is multi-stage. Its Python stage runs `uv sync --no-dev --frozen` and copies the resulting `engines/freqtrade/.venv` into the final image; it never uses `pip install --system` or a global Python package installation. The same image runs the web API, the optional Telegram poller, and the optional Freqtrade runner through separate Compose services.
+Docker is the only supported route for full application verification and deployment. The test image uses the locked JavaScript dependencies and the Freqtrade virtual environment created by `uv`; the deployment image uses the same build inputs and never uses `pip install --system` or a global Python package installation. The application services run through separate Compose profiles.
+
+Run the full verification suite before a deployment:
+
+```bash
+pnpm test:docker
+```
 
 First copy the example environment file to a protected location outside the checkout.
 
@@ -123,16 +131,6 @@ docker compose -f infra/docker-compose.yml ps
 docker compose -f infra/docker-compose.yml --profile runner --profile telegram logs --tail=100
 ```
 
-### Host-side runner alternative
-
-If containers are not used for the scheduler, create the same isolated environment before installing the existing cron template. The wrapper uses `engines/freqtrade/.venv/bin/python` by default, takes a non-blocking lock, and suppresses normal cron output.
-
-```bash
-(cd engines/freqtrade && uv sync --no-dev)
-chmod 600 /etc/cryptosignal/runner.env
-crontab infra/cron/cryptosignal.crontab
-```
-
 ## Operations
 
 The dashboard is the primary test surface and owns the versioned configuration, runner health, and immutable operational audit history. Telegram shares the same configuration only when the optional profile is enabled. Back up the database and protected environment file before schema migrations or engine upgrades.
@@ -155,17 +153,13 @@ The restore script refuses missing arguments and nonempty targets, prints its ex
 
 > Docker image builds, Compose rendering, a backup drill, and a 24-hour public-stream soak require a host with Docker and outbound network access. They cannot be accepted solely from this sandbox.
 
-## Validation
+## Verification
 
 ```bash
-pnpm check
-pnpm lint
-pnpm test
-pnpm vitest run --maxWorkers=1 --minWorkers=1 --testTimeout=15000
-PYTHONPATH=engines/freqtrade pytest -q engines/freqtrade/tests/test_strategy_contract.py
-freqtrade show-config --config engines/freqtrade/config/signals-only.json --userdir engines/freqtrade/user_data
-bash -n scripts/backup-market-data.sh scripts/restore-market-data.sh scripts/verify-market-archive.sh scripts/configure-production.sh
+pnpm test:docker
 ```
+
+The Docker verification command type-checks, lints, runs serial Vitest contracts (excluding the sandbox-sensitive Telegram credential reachability check), runs the Freqtrade strategy contract, and validates the operator scripts. Do not treat a host `pnpm test` or a locally activated Python environment as a release gate.
 
 ## Project conventions
 

@@ -31,9 +31,9 @@ The first admin requires `DASHBOARD_BOOTSTRAP_TOKEN`. The bootstrap path is one-
 
 ## Telegram and runtime rules
 
-Development starts polling in process. In production, only the `telegram` profile of `infra/docker-compose.yml` may set `TELEGRAM_POLLING_ENABLED=true`; web and runner services must leave polling disabled. This guarantees exactly one `getUpdates` consumer per bot token. Every bot command must verify `TELEGRAM_ALLOWED_USER_IDS`, persist configuration changes through `updateBotConfig`, and record auditable events.
+Interactive debugging may use the local API and Metro processes, but it must leave Telegram polling and durable market workers disabled. Docker is the only supported full-test and deployment path. In a deployed environment, only the `telegram` profile of `infra/docker-compose.yml` may set `TELEGRAM_POLLING_ENABLED=true`; web and runner services must leave polling disabled. This guarantees exactly one `getUpdates` consumer per bot token. Every bot command must verify `TELEGRAM_ALLOWED_USER_IDS`, persist configuration changes through `updateBotConfig`, and record auditable events.
 
-The Freqtrade runner may retrieve public market data and submit closed-candle snapshots and compact runner health through `SIGNAL_INGEST_TOKEN`. The primary production runtime is the `runner` Compose profile, which uses the project-local uv-managed `engines/freqtrade/.venv`; `scripts/run-configured-cycle-quiet.sh` and `infra/cron/cryptosignal.crontab` remain a host-side alternative. Neither option may write routine output or overlap runs. It must not use `freqtrade trade`, exchange API keys, or any order capability.
+The Freqtrade runner may retrieve public market data and submit closed-candle snapshots and compact runner health through `SIGNAL_INGEST_TOKEN`. The `runner` Compose profile is the only supported deployed runtime. It uses the project-local uv-managed `engines/freqtrade/.venv`, must not write routine output or overlap runs, and must not use `freqtrade trade`, exchange API keys, or any order capability.
 
 Live-market services are public-data-only. `market-live` runs the Binance public collector, Redis cache, and evaluator; `market-retain` runs ClickHouse, SeaweedFS, and the writer. Redis, ClickHouse, SeaweedFS, collector, writer, evaluator, and optional MCP adapter ports must remain internal to Compose. Raw events never enter MySQL/TiDB; only control-plane records, health, observations, and archive manifests do. Every live observation and alert must retain the exact `LIVE_UNCONFIRMED` boundary and must never create, suppress, or overwrite a confirmed closed-candle signal.
 
@@ -48,15 +48,12 @@ For every schema change: update `drizzle/schema.ts`; run `pnpm drizzle-kit gener
 Before a checkpoint, run at least:
 
 ```bash
-pnpm check
-pnpm lint
-pnpm test
-PYTHONPATH=engines/freqtrade pytest -q engines/freqtrade/tests/test_strategy_contract.py
+pnpm test:docker
 ```
 
 When touching secrets, validate them only through a lightweight endpoint or test. Do not print secret values. When touching a database model, verify the generated migration. When touching the browser UI, capture and inspect a responsive browser preview if the development renderer is available.
 
-When touching market operations, run the focused script contracts plus `bash -n scripts/backup-market-data.sh scripts/restore-market-data.sh scripts/verify-market-archive.sh scripts/configure-production.sh`. A Docker profile render, backup/restore drill, and 24-hour three-symbol public stream soak require a Docker-capable host with network access. Record measured capacity evidence in `docs/operations/market-data-capacity-report-template.md`; never invent a storage budget.
+When touching market operations, run `pnpm test:docker`. A Docker profile render, backup/restore drill, and 24-hour three-symbol public stream soak require a Docker-capable host with network access. Record measured capacity evidence in `docs/operations/market-data-capacity-report-template.md`; never invent a storage budget.
 
 ## Documentation and task hygiene
 
@@ -64,6 +61,6 @@ Add every new feature, defect, and operational change to `todo.md` before implem
 
 ## Persistent-host deployment checklist
 
-Use HTTPS, a single same-origin reverse proxy for `/api/`, TLS for the database, protected environment files, regular database backups, one Docker-owned polling service, and either the Compose runner profile or a separate scheduled Freqtrade cycle. Docker Python dependencies must be installed only by `uv sync --no-dev --frozen` into the project virtual environment; do not use `pip install --system` or any global Python installation. Do not rely on the development Metro process for production.
+Use HTTPS, a single same-origin reverse proxy for `/api/`, TLS for the database, protected environment files, regular database backups, one Docker-owned polling service, and the Compose runner profile. Docker Python dependencies must be installed only by `uv sync --no-dev --frozen` into the project virtual environment; do not use `pip install --system` or any global Python installation. Do not rely on the development Metro process for production.
 
 For market-retain backups, use timestamped non-destructive archives. `restore-market-data.sh` requires both `--source` and `--target-empty-dir`, refuses a nonempty target, and only stages data for review. Verify archive checksums before any manual import; never delete an archive object or replace a running volume as part of a restore script.

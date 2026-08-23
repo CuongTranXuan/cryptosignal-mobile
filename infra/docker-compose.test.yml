@@ -1,0 +1,20 @@
+name: cryptosignal-test
+
+services:
+  verification:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: test-runner
+    environment:
+      NODE_ENV: test
+    command:
+      - sh
+      - -lc
+      - >-
+        pnpm check && pnpm lint &&
+        pnpm vitest run --maxWorkers=1 --minWorkers=1 --testTimeout=15000
+        --exclude tests/telegram.credentials.test.ts --exclude '.worktrees/**' &&
+        PYTHONPATH=engines/freqtrade pytest -q engines/freqtrade/tests/test_strategy_contract.py &&
+        bash -n scripts/backup-market-data.sh scripts/restore-market-data.sh
+        scripts/verify-market-archive.sh scripts/configure-production.sh

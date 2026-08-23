@@ -127,3 +127,4 @@
 - [x] Repair the deployed production startup artifact path and validate the service health after the author-history correction.
 - [x] Diagnose and restore the published dashboard root route after the reported blank public response.
 - [x] Harden managed-deployment static-bundle resolution after the public root continued returning Cannot GET.
+- [x] Make Docker the exclusive application testing and deployment workflow; update debug logic and operational documentation.
