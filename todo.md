@@ -131,5 +131,6 @@
 - [x] Redesign the dashboard around a focused research workspace using selected patterns from maintained open-source crypto interfaces.
 - [x] Validate the redesigned dashboard flows and publish the completed usability overhaul to GitHub.
 - [x] Make Docker the exclusive application testing and deployment workflow; update debug logic and operational documentation.
-- [x] Rewrite all reachable Git history to cuongtx <cuongtranxuan.pfiev@gmail.com> and enforce that author identity for future commits.
+- [x] Rewrite all reachable Git history to CuongTranXuan <cuongtranxuan.pfiev@gmail.com> and enforce that author identity for future commits.
 - [x] Simplify local Docker-only onboarding: README rewrite, `.env.example`, bundled MySQL, and `pnpm docker:up` / `pnpm docker:down`.
+- [x] Add a TradingView-compatible, closed-candle visualization of CryptoSignal behavior with parity boundaries, documentation, tests, and a GitHub commit.

@@ -1,0 +1,131 @@
+//@version=6
+indicator("CryptoSignal · Closed-Candle Visualizer", shorttitle = "CryptoSignal CC", overlay = true)
+
+// This is an indicator, not a trading strategy; it intentionally contains no order
+// functions and only emits values after a chart bar has closed.
+
+groupSignal = "Closed-candle signal"
+threshold = input.float(0.35, "Setup threshold", minval = 0.05, maxval = 1.0, step = 0.01, group = groupSignal)
+showEveryQualifiedBar = input.bool(false, "Mark every qualified closed candle", group = groupSignal)
+showBarColour = input.bool(true, "Tint qualified closed candles", group = groupSignal)
+
+groupFamilies = "Mirrored rule families"
+useTrend = input.bool(true, "EMA trend", group = groupFamilies)
+useMomentum = input.bool(true, "RSI + MACD momentum", group = groupFamilies)
+useVolume = input.bool(true, "Relative-volume confirmation", group = groupFamilies)
+usePatterns = input.bool(true, "Candlestick pattern approximations", group = groupFamilies)
+useWyckoff = input.bool(false, "Wyckoff proxies", group = groupFamilies)
+useSMC = input.bool(false, "SMC break-of-structure proxies", group = groupFamilies)
+useElliott = input.bool(false, "Elliott impulse proxies", group = groupFamilies)
+
+groupDisplay = "Display"
+showEMAs = input.bool(true, "Show EMA 20 / 50 / 200", group = groupDisplay)
+showPatternMarkers = input.bool(false, "Show pattern markers", group = groupDisplay)
+showStatusTable = input.bool(true, "Show latest closed-candle status", group = groupDisplay)
+
+ema20 = ta.ema(close, 20)
+ema50 = ta.ema(close, 50)
+ema200 = ta.ema(close, 200)
+rsi14 = ta.rsi(close, 14)
+[macdLine, macdSignal, _] = ta.macd(close, 12, 26, 9)
+[_, _, adx14] = ta.dmi(14, 14)
+atr14 = ta.atr(14)
+relativeVolume = volume / ta.sma(volume, 20)
+priorRangeHigh20 = ta.highest(high[1], 20)
+priorRangeLow20 = ta.lowest(low[1], 20)
+
+trendBullish = ema20 > ema50 and ema50 > ema200
+trendBearish = ema20 < ema50 and ema50 < ema200
+momentumBullish = rsi14 >= 50 and macdLine >= macdSignal
+momentumBearish = rsi14 <= 50 and macdLine <= macdSignal
+volumeBullish = relativeVolume >= 1 and close > open
+volumeBearish = relativeVolume >= 1 and close < open
+
+body = math.abs(close - open)
+bodyHigh = math.max(open, close)
+bodyLow = math.min(open, close)
+previousBodyHigh = math.max(open[1], close[1])
+previousBodyLow = math.min(open[1], close[1])
+bullishEngulfing = close[1] < open[1] and close > open and bodyHigh >= previousBodyHigh and bodyLow <= previousBodyLow
+bearishEngulfing = close[1] > open[1] and close < open and bodyHigh >= previousBodyHigh and bodyLow <= previousBodyLow
+bullishHarami = close[1] < open[1] and close > open and bodyHigh < previousBodyHigh and bodyLow > previousBodyLow
+bearishHarami = close[1] > open[1] and close < open and bodyHigh < previousBodyHigh and bodyLow > previousBodyLow
+tweezerTop = math.abs(high - high[1]) <= atr14 * 0.10 and close[1] > open[1] and close < open
+tweezerBottom = math.abs(low - low[1]) <= atr14 * 0.10 and close[1] < open[1] and close > open
+morningStar = close[2] < open[2] and body[1] <= body[2] * 0.60 and close > open and close >= (open[2] + close[2]) / 2
+eveningStar = close[2] > open[2] and body[1] <= body[2] * 0.60 and close < open and close <= (open[2] + close[2]) / 2
+threeWhiteSoldiers = close > open and close[1] > open[1] and close[2] > open[2] and close > close[1] and close[1] > close[2]
+threeBlackCrows = close < open and close[1] < open[1] and close[2] < open[2] and close < close[1] and close[1] < close[2]
+threeInsideUp = close[2] < open[2] and bodyHigh[1] < math.max(open[2], close[2]) and bodyLow[1] > math.min(open[2], close[2]) and close > open and close > open[2]
+threeInsideDown = close[2] > open[2] and bodyHigh[1] < math.max(open[2], close[2]) and bodyLow[1] > math.min(open[2], close[2]) and close < open and close < open[2]
+
+wyckoffSpring = low < priorRangeLow20 and close > priorRangeLow20 and relativeVolume >= 1
+wyckoffUpthrust = high > priorRangeHigh20 and close < priorRangeHigh20 and relativeVolume >= 1
+smcBullishBos = close > priorRangeHigh20 and relativeVolume >= 1
+smcBearishBos = close < priorRangeLow20 and relativeVolume >= 1
+elliottBullishImpulse = close > close[1] and close[1] > close[2] and close[2] > close[3] and ema20 > ema50
+elliottBearishImpulse = close < close[1] and close[1] < close[2] and close[2] < close[3] and ema20 < ema50
+
+float score = 0.0
+score := useTrend and trendBullish ? score + 0.30 : score
+score := useTrend and trendBearish ? score - 0.30 : score
+score := useMomentum and momentumBullish ? score + 0.20 : score
+score := useMomentum and momentumBearish ? score - 0.20 : score
+score := useVolume and volumeBullish ? score + 0.10 : score
+score := useVolume and volumeBearish ? score - 0.10 : score
+score := usePatterns and bullishEngulfing ? score + 0.15 : score
+score := usePatterns and bearishEngulfing ? score - 0.15 : score
+score := usePatterns and bullishHarami ? score + 0.10 : score
+score := usePatterns and bearishHarami ? score - 0.10 : score
+score := usePatterns and tweezerBottom ? score + 0.10 : score
+score := usePatterns and tweezerTop ? score - 0.10 : score
+score := usePatterns and morningStar ? score + 0.15 : score
+score := usePatterns and eveningStar ? score - 0.15 : score
+score := usePatterns and threeWhiteSoldiers ? score + 0.15 : score
+score := usePatterns and threeBlackCrows ? score - 0.15 : score
+score := usePatterns and threeInsideUp ? score + 0.12 : score
+score := usePatterns and threeInsideDown ? score - 0.12 : score
+score := useWyckoff and wyckoffSpring ? score + 0.16 : score
+score := useWyckoff and wyckoffUpthrust ? score - 0.16 : score
+score := useSMC and smcBullishBos ? score + 0.18 : score
+score := useSMC and smcBearishBos ? score - 0.18 : score
+score := useElliott and elliottBullishImpulse ? score + 0.12 : score
+score := useElliott and elliottBearishImpulse ? score - 0.12 : score
+score := math.max(-1.0, math.min(1.0, score))
+
+hasRequiredHistory = not na(ema200) and not na(rsi14) and not na(macdLine) and not na(adx14) and not na(relativeVolume) and not na(priorRangeHigh20)
+closedCandle = barstate.isconfirmed and hasRequiredHistory
+bullishSetup = closedCandle and score >= threshold
+bearishSetup = closedCandle and score <= -threshold
+newBullishSetup = bullishSetup and not bullishSetup[1]
+newBearishSetup = bearishSetup and not bearishSetup[1]
+showBullish = bullishSetup and (showEveryQualifiedBar or newBullishSetup)
+showBearish = bearishSetup and (showEveryQualifiedBar or newBearishSetup)
+
+plot(showEMAs ? ema20 : na, "EMA 20", color = color.new(color.teal, 0), linewidth = 1)
+plot(showEMAs ? ema50 : na, "EMA 50", color = color.new(color.orange, 0), linewidth = 1)
+plot(showEMAs ? ema200 : na, "EMA 200", color = color.new(color.blue, 0), linewidth = 2)
+plot(closedCandle ? score : na, "Closed-candle score", color = score >= threshold ? color.lime : score <= -threshold ? color.red : color.gray, display = display.data_window)
+plot(closedCandle ? math.abs(score) * 0.75 + math.min(adx14, 40) / 40 * 0.25 : na, "Visual confidence", color = color.gray, display = display.data_window)
+
+plotshape(showBullish, title = "Bullish setup", style = shape.labelup, location = location.belowbar, color = color.new(color.lime, 0), text = "BULL", textcolor = color.black, size = size.tiny)
+plotshape(showBearish, title = "Bearish setup", style = shape.labeldown, location = location.abovebar, color = color.new(color.red, 0), text = "BEAR", textcolor = color.white, size = size.tiny)
+plotshape(showPatternMarkers and closedCandle and bullishEngulfing, title = "Bullish engulfing", style = shape.circle, location = location.belowbar, color = color.lime, size = size.tiny)
+plotshape(showPatternMarkers and closedCandle and bearishEngulfing, title = "Bearish engulfing", style = shape.circle, location = location.abovebar, color = color.red, size = size.tiny)
+barcolor(showBarColour and bullishSetup ? color.new(color.lime, 70) : showBarColour and bearishSetup ? color.new(color.red, 70) : na)
+
+alertcondition(newBullishSetup, title = "CryptoSignal bullish closed-candle setup", message = "CryptoSignal bullish closed-candle setup on {{ticker}} {{interval}}")
+alertcondition(newBearishSetup, title = "CryptoSignal bearish closed-candle setup", message = "CryptoSignal bearish closed-candle setup on {{ticker}} {{interval}}")
+
+var table status = table.new(position.top_right, 2, 4, border_width = 1)
+if showStatusTable and barstate.islast
+    stateText = bullishSetup ? "BULLISH_SETUP" : bearishSetup ? "BEARISH_SETUP" : "NEUTRAL"
+    stateColour = bullishSetup ? color.lime : bearishSetup ? color.red : color.silver
+    table.cell(status, 0, 0, "CryptoSignal", bgcolor = color.black, text_color = color.white)
+    table.cell(status, 1, 0, "Closed-candle only", bgcolor = color.black, text_color = color.silver)
+    table.cell(status, 0, 1, "State")
+    table.cell(status, 1, 1, stateText, text_color = stateColour)
+    table.cell(status, 0, 2, "Score")
+    table.cell(status, 1, 2, closedCandle ? str.tostring(score, "#.00") : "Waiting for close")
+    table.cell(status, 0, 3, "Threshold")
+    table.cell(status, 1, 3, str.tostring(threshold, "#.00"))

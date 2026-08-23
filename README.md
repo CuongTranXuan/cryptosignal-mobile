@@ -77,6 +77,12 @@ pnpm test:docker
 
 Runs type-check, lint, Vitest contracts, Freqtrade strategy contract, and script validation inside Docker.
 
+## TradingView closed-candle visualizer
+
+The repository includes a signals-only Pine Script v6 indicator at [`tradingview/CryptoSignalClosedCandleVisualizer.pine`](tradingview/CryptoSignalClosedCandleVisualizer.pine). Paste it into TradingView’s Pine Editor to draw CryptoSignal-style closed-candle setup behavior on a matching spot chart and timeframe. It is an **indicator, not a strategy**: it cannot place orders, access this application, or modify its shared controls.
+
+See [`docs/TRADINGVIEW_VISUALIZER.md`](docs/TRADINGVIEW_VISUALIZER.md) for installation, score mapping, TA-Lib parity boundaries, and closed-bar alert setup.
+
 ## Schema changes
 
 After editing `drizzle/schema.ts`:
