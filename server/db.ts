@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, gt, gte } from "drizzle-orm";
 import { sql } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/mysql2";
+import { drizzle } from "drizzle-orm/node-postgres";
 import {
   auditEvents,
   botConfigs,
@@ -114,7 +114,7 @@ export async function upsertUser(user: InsertUser): Promise<void> {
   }
   values.role = user.role ?? (user.openId === ENV.ownerOpenId ? "admin" : "user");
   updateSet.role = values.role;
-  await db.insert(users).values(values).onDuplicateKeyUpdate({ set: updateSet });
+  await db.insert(users).values(values).onConflictDoUpdate({ target: users.openId, set: updateSet });
 }
 
 export async function getUserByOpenId(openId: string) {
@@ -173,8 +173,8 @@ export async function getDashboardCredential(username: string) {
 export async function createDashboardCredential(username: string, passwordHash: string, role: "user" | "admin") {
   const db = await getDb();
   if (!db) throw new Error("Database is unavailable");
-  const result = await db.insert(dashboardCredentials).values({ username, passwordHash, role });
-  return Number(result[0].insertId);
+  const result = await db.insert(dashboardCredentials).values({ username, passwordHash, role }).returning({ id: dashboardCredentials.id });
+  return result[0].id;
 }
 
 export async function createDashboardSession(credentialId: number, tokenHash: string, expiresAt: Date) {
@@ -237,7 +237,8 @@ export async function updateBotConfig(
       cooldownMinutes: next.cooldownMinutes,
       quietHoursJson: JSON.stringify(next.quietHours),
     })
-    .onDuplicateKeyUpdate({
+    .onConflictDoUpdate({
+      target: botConfigs.id,
       set: {
         configVersion: next.configVersion,
         isPaused: next.isPaused,
@@ -307,13 +308,14 @@ export async function recordCandleHistory(candles: CandlePointInput[]) {
   await db
     .insert(candleHistory)
     .values(candles.map((candle) => ({ ...candle, candleCloseTime: new Date(candle.candleCloseTime) })))
-    .onDuplicateKeyUpdate({
+    .onConflictDoUpdate({
+      target: candleHistory.id,
       set: {
-        open: sql`VALUES(${candleHistory.open})`, high: sql`VALUES(${candleHistory.high})`, low: sql`VALUES(${candleHistory.low})`, close: sql`VALUES(${candleHistory.close})`, volume: sql`VALUES(${candleHistory.volume})`,
-        ema20: sql`VALUES(${candleHistory.ema20})`, ema50: sql`VALUES(${candleHistory.ema50})`, ema200: sql`VALUES(${candleHistory.ema200})`, rsi14: sql`VALUES(${candleHistory.rsi14})`,
-        macd: sql`VALUES(${candleHistory.macd})`, macdSignal: sql`VALUES(${candleHistory.macdSignal})`, atr14: sql`VALUES(${candleHistory.atr14})`,
-        signalState: sql`VALUES(${candleHistory.signalState})`, signalScore: sql`VALUES(${candleHistory.signalScore})`,
-        strategyVersion: sql`VALUES(${candleHistory.strategyVersion})`, configVersion: sql`VALUES(${candleHistory.configVersion})`,
+        open: sql`excluded."open"`, high: sql`excluded."high"`, low: sql`excluded."low"`, close: sql`excluded."close"`, volume: sql`excluded."volume"`,
+        ema20: sql`excluded."ema20"`, ema50: sql`excluded."ema50"`, ema200: sql`excluded."ema200"`, rsi14: sql`excluded."rsi14"`,
+        macd: sql`excluded."macd"`, macdSignal: sql`excluded."macdSignal"`, atr14: sql`excluded."atr14"`,
+        signalState: sql`excluded."signalState"`, signalScore: sql`excluded."signalScore"`,
+        strategyVersion: sql`excluded."strategyVersion"`, configVersion: sql`excluded."configVersion"`,
       },
     });
   return { recorded: candles.length };
@@ -450,7 +452,8 @@ export async function recordRunnerHealth(update: RunnerHealthUpdate): Promise<Ru
       lastError: update.lastError,
       summaryJson: JSON.stringify(update.summary),
     })
-    .onDuplicateKeyUpdate({
+    .onConflictDoUpdate({
+      target: runnerHealth.id,
       set: {
         runId: update.runId,
         state: update.state,
@@ -559,7 +562,8 @@ export async function recordMarketPipelineHealth(update: MarketPipelineHealthUpd
     lastError: update.lastError,
     lagMs: update.lagMs,
     summaryJson: JSON.stringify(update.summary),
-  }).onDuplicateKeyUpdate({
+  }).onConflictDoUpdate({
+    target: marketPipelineHealth.component,
     set: {
       state: update.state,
       lastSuccessAt: update.lastSuccessAt,
@@ -595,7 +599,8 @@ export type MarketArchiveManifestInput = {
 export async function recordMarketArchiveManifest(input: MarketArchiveManifestInput) {
   const db = await getDb();
   if (!db) return input;
-  await db.insert(marketArchiveManifests).values(input).onDuplicateKeyUpdate({
+  await db.insert(marketArchiveManifests).values(input).onConflictDoUpdate({
+    target: marketArchiveManifests.objectKey,
     set: {
       rowCount: input.rowCount,
       sha256: input.sha256,
@@ -630,5 +635,5 @@ export async function setTelegramUpdateOffset(updateOffset: number) {
   await db
     .insert(telegramPollingState)
     .values({ id: 1, updateOffset, lastPolledAt: new Date() })
-    .onDuplicateKeyUpdate({ set: { updateOffset, lastPolledAt: new Date() } });
+    .onConflictDoUpdate({ target: telegramPollingState.id, set: { updateOffset, lastPolledAt: new Date() } });
 }

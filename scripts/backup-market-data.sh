@@ -37,9 +37,10 @@ docker compose -f "$COMPOSE_FILE" --profile market-retain exec -T clickhouse sh 
 
 echo "Exporting market archive manifest ledger through the web service database connection..."
 docker compose -f "$COMPOSE_FILE" exec -T web node --input-type=module -e '
-  import mysql from "mysql2/promise";
-  const connection = await mysql.createConnection(process.env.DATABASE_URL);
-  const [rows] = await connection.query("SELECT id, stream_type AS streamType, asset_symbol AS assetSymbol, partition_start AS partitionStart, partition_end AS partitionEnd, object_key AS objectKey, row_count AS rowCount, sha256, clickhouse_batch_id AS clickhouseBatchId, state, created_at AS createdAt FROM market_archive_manifests ORDER BY partition_start ASC, id ASC");
+  import pg from "pg";
+  const connection = new pg.Client({ connectionString: process.env.DATABASE_URL });
+  await connection.connect();
+  const { rows } = await connection.query('SELECT "id", "streamType", "assetSymbol", "partitionStart", "partitionEnd", "objectKey", "rowCount", "sha256", "clickhouseBatchId", "state", "createdAt" FROM "market_archive_manifests" ORDER BY "partitionStart" ASC, "id" ASC');
   for (const row of rows) console.log(JSON.stringify(row));
   await connection.end();
 ' > "$stage_dir/market-archive-manifests.ndjson"
