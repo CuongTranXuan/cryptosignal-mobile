@@ -4,4 +4,5 @@ export { ChartMetrics, type ChartInspection } from "@/components/charting/chart-
 export { ChartLevelControls } from "@/components/charting/chart-level-controls";
 export { ChartLegend } from "@/components/charting/chart-legend";
 export { chartTimestamp, formatChartPrice } from "@/components/charting/format";
-export { horizontalLevelsFromAnnotations, useLightweightChart } from "@/components/charting/use-lightweight-chart";
+export { useLightweightChart } from "@/components/charting/use-lightweight-chart";
+export { AnnotationPrimitiveManager } from "@/components/charting/primitives/annotation-primitive-manager";

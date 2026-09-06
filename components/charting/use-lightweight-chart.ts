@@ -1,27 +1,33 @@
-import { useEffect } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { CandlestickSeries, ColorType, CrosshairMode, HistogramSeries, LineSeries, LineStyle, createChart, createSeriesMarkers, type UTCTimestamp } from "lightweight-charts";
 
 import { chartTimestamp } from "@/components/charting/format";
+import { AnnotationPrimitiveManager } from "@/components/charting/primitives/annotation-primitive-manager";
+import type { AnnotationTheme } from "@/components/charting/primitives/annotation-styles";
 import { useColors } from "@/hooks/use-colors";
-import type { ChartAnnotation, ChartCandle, ChartSignalMarker } from "@/shared/chart-types";
+import { flattenAnnotationsForRender, type ChartAnnotation, type ChartCandle, type ChartSignalMarker } from "@/shared/chart-types";
 
 type UseLightweightChartOptions = {
   host: HTMLDivElement | null;
   candles: ChartCandle[];
   signals: ChartSignalMarker[];
+  annotations?: ChartAnnotation[];
+  annotationTheme: AnnotationTheme;
   showEma: boolean;
   showRsi: boolean;
   showMacd: boolean;
-  levels: number[];
   onInspect: (candle: ChartCandle | null) => void;
 };
 
-export function useLightweightChart({ host, candles, signals, showEma, showRsi, showMacd, levels, onInspect }: UseLightweightChartOptions) {
+export function useLightweightChart({ host, candles, signals, annotations, annotationTheme, showEma, showRsi, showMacd, onInspect }: UseLightweightChartOptions) {
   const colors = useColors();
+  const managerRef = useRef(new AnnotationPrimitiveManager());
+  const renderableAnnotations = useMemo(() => flattenAnnotationsForRender(annotations), [annotations]);
 
   useEffect(() => {
     if (!host || !candles.length) return;
 
+    const manager = managerRef.current;
     const ordered = candles;
     const candleLookup = new Map(ordered.map((candle) => [chartTimestamp(candle.candleCloseTime), candle]));
     const chart = createChart(host, {
@@ -86,9 +92,7 @@ export function useLightweightChart({ host, candles, signals, showEma, showRsi, 
       text: `${marker.state.replace("_SETUP", "")} · ${Math.round(Math.abs(marker.score) * 100)}%`,
     })));
 
-    levels.forEach((level, index) => {
-      candlesticks.createPriceLine({ price: level, color: colors.primary, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: `Level ${index + 1}` });
-    });
+    manager.sync(candlesticks, renderableAnnotations, annotationTheme);
 
     chart.timeScale().fitContent();
 
@@ -99,14 +103,9 @@ export function useLightweightChart({ host, candles, signals, showEma, showRsi, 
     chart.subscribeCrosshairMove(onCrosshairMove);
 
     return () => {
+      manager.detachAll(candlesticks);
       chart.unsubscribeCrosshairMove(onCrosshairMove);
       chart.remove();
     };
-  }, [candles, colors, host, levels, onInspect, showEma, showMacd, showRsi, signals]);
-}
-
-/** Maps persisted horizontal-level annotations to chart price lines. */
-export function horizontalLevelsFromAnnotations(annotations: ChartAnnotation[] | undefined): number[] {
-  if (!annotations?.length) return [];
-  return annotations.filter((annotation) => annotation.kind === "HORIZONTAL_LEVEL").map((annotation) => annotation.price);
+  }, [annotationTheme, candles, colors, host, onInspect, renderableAnnotations, showEma, showMacd, showRsi, signals]);
 }

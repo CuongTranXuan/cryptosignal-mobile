@@ -13,7 +13,7 @@ describe("charting module contract", () => {
 
     expect(indexSource).toContain("ResearchChartPanel");
     expect(panelSource).toContain("export function ResearchChartPanel");
-    expect(panelSource).toContain("onAnnotationsChange");
+    expect(panelSource).toContain("annotations = []");
     expect(typesSource).toContain("HORIZONTAL_LEVEL");
     expect(typesSource).toContain("TRENDLINE");
     expect(typesSource).toContain("ZONE");

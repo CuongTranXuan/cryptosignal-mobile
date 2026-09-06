@@ -6,10 +6,9 @@ export function ChartLegend() {
   const colors = useColors();
   return (
     <View style={styles.legend}>
-      <Legend color={colors.success} label="Bullish setup" colors={colors} />
-      <Legend color={colors.error} label="Bearish setup" colors={colors} />
-      <Legend color={colors.primary} label="EMA20 / MACD" colors={colors} />
-      <Legend color={colors.warning} label="EMA50 / signal" colors={colors} />
+      <Legend color={colors.success} label="Bullish methodology overlay" colors={colors} />
+      <Legend color={colors.error} label="Bearish methodology overlay" colors={colors} />
+      <Legend color={colors.warning} label="Invalidation band" colors={colors} />
     </View>
   );
 }
