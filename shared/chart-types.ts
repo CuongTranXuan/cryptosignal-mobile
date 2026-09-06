@@ -16,6 +16,8 @@ export type ChartSignalMarker = {
 /** Distinguishes confirmed history from live, unconfirmed overlays. */
 export type ChartDataQuality = "CLOSED_CANDLE" | "LIVE_UNCONFIRMED";
 
+export type ChartAnnotationSource = "ENGINE" | "AGENT" | "DASHBOARD" | "SYSTEM";
+
 /** Extensible annotation kinds for the chart platform. */
 export type ChartAnnotationKind =
   | "HORIZONTAL_LEVEL"
@@ -31,22 +33,21 @@ export type ChartAnnotationBase = {
   timeframe: string;
   createdAt: string;
   dataQuality: ChartDataQuality;
+  source?: ChartAnnotationSource;
+  label?: string;
 };
 
 export type HorizontalLevelAnnotation = ChartAnnotationBase & {
   kind: "HORIZONTAL_LEVEL";
   price: number;
-  label?: string;
 };
 
-/** Reserved for Phase 2+ drawing tools. */
 export type TrendlineAnnotation = ChartAnnotationBase & {
   kind: "TRENDLINE";
   startTime: string;
   startPrice: number;
   endTime: string;
   endPrice: number;
-  label?: string;
 };
 
 export type ZoneAnnotation = ChartAnnotationBase & {
@@ -55,10 +56,42 @@ export type ZoneAnnotation = ChartAnnotationBase & {
   bottomPrice: number;
   startTime: string;
   endTime: string;
-  label?: string;
 };
 
-export type ChartAnnotation = HorizontalLevelAnnotation | TrendlineAnnotation | ZoneAnnotation;
+export type MethodologyOverlayAnnotation = ChartAnnotationBase & {
+  kind: "METHODOLOGY_OVERLAY";
+  source: ChartAnnotationSource;
+  ruleId: string;
+  ruleFamily: string;
+  direction: "BULLISH" | "BEARISH" | "NEUTRAL";
+  sourceFindingId: string;
+  overlayShape: "HORIZONTAL_LEVEL" | "TRENDLINE" | "ZONE";
+  geometry: HorizontalLevelAnnotation | TrendlineAnnotation | ZoneAnnotation;
+};
+
+export type ChartAnnotation =
+  | HorizontalLevelAnnotation
+  | TrendlineAnnotation
+  | ZoneAnnotation
+  | MethodologyOverlayAnnotation;
+
+/** Concrete shapes passed to LWC primitives after expanding methodology overlays. */
+export type RenderableChartAnnotation = HorizontalLevelAnnotation | TrendlineAnnotation | ZoneAnnotation;
+
+const MAX_RENDERABLE_ANNOTATIONS = 20;
+
+export function flattenAnnotationsForRender(annotations: ChartAnnotation[] | undefined): RenderableChartAnnotation[] {
+  if (!annotations?.length) return [];
+  const flat: RenderableChartAnnotation[] = [];
+  for (const annotation of annotations) {
+    if (annotation.kind === "METHODOLOGY_OVERLAY") {
+      flat.push(annotation.geometry);
+      continue;
+    }
+    flat.push(annotation);
+  }
+  return flat.slice(0, MAX_RENDERABLE_ANNOTATIONS);
+}
 
 export type ResearchChartPanelProps = {
   candles: ChartCandle[];
@@ -66,7 +99,5 @@ export type ResearchChartPanelProps = {
   assetSymbol?: string;
   timeframe?: string;
   dataQuality?: ChartDataQuality;
-  /** Persisted or agent-authored annotations; horizontal levels are the first supported kind. */
   annotations?: ChartAnnotation[];
-  onAnnotationsChange?: (annotations: ChartAnnotation[]) => void;
 };
