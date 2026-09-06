@@ -134,3 +134,9 @@
 - [x] Rewrite all reachable Git history to CuongTranXuan <cuongtranxuan.pfiev@gmail.com> and enforce that author identity for future commits.
 - [x] Simplify local Docker-only onboarding: README rewrite, `.env.example`, bundled MySQL, and `pnpm docker:up` / `pnpm docker:down`.
 - [x] Add a TradingView-compatible, closed-candle visualization of CryptoSignal behavior with parity boundaries, documentation, tests, and a GitHub commit.
+- [x] Document product vision, gap analysis, and platform evolution order in `docs/PRODUCT_VISION.md`.
+- [x] Restructure chart components into `components/charting/` with `ResearchChartPanel`, shared `chart-types`, and backward-compatible `PriceHistoryChart` alias.
+- [ ] Persist chart annotations and add trendline/zone drawing tools on `ResearchChartPanel`.
+- [ ] Bridge live Binance candle updates into the research chart with `LIVE_UNCONFIRMED` visual distinction.
+- [ ] Extract dashboard workspaces from `app/(tabs)/index.tsx` into `components/platform/`.
+- [ ] Implement AI analysis harness (pydantic-ai / eino) consuming signal + candle + annotation context.
