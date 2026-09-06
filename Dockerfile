@@ -1,9 +1,11 @@
 # syntax=docker/dockerfile:1
 
+ARG PNPM_VERSION=9.12.0
+
 FROM node:22-bookworm-slim AS node-build
 
 WORKDIR /app
-RUN corepack enable
+RUN npm install -g pnpm@${PNPM_VERSION}
 COPY package.json pnpm-lock.yaml .npmrc ./
 RUN pnpm install --frozen-lockfile
 COPY . .
@@ -12,7 +14,7 @@ RUN pnpm build
 FROM node:22-bookworm-slim AS node-production
 
 WORKDIR /app
-RUN corepack enable
+RUN npm install -g pnpm@${PNPM_VERSION}
 COPY package.json pnpm-lock.yaml .npmrc ./
 RUN pnpm install --frozen-lockfile --prod
 
@@ -59,10 +61,13 @@ RUN uv sync --all-groups --frozen --no-install-project
 
 FROM ghcr.io/astral-sh/uv:python3.11-bookworm-slim AS test-runner
 
+ARG PNPM_VERSION=9.12.0
+
 WORKDIR /app
 ENV NODE_ENV=test
 ENV PATH="/app/engines/freqtrade/.venv/bin:${PATH}"
 
 COPY --from=node-runtime /usr/local/ /usr/local/
+RUN npm install -g pnpm@${PNPM_VERSION}
 COPY --from=node-build /app /app
 COPY --from=python-test /app/engines/freqtrade/.venv ./engines/freqtrade/.venv

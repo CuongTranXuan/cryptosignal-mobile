@@ -33,7 +33,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    command: ["npx", "drizzle-kit", "migrate", "--config=drizzle.pg.config.ts"]
+    command: ["pnpm", "exec", "drizzle-kit", "migrate", "--config=drizzle.pg.config.ts"]
     restart: "no"
 
   web:

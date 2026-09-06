@@ -42,8 +42,9 @@ describe("local market-data Compose contracts", () => {
   it("keeps the full verification suite in a Docker test-runner image", () => {
     expect(testCompose).toContain("target: test-runner");
     expect(testCompose).toContain("pnpm check && pnpm lint");
-    expect(testCompose).toContain("PYTHONPATH=engines/freqtrade pytest");
+    expect(testCompose).toContain("engines/freqtrade/.venv/bin/python -m pytest");
     expect(dockerfile).toContain("AS python-test");
+    expect(dockerfile).toContain("npm install -g pnpm@");
     expect(dockerfile).toContain("uv sync --all-groups --frozen --no-install-project");
     expect(dockerfile).toContain("AS test-runner");
     expect(packageJson).toContain('"test:docker": "docker compose -f infra/docker-compose.test.yml run --build --rm verification"');

@@ -53,7 +53,7 @@ export CRYPTO_SIGNAL_ENV_FILE="$ENV_FILE"
 export CRYPTO_SIGNAL_API_BIND="${CRYPTO_SIGNAL_API_BIND:-127.0.0.1:3000}"
 
 docker compose "${COMPOSE_FILES[@]}" up -d postgres
-docker compose "${COMPOSE_FILES[@]}" --profile migrate run --rm db-migrate
+docker compose "${COMPOSE_FILES[@]}" --profile migrate run --build --rm db-migrate
 compose_up=(docker compose "${COMPOSE_FILES[@]}")
 if ((${#profile_args[@]} > 0)); then
   compose_up+=("${profile_args[@]}")

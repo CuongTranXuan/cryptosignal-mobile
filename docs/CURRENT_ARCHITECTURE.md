@@ -17,9 +17,9 @@ CryptoSignal researches public crypto-market data for **BTC/USDT, ETH/USDT, and 
 | Public live collector | Binance public combined WebSocket streams for trades, book tickers, and configured klines. | Spools before caching; no Binance credentials. |
 | Redis | Latest public event snapshot for the dashboard and evaluator. | Internal network only; stale reads are explicit. |
 | Evaluator | Deterministic live-condition evaluation and optional live-only Telegram delivery. | Writes only `LIVE_UNCONFIRMED` observations. |
-| ClickHouse | Bounded raw-event replay and 90-day warm retention. | Internal network only; raw events do not enter MySQL/TiDB. |
+| ClickHouse | Bounded raw-event replay and 90-day warm retention. | Internal network only; raw events do not enter PostgreSQL. |
 | SeaweedFS | Verified partitioned Parquet archive retention. | S3-compatible internal endpoint only. |
-| MySQL/TiDB | Authentication, configuration, audit events, health, live observations, and archive manifests. | Stores control-plane metadata, never raw market events. |
+| PostgreSQL | Authentication, configuration, audit events, health, live observations, and archive manifests. | Stores control-plane metadata, never raw market events. |
 | Optional MCP adapter | Dashboard-confirmed, public-read-only research discovery/invocation behind a strict allowlist. | Disabled by default; isolated from workers and alerts. |
 
 ## Market-event lifecycle

@@ -35,13 +35,13 @@ Interactive debugging may use the local API and Metro processes, but it must lea
 
 The Freqtrade runner may retrieve public market data and submit closed-candle snapshots and compact runner health through `SIGNAL_INGEST_TOKEN`. The `runner` Compose profile is the only supported deployed runtime. It uses the project-local uv-managed `engines/freqtrade/.venv`, must not write routine output or overlap runs, and must not use `freqtrade trade`, exchange API keys, or any order capability.
 
-Live-market services are public-data-only. `market-live` runs the Binance public collector, Redis cache, and evaluator; `market-retain` runs ClickHouse, SeaweedFS, and the writer. Redis, ClickHouse, SeaweedFS, collector, writer, evaluator, and optional MCP adapter ports must remain internal to Compose. Raw events never enter MySQL/TiDB; only control-plane records, health, observations, and archive manifests do. Every live observation and alert must retain the exact `LIVE_UNCONFIRMED` boundary and must never create, suppress, or overwrite a confirmed closed-candle signal.
+Live-market services are public-data-only. `market-live` runs the Binance public collector, Redis cache, and evaluator; `market-retain` runs ClickHouse, SeaweedFS, and the writer. Redis, ClickHouse, SeaweedFS, collector, writer, evaluator, and optional MCP adapter ports must remain internal to Compose. Raw events never enter PostgreSQL; only control-plane records, health, observations, and archive manifests do. Every live observation and alert must retain the exact `LIVE_UNCONFIRMED` boundary and must never create, suppress, or overwrite a confirmed closed-candle signal.
 
 The optional `mcp-research` profile is disabled by default. It may only reach the fixed public MCP endpoint through the denylist-first adapter, an exact public tool allowlist, and an explicit dashboard-confirmed action. Do not enable connectors, add private Binance credentials, or route MCP output into a worker automatically.
 
 ## Database changes
 
-For every schema change: update `drizzle/schema.ts`; run `pnpm drizzle-kit generate`; read the generated SQL; verify that it is non-destructive; apply it through the production migration process; and add deterministic tests. Never run destructive SQL or drop data without explicit owner confirmation and a verified backup.
+For every schema change: update `drizzle/schema.ts`; run `pnpm db:generate:pg`; read the generated SQL in `drizzle-pg/`; verify that it is non-destructive; apply it through the production migration process; and add deterministic tests. Never run destructive SQL or drop data without explicit owner confirmation and a verified backup.
 
 ## Required validation
 

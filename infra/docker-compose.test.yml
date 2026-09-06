@@ -1,13 +1,45 @@
 name: cryptosignal-test
 
 services:
-  verification:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: cryptosignal
+      POSTGRES_USER: cryptosignal
+      POSTGRES_PASSWORD: cryptosignal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cryptosignal -d cryptosignal"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  db-migrate:
     build:
       context: ..
       dockerfile: Dockerfile
       target: test-runner
     environment:
+      DATABASE_URL: postgresql://cryptosignal:cryptosignal@postgres:5432/cryptosignal
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["pnpm", "exec", "drizzle-kit", "migrate", "--config=drizzle.pg.config.ts"]
+    restart: "no"
+
+  verification:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: test-runner
+    depends_on:
+      db-migrate:
+        condition: service_completed_successfully
+    environment:
       NODE_ENV: test
+      DATABASE_URL: postgresql://cryptosignal:cryptosignal@postgres:5432/cryptosignal
+      SIGNAL_INGEST_TOKEN: test-docker-ingest-token-secret-value
+      DASHBOARD_BOOTSTRAP_TOKEN: test-docker-bootstrap-token-at-least-32-chars
     command:
       - sh
       - -lc
@@ -15,7 +47,7 @@ services:
         pnpm check && pnpm lint &&
         pnpm vitest run --maxWorkers=1 --minWorkers=1 --testTimeout=15000
         --exclude tests/telegram.credentials.test.ts --exclude '.worktrees/**' &&
-        PYTHONPATH=engines/freqtrade pytest -q engines/freqtrade/tests/test_strategy_contract.py &&
+        PYTHONPATH=engines/freqtrade engines/freqtrade/.venv/bin/python -m pytest -q engines/freqtrade/tests/test_strategy_contract.py &&
         bash -n scripts/backup-market-data.sh scripts/restore-market-data.sh
         scripts/verify-market-archive.sh scripts/configure-production.sh
         scripts/docker-up.sh scripts/docker-down.sh
