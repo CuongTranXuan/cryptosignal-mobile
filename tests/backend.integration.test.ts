@@ -36,7 +36,7 @@ describe("signals-only backend integration", () => {
 
   it("accepts a 30-minute closed-candle chart window", async () => {
     const chart = await createCaller().market.chart({ assetSymbol: "BTC/USDT", timeframe: "30m", limit: 30 });
-    expect(chart).toMatchObject({ candles: expect.any(Array), signals: expect.any(Array), scenarios: expect.any(Array) });
+    expect(chart).toMatchObject({ candles: expect.any(Array), signals: expect.any(Array), scenarios: expect.any(Array), annotations: expect.any(Array) });
   });
 
   it("exposes an operational audit-history list for the protected dashboard", async () => {

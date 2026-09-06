@@ -17,7 +17,9 @@ import {
   users,
 } from "../drizzle/schema";
 import { DEFAULT_LIVE_ALERT_CONFIG, LIVE_CONDITION_IDS, type LiveAlertConfig, type LiveObservation, type MarketComponentHealth } from "../shared/live-market-types";
-import { CANDLE_PATTERN_RULE_IDS, METHODOLOGY_RULE_IDS, type AuditEventView, type BotConfigView, type CandlePatternRuleId, type CandlePointInput, type ConditionalScenario, type MethodologyRuleId, type RuleFamilyId, type RunnerHealthState, type RunnerHealthView, type SignalSnapshotInput } from "../shared/signal-types";
+import { buildAnnotationsFromSignalContext } from "../shared/annotation-generator";
+import type { ChartAnnotation } from "../shared/chart-types";
+import { CANDLE_PATTERN_RULE_IDS, METHODOLOGY_RULE_IDS, type AuditEventView, type BotConfigView, type CandlePatternRuleId, type CandlePointInput, type ConditionalScenario, type MethodologyRuleId, type RuleFamilyId, type RunnerHealthState, type RunnerHealthView, type SignalFinding, type SignalSnapshotInput } from "../shared/signal-types";
 import { ENV } from "./_core/env";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -365,7 +367,7 @@ export function buildConditionalScenarios(
 
 export async function getChartWindow(assetSymbol: string, timeframe: string, limit = 120) {
   const db = await getDb();
-  if (!db) return { candles: [], signals: [], scenarios: [] as ConditionalScenario[] };
+  if (!db) return { candles: [], signals: [], scenarios: [] as ConditionalScenario[], annotations: [] as ChartAnnotation[] };
   const newestFirst = await db
     .select()
     .from(candleHistory)
@@ -373,17 +375,43 @@ export async function getChartWindow(assetSymbol: string, timeframe: string, lim
     .orderBy(desc(candleHistory.candleCloseTime))
     .limit(limit);
   const candles = newestFirst.reverse();
-  if (candles.length === 0) return { candles, signals: [], scenarios: [] as ConditionalScenario[] };
+  if (candles.length === 0) return { candles, signals: [], scenarios: [] as ConditionalScenario[], annotations: [] as ChartAnnotation[] };
   const signals = await db
     .select()
     .from(signalSnapshots)
     .where(and(eq(signalSnapshots.assetSymbol, assetSymbol), eq(signalSnapshots.timeframe, timeframe), gte(signalSnapshots.candleCloseTime, candles[0].candleCloseTime)))
     .orderBy(asc(signalSnapshots.candleCloseTime));
   const latest = candles[candles.length - 1];
+  const mappedSignals = signals.map((signal) => ({
+    ...signal,
+    findings: parseJson<SignalFinding[]>(signal.findingsJson, []),
+    conflicts: parseJson(signal.conflictsJson, []),
+    invalidation: parseJson(signal.invalidationJson, {}),
+  }));
+  const latestSignal = mappedSignals.find((signal) => signal.candleCloseTime.getTime() === latest.candleCloseTime.getTime()) ?? mappedSignals[mappedSignals.length - 1];
+  const annotations = latestSignal
+    ? buildAnnotationsFromSignalContext({
+        assetSymbol,
+        timeframe,
+        candleCloseTime: latest.candleCloseTime.toISOString(),
+        configVersion: latestSignal.configVersion,
+        findings: latestSignal.findings,
+        invalidation: latestSignal.invalidation,
+        candle: {
+          close: latest.close,
+          low: latest.low,
+          high: latest.high,
+          ema20: latest.ema20,
+          ema50: latest.ema50,
+        },
+        researchWindowStartTime: candles[0].candleCloseTime.toISOString(),
+      })
+    : [];
   return {
     candles,
-    signals: signals.map((signal) => ({ ...signal, findings: parseJson(signal.findingsJson, []), conflicts: parseJson(signal.conflictsJson, []) })),
+    signals: mappedSignals,
     scenarios: buildConditionalScenarios(latest, timeframe),
+    annotations,
   };
 }
 
