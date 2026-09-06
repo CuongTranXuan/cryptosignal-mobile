@@ -190,6 +190,25 @@ export const marketPipelineHealth = pgTable(
   (table) => [index("market_pipeline_health_state_updated_idx").on(table.state, table.updatedAt)],
 );
 
+export const chartAnnotationSource = pgEnum("chart_annotation_source", ["ENGINE", "AGENT", "DASHBOARD", "SYSTEM"]);
+
+export const chartAnnotations = pgTable(
+  "chart_annotations",
+  {
+    id: varchar("id", { length: 64 }).primaryKey(),
+    assetSymbol: varchar("assetSymbol", { length: 32 }).notNull(),
+    timeframe: varchar("timeframe", { length: 12 }).notNull(),
+    candleCloseTime: timestamp("candleCloseTime", { withTimezone: true }).notNull(),
+    kind: varchar("kind", { length: 32 }).notNull(),
+    source: chartAnnotationSource("source").notNull(),
+    sourceFindingId: varchar("sourceFindingId", { length: 96 }),
+    payloadJson: text("payloadJson").notNull(),
+    configVersion: integer("configVersion").notNull(),
+    createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [index("chart_annotations_asset_time_idx").on(table.assetSymbol, table.timeframe, table.candleCloseTime)],
+);
+
 export const marketArchiveManifests = pgTable(
   "market_archive_manifests",
   {
@@ -217,4 +236,5 @@ export type DashboardCredential = typeof dashboardCredentials.$inferSelect;
 export type RunnerHealth = typeof runnerHealth.$inferSelect;
 export type LiveObservationRecord = typeof liveObservations.$inferSelect;
 export type MarketPipelineHealth = typeof marketPipelineHealth.$inferSelect;
+export type ChartAnnotationRecord = typeof chartAnnotations.$inferSelect;
 export type MarketArchiveManifest = typeof marketArchiveManifests.$inferSelect;
