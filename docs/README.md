@@ -9,6 +9,7 @@ CryptoSignal is a **signals-only, public-market research system**. It analyzes c
 | [`../README.md`](../README.md) | Installation, environment configuration, deployment profiles, backup, restore, and validation commands. | Primary operator guide. |
 | [`../AGENTS.md`](../AGENTS.md) | Mandatory coding boundaries, file ownership map, and validation requirements. | Primary agent guide. |
 | [`PRODUCT_VISION.md`](PRODUCT_VISION.md) | Target platform direction, gap analysis vs current implementation, and recommended evolution order. | Product planning guide. |
+| [`superpowers/specs/2026-09-06-charting-platform-design.md`](superpowers/specs/2026-09-06-charting-platform-design.md) | Agent-first chart annotations on Lightweight Charts — evidence mapping, primitives, API, persistence. | Charting feature spec (review before implementation). |
 | [`CURRENT_ARCHITECTURE.md`](CURRENT_ARCHITECTURE.md) | Current runtime design, data lifecycle, safety boundaries, and control surfaces. | Primary architecture guide. |
 | [`operations/market-data-capacity-report-template.md`](operations/market-data-capacity-report-template.md) | Evidence template for the required three-symbol storage and replay pilot. | Required before capacity decisions. |
 | [`research/2026-08-22-binance-superpowers-source-notes.md`](research/2026-08-22-binance-superpowers-source-notes.md) | Historical source notes for the public-data architecture decision. | Reference only. |
