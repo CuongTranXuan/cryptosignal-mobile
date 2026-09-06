@@ -1,6 +1,6 @@
 import type { Express } from "express";
 import { z } from "zod";
-import { getBotConfig, recordCandleHistory, recordRunnerHealth, recordSignalSnapshot } from "./db";
+import { getBotConfig, recordCandleHistory, recordRunnerHealth, recordSignalSnapshot, recordAuditEvent, buildAnnotationsForSnapshot, upsertChartAnnotations } from "./db";
 import { SIGNAL_STATES } from "../shared/signal-types";
 import { deliverSignalAlert } from "./telegram-polling";
 
@@ -85,6 +85,27 @@ export function registerSignalIngestRoutes(app: Express) {
       return;
     }
     const persisted = await recordSignalSnapshot(parsed.data);
+    if (persisted.isNew) {
+      try {
+        const close = typeof parsed.data.invalidation.close === "number" ? parsed.data.invalidation.close : 0;
+        const atr = typeof parsed.data.invalidation.atr14 === "number" ? parsed.data.invalidation.atr14 : 0;
+        const emaFinding = parsed.data.findings.find((finding) => finding.ruleId === "EMA_TREND_V1");
+        const ema20 = typeof emaFinding?.evidence.ema20 === "number" ? emaFinding.evidence.ema20 : close;
+        const ema50 = typeof emaFinding?.evidence.ema50 === "number" ? emaFinding.evidence.ema50 : close;
+        const researchWindowStartTime = new Date(new Date(parsed.data.candleCloseTime).getTime() - 20 * 3_600_000).toISOString();
+        const annotations = buildAnnotationsForSnapshot(
+          parsed.data,
+          { close, low: close - atr, high: close + atr, ema20, ema50 },
+          researchWindowStartTime,
+        );
+        await upsertChartAnnotations(annotations, parsed.data.configVersion);
+      } catch (error) {
+        await recordAuditEvent("ANNOTATION_SKIPPED", "SYSTEM", "signal-ingest", {
+          snapshotId: parsed.data.id,
+          message: error instanceof Error ? error.message : "annotation generation failed",
+        });
+      }
+    }
     const alert = persisted.isNew ? await deliverSignalAlert(persisted.snapshot) : { delivered: false, reason: "DUPLICATE" as const };
     res.status(persisted.isNew ? 201 : 200).json({ ok: true, snapshot: persisted.snapshot, alert });
   });

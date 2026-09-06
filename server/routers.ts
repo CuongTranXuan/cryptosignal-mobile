@@ -3,7 +3,8 @@ import { z } from "zod";
 import { COOKIE_NAME } from "../shared/const";
 import { LIVE_ASSET_SYMBOLS, LIVE_CONDITION_IDS, type MarketComponentHealth } from "../shared/live-market-types";
 import { CANDLE_PATTERN_RULE_IDS, METHODOLOGY_RULE_IDS, RULE_FAMILY_IDS } from "../shared/signal-types";
-import { getBotConfig, getChartWindow, getMarketPipelineHealth, getRunnerHealth, listAuditEvents, listLiveObservations, listSignalSnapshots, recordAuditEvent, recordMarketPipelineHealth, recordSignalSnapshot, setBotPaused, updateBotConfig } from "./db";
+import { getBotConfig, getChartWindow, deleteChartAnnotation, getMarketPipelineHealth, getRunnerHealth, listAuditEvents, listChartAnnotations, listLiveObservations, listSignalSnapshots, recordAuditEvent, recordMarketPipelineHealth, recordSignalSnapshot, setBotPaused, updateBotConfig, upsertChartAnnotations } from "./db";
+import { chartAnnotationPayloadSchema } from "./chart-annotations";
 import { createConfiguredReplayService, MAX_REPLAY_EVENTS, MAX_REPLAY_WINDOW_MS, MarketCacheUnavailableError, readConfiguredLiveSnapshot } from "./market-data/replay";
 import { createConfiguredPublicMcpClient, McpPublicUnavailableError } from "./market-data/mcp-public-client";
 import { createConfiguredPublicQuoteService, PublicQuoteUnavailableError } from "./market-data/public-quote";
@@ -94,6 +95,21 @@ export const appRouter = router({
     chart: dashboardProtectedProcedure
       .input(z.object({ assetSymbol: liveAssetSymbolSchema, timeframe: z.enum(["30m", "1h", "4h"]), limit: z.number().int().min(30).max(500).default(180) }))
       .query(({ input }) => getChartWindow(input.assetSymbol, input.timeframe, input.limit)),
+    annotations: router({
+      list: dashboardProtectedProcedure
+        .input(z.object({ assetSymbol: liveAssetSymbolSchema, timeframe: z.enum(["30m", "1h", "4h"]), candleCloseTime: z.string().datetime().optional() }))
+        .query(({ input }) => listChartAnnotations(input)),
+      upsert: dashboardProtectedProcedure
+        .input(z.object({ annotations: z.array(chartAnnotationPayloadSchema).min(1).max(20), configVersion: z.number().int().positive().optional() }))
+        .mutation(async ({ input }) => {
+          await upsertChartAnnotations(input.annotations, input.configVersion ?? 1);
+          await recordAuditEvent("ANNOTATIONS_UPSERTED", "DASHBOARD", "dashboard", { count: input.annotations.length });
+          return { count: input.annotations.length };
+        }),
+      delete: dashboardProtectedProcedure
+        .input(z.object({ id: z.string().min(8).max(64) }))
+        .mutation(({ input }) => deleteChartAnnotation(input.id)),
+    }),
     liveSnapshot: dashboardProtectedProcedure.input(z.object({ assetSymbol: liveAssetSymbolSchema })).query(async ({ input }) => {
       try {
         return await readConfiguredLiveSnapshot(input.assetSymbol);

@@ -5,6 +5,7 @@ import {
   auditEvents,
   botConfigs,
   candleHistory,
+  chartAnnotations,
   dashboardCredentials,
   dashboardSessions,
   InsertUser,
@@ -16,10 +17,11 @@ import {
   telegramPollingState,
   users,
 } from "../drizzle/schema";
-import { DEFAULT_LIVE_ALERT_CONFIG, LIVE_CONDITION_IDS, type LiveAlertConfig, type LiveObservation, type MarketComponentHealth } from "../shared/live-market-types";
 import { buildAnnotationsFromSignalContext } from "../shared/annotation-generator";
 import type { ChartAnnotation } from "../shared/chart-types";
+import { DEFAULT_LIVE_ALERT_CONFIG, LIVE_CONDITION_IDS, type LiveAlertConfig, type LiveObservation, type MarketComponentHealth } from "../shared/live-market-types";
 import { CANDLE_PATTERN_RULE_IDS, METHODOLOGY_RULE_IDS, type AuditEventView, type BotConfigView, type CandlePatternRuleId, type CandlePointInput, type ConditionalScenario, type MethodologyRuleId, type RuleFamilyId, type RunnerHealthState, type RunnerHealthView, type SignalFinding, type SignalSnapshotInput } from "../shared/signal-types";
+import { parseChartAnnotationPayload, resolveAnnotationSource } from "./chart-annotations";
 import { ENV } from "./_core/env";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -365,6 +367,78 @@ export function buildConditionalScenarios(
   ];
 }
 
+export function buildAnnotationsForSnapshot(
+  snapshot: SignalSnapshotInput,
+  candle: { close: number; low: number; high: number; ema20: number; ema50: number },
+  researchWindowStartTime: string,
+): ChartAnnotation[] {
+  return buildAnnotationsFromSignalContext({
+    assetSymbol: snapshot.assetSymbol,
+    timeframe: snapshot.timeframe,
+    candleCloseTime: snapshot.candleCloseTime,
+    configVersion: snapshot.configVersion,
+    findings: snapshot.findings,
+    invalidation: snapshot.invalidation,
+    candle,
+    researchWindowStartTime,
+  });
+}
+
+export async function upsertChartAnnotations(annotations: ChartAnnotation[], configVersion = 0) {
+  const db = await getDb();
+  if (!db || annotations.length === 0) return;
+  for (const annotation of annotations) {
+    await db
+      .insert(chartAnnotations)
+      .values({
+        id: annotation.id,
+        assetSymbol: annotation.assetSymbol,
+        timeframe: annotation.timeframe,
+        candleCloseTime: new Date(annotation.createdAt),
+        kind: annotation.kind,
+        source: resolveAnnotationSource(annotation),
+        sourceFindingId: annotation.kind === "METHODOLOGY_OVERLAY" ? annotation.sourceFindingId : null,
+        payloadJson: JSON.stringify(annotation),
+        configVersion,
+      })
+      .onConflictDoUpdate({
+        target: chartAnnotations.id,
+        set: {
+          payloadJson: JSON.stringify(annotation),
+          kind: annotation.kind,
+          source: resolveAnnotationSource(annotation),
+        },
+      });
+  }
+}
+
+export async function listChartAnnotations(input: { assetSymbol: string; timeframe: string; candleCloseTime?: string }) {
+  const db = await getDb();
+  if (!db) return [] as ChartAnnotation[];
+  const rows = await db
+    .select()
+    .from(chartAnnotations)
+    .where(
+      input.candleCloseTime
+        ? and(
+            eq(chartAnnotations.assetSymbol, input.assetSymbol),
+            eq(chartAnnotations.timeframe, input.timeframe),
+            eq(chartAnnotations.candleCloseTime, new Date(input.candleCloseTime)),
+          )
+        : and(eq(chartAnnotations.assetSymbol, input.assetSymbol), eq(chartAnnotations.timeframe, input.timeframe)),
+    )
+    .orderBy(desc(chartAnnotations.candleCloseTime))
+    .limit(20);
+  return rows.map((row) => parseChartAnnotationPayload(parseJson(row.payloadJson, {})));
+}
+
+export async function deleteChartAnnotation(id: string) {
+  const db = await getDb();
+  if (!db) return;
+  await db.delete(chartAnnotations).where(eq(chartAnnotations.id, id));
+  await recordAuditEvent("ANNOTATION_DELETED", "DASHBOARD", "dashboard", { id });
+}
+
 export async function getChartWindow(assetSymbol: string, timeframe: string, limit = 120) {
   const db = await getDb();
   if (!db) return { candles: [], signals: [], scenarios: [] as ConditionalScenario[], annotations: [] as ChartAnnotation[] };
@@ -389,24 +463,43 @@ export async function getChartWindow(assetSymbol: string, timeframe: string, lim
     invalidation: parseJson(signal.invalidationJson, {}),
   }));
   const latestSignal = mappedSignals.find((signal) => signal.candleCloseTime.getTime() === latest.candleCloseTime.getTime()) ?? mappedSignals[mappedSignals.length - 1];
-  const annotations = latestSignal
-    ? buildAnnotationsFromSignalContext({
-        assetSymbol,
-        timeframe,
-        candleCloseTime: latest.candleCloseTime.toISOString(),
-        configVersion: latestSignal.configVersion,
-        findings: latestSignal.findings,
-        invalidation: latestSignal.invalidation,
-        candle: {
-          close: latest.close,
-          low: latest.low,
-          high: latest.high,
-          ema20: latest.ema20,
-          ema50: latest.ema50,
-        },
-        researchWindowStartTime: candles[0].candleCloseTime.toISOString(),
-      })
-    : [];
+  const persisted = await listChartAnnotations({
+    assetSymbol,
+    timeframe,
+    candleCloseTime: latest.candleCloseTime.toISOString(),
+  });
+  const annotations = persisted.length > 0
+    ? persisted
+    : latestSignal
+      ? buildAnnotationsForSnapshot(
+          {
+            id: latestSignal.id,
+            assetSymbol: latestSignal.assetSymbol,
+            venue: latestSignal.venue,
+            timeframe: latestSignal.timeframe,
+            candleCloseTime: latestSignal.candleCloseTime.toISOString(),
+            state: latestSignal.state as SignalSnapshotInput["state"],
+            score: latestSignal.score,
+            confidence: latestSignal.confidence,
+            regime: latestSignal.regime,
+            dataQualityState: latestSignal.dataQualityState,
+            findings: latestSignal.findings,
+            conflicts: latestSignal.conflicts,
+            invalidation: latestSignal.invalidation,
+            strategyVersion: latestSignal.strategyVersion,
+            configVersion: latestSignal.configVersion,
+            sourceManifestId: latestSignal.sourceManifestId,
+          },
+          {
+            close: latest.close,
+            low: latest.low,
+            high: latest.high,
+            ema20: latest.ema20,
+            ema50: latest.ema50,
+          },
+          candles[0].candleCloseTime.toISOString(),
+        )
+      : [];
   return {
     candles,
     signals: mappedSignals,
