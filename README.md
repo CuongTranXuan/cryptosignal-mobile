@@ -1,130 +1,27 @@
 # CryptoSignal
 
-Signals-only crypto market research dashboard. The app evaluates completed public OHLCV candles, records immutable evidence, and displays it in a password-protected browser UI.
+A lightweight chart platform for **people** and **LLM agents** to draw candle patterns on the same market view.
 
-> **No orders are placed.** There are no exchange private keys, portfolio features, or trade execution paths.
+## What it is
 
-## Prerequisites
+1. **Binance MCP** supplies public candle data.
+2. **TradingView Lightweight Charts** renders the candles.
+3. **Humans** draw and edit patterns on the chart.
+4. **LLM agents** draw the same patterns through a structured API.
 
-- [Docker](https://docs.docker.com/get-docker/) with Compose v2
-- Enough disk for images, local PostgreSQL, and optional market-data volumes
-- A Supabase project for hosted PostgreSQL deployment
+Both surfaces share one annotation model, so a pattern drawn by an agent looks the same as one drawn by a person.
 
-## Quick start
-
-From the repo root:
-
-```bash
-pnpm docker:up
+```
+Binance MCP  -->  candles  -->  Lightweight Charts
+                                   ^
+                                   |
+                      human UI  +  agent drawing API
 ```
 
-On first run this:
+## Boundary
 
-1. Creates `.env` from `.env.example` if missing
-2. Starts PostgreSQL
-3. Applies database migrations
-4. Builds and starts the web API on `http://127.0.0.1:3000`
+This is a research chart, not a trading terminal. No order placement, no exchange private keys, no portfolio or execution.
 
-Open the dashboard, then create the first administrator account using the bootstrap token from `.env` (`DASHBOARD_BOOTSTRAP_TOKEN`).
+## Status
 
-Stop everything:
-
-```bash
-pnpm docker:down
-```
-
-## Optional profiles
-
-Add profiles to the same command:
-
-```bash
-pnpm docker:up -- --with-runner
-pnpm docker:up -- --with-telegram
-pnpm docker:up -- --with-market-live
-pnpm docker:up -- --with-market-live --with-market-retain
-pnpm docker:up -- --with-mcp-research
-```
-
-| Profile | What it adds |
-|---|---|
-| `runner` | Closed-candle Freqtrade analysis cycle every 5 minutes |
-| `telegram` | Owner-allowlisted Telegram long polling (set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_ALLOWED_USER_IDS` in `.env`) |
-| `market-live` | Public Binance WebSocket collector, Redis cache, live evaluator |
-| `market-retain` | ClickHouse replay store, SeaweedFS archive, event writer |
-| `mcp-research` | Optional public read-only MCP adapter (disabled by default) |
-
-## Environment
-
-Local settings live in `.env` at the repo root. Start from `.env.example`:
-
-```bash
-cp .env.example .env
-```
-
-| Variable | Purpose |
-|---|---|
-| `DATABASE_URL` | PostgreSQL connection string; local Docker uses the bundled Postgres service |
-| `POSTGRES_PASSWORD` | Local Docker Postgres password (defaults to `cryptosignal`) |
-| `DASHBOARD_BOOTSTRAP_TOKEN` | One-time first-admin setup key (≥ 32 characters) |
-| `SIGNAL_INGEST_TOKEN` | Token for closed-candle ingest from the runner |
-| `CORS_ALLOWED_ORIGINS` | Comma-separated frontend origins, including the GitHub Pages URL |
-| `EXPO_WEB_PREVIEW_URL` | Public frontend URL used after OAuth callback |
-| `TELEGRAM_*` | Required only for `--with-telegram` |
-
-Local Docker development uses the bundled PostgreSQL service. Hosted deployment uses the same PostgreSQL schema and can target Supabase with `pnpm db:generate:pg` and `pnpm db:migrate:pg`.
-
-## Low-cost hosted deployment
-
-The intended hosted split is GitHub Pages for the static Expo web export, Render for the Express/tRPC API, and Supabase for PostgreSQL. Configure the following GitHub repository variables for the Pages workflow: `EXPO_PUBLIC_API_BASE_URL`, `EXPO_PUBLIC_OAUTH_PORTAL_URL`, `EXPO_PUBLIC_OAUTH_SERVER_URL`, and `EXPO_PUBLIC_APP_ID`. Configure the corresponding backend secrets in Render from [`render.yaml`](render.yaml).
-
-Generate and apply the PostgreSQL schema from a machine that has the Supabase connection string available:
-
-```bash
-export DATABASE_URL='postgresql://...'
-pnpm db:generate:pg
-pnpm db:migrate:pg
-```
-
-The first deployment should run only the API. Telegram polling, market-live collection, ClickHouse retention, and other continuous workers require separate always-on worker capacity and are intentionally not enabled by the Render web service definition.
-
-## Verification
-
-```bash
-pnpm test:docker
-```
-
-Runs type-check, lint, Vitest contracts, Freqtrade strategy contract, and script validation inside Docker.
-
-## TradingView closed-candle visualizer
-
-The repository includes a signals-only Pine Script v6 indicator at [`tradingview/CryptoSignalClosedCandleVisualizer.pine`](tradingview/CryptoSignalClosedCandleVisualizer.pine). Paste it into TradingView’s Pine Editor to draw CryptoSignal-style closed-candle setup behavior on a matching spot chart and timeframe. It is an **indicator, not a strategy**: it cannot place orders, access this application, or modify its shared controls.
-
-See [`docs/TRADINGVIEW_VISUALIZER.md`](docs/TRADINGVIEW_VISUALIZER.md) for installation, score mapping, TA-Lib parity boundaries, and closed-bar alert setup.
-
-## Schema changes
-
-After editing `drizzle/schema.ts`:
-
-```bash
-pnpm db:generate:pg
-# Review drizzle-pg/<new_migration>.sql
-pnpm docker:up
-```
-
-`docker:up` reapplies migrations against the local PostgreSQL container.
-
-For hosted Supabase deployment, run `pnpm db:migrate:pg` from a machine with the production `DATABASE_URL` set.
-
-## Architecture
-
-| Component | Role |
-|---|---|
-| `web` | Express/tRPC API, static browser dashboard, sessions |
-| `postgres` (local) / `PostgreSQL` (hosted) | Credentials, sessions, signals, candles, audit events |
-| `runner` | Public-market closed-candle analysis (optional) |
-| `poller` | Telegram long polling (optional, one instance per bot token) |
-| `market-live` / `market-retain` | Public live-market collection and retention (optional) |
-
-## Conventions
-
-Read [`AGENTS.md`](AGENTS.md) for security boundaries, migration workflow, and the source-of-truth file map.
+Clean restart. Implementation starts from this README.
