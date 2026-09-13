@@ -1,0 +1,17 @@
+{
+  "id": "shp_triangle_1",
+  "symbol": "BTCUSDT",
+  "interval": "1h",
+  "kind": "polyline",
+  "name": "Symmetrical triangle",
+  "status": "preview",
+  "source": "agent",
+  "confidence": 0.88,
+  "points": [
+    { "time": 1710000000, "price": 64200 },
+    { "time": 1710003600, "price": 63800 },
+    { "time": 1710007200, "price": 64500 }
+  ],
+  "priceLow": null,
+  "priceHigh": null
+}

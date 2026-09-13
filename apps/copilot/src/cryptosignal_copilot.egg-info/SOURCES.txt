@@ -1,0 +1,9 @@
+pyproject.toml
+src/cryptosignal_copilot/__init__.py
+src/cryptosignal_copilot/schema.py
+src/cryptosignal_copilot.egg-info/PKG-INFO
+src/cryptosignal_copilot.egg-info/SOURCES.txt
+src/cryptosignal_copilot.egg-info/dependency_links.txt
+src/cryptosignal_copilot.egg-info/requires.txt
+src/cryptosignal_copilot.egg-info/top_level.txt
+tests/test_schema.py
