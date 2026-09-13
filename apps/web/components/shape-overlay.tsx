@@ -14,7 +14,8 @@ import type { PatternShape } from "../lib/pattern-shape";
 import { useShapeStore } from "../lib/stores/shape-store";
 
 const NODE_R = 5;
-const NODE_HIT = 8;
+/** Hit-target radius in px (diameter ≥ 16) so nodes are easy to grab. */
+const NODE_HIT_R = 8;
 const PREVIEW_STROKE = "#f0b90b";
 const COMMITTED_STROKE = "#0ecb81";
 const ZONE_FILL = "rgba(240, 185, 11, 0.18)";
@@ -117,7 +118,7 @@ export function ShapeOverlay({ coordApiRef, overlayTick }: ShapeOverlayProps) {
 
       <svg
         ref={svgRef}
-        className="pointer-events-auto absolute inset-0 h-full w-full"
+        className="pointer-events-none absolute inset-0 h-full w-full"
         width={size.w}
         height={size.h}
         onPointerMove={onPointerMove}
@@ -127,7 +128,7 @@ export function ShapeOverlay({ coordApiRef, overlayTick }: ShapeOverlayProps) {
         {shapes.map((shape) => {
           if (!api) return null;
           if (shape.kind === "zone") {
-            return renderZone(shape, api, size.w, selectedId, dragRef, select);
+            return renderZone(shape, api, size.w, selectedId, dragRef);
           }
           return renderPath(shape, api, selectedId, dragRef, select);
         })}
@@ -142,7 +143,6 @@ function renderZone(
   paneWidth: number,
   selectedId: string | null,
   dragRef: MutableRefObject<DragState | null>,
-  select: (id: string | null) => void,
 ) {
   const rect = mapZoneToRect(shape, api, paneWidth);
   if (!rect || rect.height <= 0) return null;
@@ -161,20 +161,18 @@ function renderZone(
         stroke={stroke}
         strokeWidth={selected ? 2 : 1}
         strokeDasharray={dash}
-        onPointerDown={(e) => {
-          e.stopPropagation();
-          select(shape.id);
-        }}
+        className="pointer-events-none"
       />
       {selected && shape.priceHigh != null && shape.priceLow != null && (
         <>
           <circle
             cx={rect.x + rect.width / 2}
             cy={rect.y}
-            r={NODE_R}
+            r={NODE_HIT_R}
             fill={stroke}
             stroke="#0b0e14"
             strokeWidth={1}
+            className="pointer-events-auto"
             style={{ cursor: "ns-resize" }}
             onPointerDown={(e) => {
               e.stopPropagation();
@@ -191,10 +189,11 @@ function renderZone(
           <circle
             cx={rect.x + rect.width / 2}
             cy={rect.y + rect.height}
-            r={NODE_R}
+            r={NODE_HIT_R}
             fill={stroke}
             stroke="#0b0e14"
             strokeWidth={1}
+            className="pointer-events-auto"
             style={{ cursor: "ns-resize" }}
             onPointerDown={(e) => {
               e.stopPropagation();
@@ -236,6 +235,8 @@ function renderPath(
         stroke={stroke}
         strokeWidth={selected ? 2.5 : 1.5}
         strokeDasharray={dash}
+        className="pointer-events-auto"
+        style={{ cursor: "pointer" }}
         onPointerDown={(e) => {
           e.stopPropagation();
           select(shape.id);
@@ -246,10 +247,11 @@ function renderPath(
           key={`${shape.id}-${index}`}
           cx={p.x}
           cy={p.y}
-          r={Math.max(NODE_R, NODE_HIT / 2)}
+          r={Math.max(NODE_R, NODE_HIT_R)}
           fill={selected ? stroke : "transparent"}
           stroke={stroke}
           strokeWidth={1.5}
+          className="pointer-events-auto"
           style={{ cursor: selected ? "grab" : "pointer" }}
           onPointerDown={(e) => {
             e.stopPropagation();
