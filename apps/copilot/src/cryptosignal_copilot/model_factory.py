@@ -1,0 +1,24 @@
+from __future__ import annotations
+
+from pydantic_ai.models.anthropic import AnthropicModel
+from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.providers.anthropic import AnthropicProvider
+from pydantic_ai.providers.openai import OpenAIProvider
+
+from cryptosignal_copilot.config import LlmConfig, LlmConfigError, health_payload
+
+__all__ = ["build_model", "health_payload"]
+
+
+def build_model(cfg: LlmConfig):
+    if cfg.style == "openai":
+        return OpenAIChatModel(
+            cfg.model,
+            provider=OpenAIProvider(base_url=cfg.base_url, api_key=cfg.api_key),
+        )
+    if cfg.style == "anthropic":
+        return AnthropicModel(
+            cfg.model,
+            provider=AnthropicProvider(base_url=cfg.base_url, api_key=cfg.api_key),
+        )
+    raise LlmConfigError(f"unknown LLM_API_STYLE: {cfg.style}")
