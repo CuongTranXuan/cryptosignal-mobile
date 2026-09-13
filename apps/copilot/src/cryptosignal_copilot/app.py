@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import ValidationError
 
 from cryptosignal_copilot.agent import AgentRunner, PydanticAiRunner
 from cryptosignal_copilot.config import LlmConfigError, health_payload, load_llm_config
@@ -28,8 +29,11 @@ def create_app(runner: AgentRunner | None = None) -> FastAPI:
         allow_headers=["*"],
     )
 
-    lock = asyncio.Lock()
+    state_lock = asyncio.Lock()
     latest_request: dict[str, AnalyzeRequest | None] = {"value": None}
+    is_draining = {"value": False}
+    drain_done = asyncio.Event()
+    drain_done.set()
 
     @app.get("/v1/copilot/health")
     async def health():
@@ -47,15 +51,42 @@ def create_app(runner: AgentRunner | None = None) -> FastAPI:
             return JSONResponse({"error": "LLM config missing"}, status_code=503)
 
         body = await request.json()
-        analyze_req = AnalyzeRequest.model_validate(body)
-        latest_request["value"] = analyze_req
+        try:
+            analyze_req = AnalyzeRequest.model_validate(body)
+        except ValidationError as exc:
+            return JSONResponse({"detail": exc.errors()}, status_code=422)
 
         async def event_stream() -> AsyncIterator[str]:
-            async with lock:
-                current = latest_request["value"] or analyze_req
-                latest_request["value"] = None
-                async for event_name, data in use_runner.run(current):
-                    yield sse(event_name, data)
+            async with state_lock:
+                latest_request["value"] = analyze_req
+                if is_draining["value"]:
+                    is_waiter = True
+                else:
+                    is_draining["value"] = True
+                    drain_done.clear()
+                    is_waiter = False
+
+            if is_waiter:
+                await drain_done.wait()
+                yield sse("done", {"note": "superseded"})
+                return
+
+            try:
+                while True:
+                    async with state_lock:
+                        current = latest_request["value"]
+                        if current is None:
+                            is_draining["value"] = False
+                            drain_done.set()
+                            break
+                        latest_request["value"] = None
+                    async for event_name, data in use_runner.run(current):
+                        yield sse(event_name, data)
+            except Exception:
+                async with state_lock:
+                    is_draining["value"] = False
+                    drain_done.set()
+                raise
 
         return StreamingResponse(event_stream(), media_type="text/event-stream")
 

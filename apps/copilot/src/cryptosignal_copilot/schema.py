@@ -1,6 +1,6 @@
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 INTERVALS = ("1m", "15m", "1h", "4h", "1d")
 Interval = Literal["1m", "15m", "1h", "4h", "1d"]
@@ -74,10 +74,36 @@ class AnalyzeRequest(BaseModel):
 
 
 class AnalyzeResult(BaseModel):
+    """Agent structured output. Shapes are raw dicts so invalid geometry can be dropped."""
+
     model_config = ConfigDict(extra="forbid")
 
     summary: str
-    shapes: list[PatternShape]
+    shapes: list[dict[str, Any]]
+
+
+def filter_preview_shapes(
+    raw_shapes: list[Any],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Force preview status, keep valid shapes, return dropped ids."""
+    valid: list[dict[str, Any]] = []
+    dropped_ids: list[str] = []
+    for raw in raw_shapes:
+        if hasattr(raw, "model_dump"):
+            data = raw.model_dump()
+        elif isinstance(raw, dict):
+            data = dict(raw)
+        else:
+            dropped_ids.append("?")
+            continue
+        data["status"] = "preview"
+        try:
+            validated = PatternShape.model_validate(data)
+        except (ValidationError, ValueError):
+            dropped_ids.append(str(data.get("id", "?")))
+            continue
+        valid.append(validated.model_dump())
+    return valid, dropped_ids
 
 
 class ExtendRange(BaseModel):

@@ -3,14 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, Protocol
 
-from pydantic import ValidationError
 from pydantic_ai import Agent
 from pydantic_ai.exceptions import ModelHTTPError
 
 from cryptosignal_copilot.config import load_llm_config
 from cryptosignal_copilot.klines import fetch_klines
 from cryptosignal_copilot.model_factory import build_model
-from cryptosignal_copilot.schema import AnalyzeRequest, AnalyzeResult, PatternShape
+from cryptosignal_copilot.schema import AnalyzeRequest, AnalyzeResult, filter_preview_shapes
 
 INSTRUCTIONS = (
     "You are a crypto chart research assistant. Analyze only closed candles. "
@@ -99,17 +98,7 @@ class PydanticAiRunner:
         if output.summary:
             yield "text", {"delta": output.summary}
 
-        valid_shapes: list[dict[str, Any]] = []
-        dropped_ids: list[str] = []
-        for shape in output.shapes:
-            raw = shape.model_dump()
-            raw["status"] = "preview"
-            try:
-                validated = PatternShape.model_validate(raw)
-            except ValidationError:
-                dropped_ids.append(str(raw.get("id", "?")))
-                continue
-            valid_shapes.append(validated.model_dump())
+        valid_shapes, dropped_ids = filter_preview_shapes(output.shapes)
 
         if dropped_ids:
             yield "text", {"delta": f"Dropped invalid shapes: {', '.join(dropped_ids)}"}
