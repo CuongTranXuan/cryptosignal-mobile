@@ -74,6 +74,8 @@ class AnalyzeRequest(BaseModel):
 
 
 class AnalyzeResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     summary: str
     shapes: list[PatternShape]
 
