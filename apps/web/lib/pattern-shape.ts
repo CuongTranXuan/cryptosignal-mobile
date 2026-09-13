@@ -3,10 +3,12 @@ import { z } from "zod";
 export const INTERVALS = ["1m", "15m", "1h", "4h", "1d"] as const;
 export type Interval = (typeof INTERVALS)[number];
 
-const PointSchema = z.object({
-  time: z.number().int(),
-  price: z.number(),
-});
+const PointSchema = z
+  .object({
+    time: z.number().int(),
+    price: z.number(),
+  })
+  .strict();
 
 export const PatternShapeSchema = z
   .object({
@@ -40,23 +42,27 @@ export const PatternShapeSchema = z
 export type PatternShape = z.infer<typeof PatternShapeSchema>;
 export const parsePatternShape = (input: unknown): PatternShape => PatternShapeSchema.parse(input);
 
-export const CandleSchema = z.object({
-  time: z.number().int(),
-  open: z.number(),
-  high: z.number(),
-  low: z.number(),
-  close: z.number(),
-  volume: z.number(),
-});
+export const CandleSchema = z
+  .object({
+    time: z.number().int(),
+    open: z.number(),
+    high: z.number(),
+    low: z.number(),
+    close: z.number(),
+    volume: z.number(),
+  })
+  .strict();
 export type Candle = z.infer<typeof CandleSchema>;
 
-export const AnalyzeRequestSchema = z.object({
-  symbol: z.string(),
-  interval: z.enum(INTERVALS),
-  from: z.number().int(),
-  to: z.number().int(),
-  closedCandles: z.array(CandleSchema),
-  existingShapes: z.array(PatternShapeSchema),
-  prompt: z.string().min(1),
-});
+export const AnalyzeRequestSchema = z
+  .object({
+    symbol: z.string(),
+    interval: z.enum(INTERVALS),
+    from: z.number().int(),
+    to: z.number().int(),
+    closedCandles: z.array(CandleSchema),
+    existingShapes: z.array(PatternShapeSchema),
+    prompt: z.string().min(1),
+  })
+  .strict();
 export type AnalyzeRequest = z.infer<typeof AnalyzeRequestSchema>;

@@ -7,13 +7,16 @@ node_modules/
 .env
 .env.*
 !.env.example
+!**/.env.example
 
 # python
-__pycache__/
-*.pyc
+**/__pycache__/
+**/*.pyc
+apps/copilot/src/cryptosignal_copilot.egg-info/
 
 # frontend
 .next/
+apps/web/.next/
 
 # os / editor
 .DS_Store
@@ -25,3 +28,7 @@ __pycache__/
 dist/
 .cache/
 .expo/
+tsconfig.tsbuildinfo
+**/tsconfig.tsbuildinfo
+.worktrees/
+docs/superpowers/
