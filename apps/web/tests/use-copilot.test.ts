@@ -10,6 +10,15 @@ import {
   createCopilotClient,
 } from "../lib/use-copilot";
 
+const c0: Candle = {
+  time: 1709996400,
+  open: 0.8,
+  high: 1.1,
+  low: 0.7,
+  close: 1.0,
+  volume: 12,
+};
+
 const c1: Candle = {
   time: 1710000000,
   open: 1,
@@ -47,9 +56,9 @@ const validShape = (id = "s1"): PatternShape => ({
   source: "agent",
   confidence: 0.8,
   points: [
-    { time: 1710000000, price: 1 },
-    { time: 1710003600, price: 2 },
-    { time: 1710007200, price: 1.5 },
+    { time: c0.time, price: 1 },
+    { time: c1.time, price: 2 },
+    { time: c2.time, price: 1.5 },
   ],
   priceLow: null,
   priceHigh: null,
@@ -79,7 +88,7 @@ function resetStores() {
   useChartStore.setState({
     symbol: "BTCUSDT",
     interval: "1h",
-    candles: [c1, c2, c3Forming],
+    candles: [c0, c1, c2, c3Forming],
     tickerPercent: null,
     connection: "live",
     shapesResetSignal: 0,
@@ -124,7 +133,7 @@ describe("use-copilot / createCopilotClient", () => {
     const client = createCopilotClient({
       fetchImpl: fetchMock as unknown as typeof fetch,
       baseUrl: "http://127.0.0.1:8000",
-      getClosedTimes: () => new Set([c1.time, c2.time]),
+      getClosedTimes: () => new Set([c0.time, c1.time, c2.time]),
     });
 
     await client.analyze(TRIANGLES_PROMPT);
@@ -135,8 +144,8 @@ describe("use-copilot / createCopilotClient", () => {
     expect(call[1].method).toBe("POST");
     const body = JSON.parse(String(call[1].body));
     expect(body.prompt).toBe(TRIANGLES_PROMPT);
-    expect(body.closedCandles).toEqual([c1, c2]);
-    expect(body.from).toBe(c1.time);
+    expect(body.closedCandles).toEqual([c0, c1, c2]);
+    expect(body.from).toBe(c0.time);
     expect(body.to).toBe(c2.time);
 
     const ai = useAiStore.getState();
@@ -162,7 +171,7 @@ describe("use-copilot / createCopilotClient", () => {
 
     const client = createCopilotClient({
       fetchImpl: fetchMock as unknown as typeof fetch,
-      getClosedTimes: () => new Set([c1.time, c2.time]),
+      getClosedTimes: () => new Set([c0.time, c1.time, c2.time]),
     });
 
     await client.analyze("find patterns");
@@ -186,7 +195,7 @@ describe("use-copilot / createCopilotClient", () => {
       const fetchMock = vi.fn(async () => new Response(JSON.stringify({ error: "x" }), { status }));
       const client = createCopilotClient({
         fetchImpl: fetchMock as unknown as typeof fetch,
-        getClosedTimes: () => new Set([c1.time, c2.time]),
+        getClosedTimes: () => new Set([c0.time, c1.time, c2.time]),
       });
       await client.analyze("hi");
       expect(useAiStore.getState().lastError).toBe(message);
@@ -224,7 +233,7 @@ describe("use-copilot / createCopilotClient", () => {
 
     const client = createCopilotClient({
       fetchImpl: fetchMock as unknown as typeof fetch,
-      getClosedTimes: () => new Set([c1.time, c2.time]),
+      getClosedTimes: () => new Set([c0.time, c1.time, c2.time]),
     });
 
     useAiStore.getState().setMode("auto");
@@ -262,7 +271,7 @@ describe("use-copilot / createCopilotClient", () => {
 
     const client = createCopilotClient({
       fetchImpl: fetchMock as unknown as typeof fetch,
-      getClosedTimes: () => new Set([c1.time, c2.time]),
+      getClosedTimes: () => new Set([c0.time, c1.time, c2.time]),
     });
 
     await client.analyze("queued waiter");
@@ -272,7 +281,7 @@ describe("use-copilot / createCopilotClient", () => {
     expect(useShapeStore.getState().previews().map((s) => s.id)).toEqual(["prior"]);
   });
 
-  it("extendRange merges fetched klines into chart store", async () => {
+  it("extendRange merges fetched klines using from/to ms range", async () => {
     const fetchKlines = vi.fn(async () => ({
       candles: [
         { time: 1709996400, open: 0.5, high: 1, low: 0.4, close: 0.9, volume: 3 },
@@ -292,16 +301,49 @@ describe("use-copilot / createCopilotClient", () => {
     const client = createCopilotClient({
       fetchImpl: fetchMock as unknown as typeof fetch,
       fetchKlines,
-      getClosedTimes: () => new Set([c1.time, c2.time]),
+      getClosedTimes: () => new Set([c0.time, c1.time, c2.time]),
     });
 
     await client.analyze("extend");
 
-    expect(fetchKlines).toHaveBeenCalledWith("BTCUSDT", "1h", expect.any(Number));
+    expect(fetchKlines).toHaveBeenCalledWith("BTCUSDT", "1h", 1000, {
+      startTimeMs: 1709996400 * 1000,
+      endTimeMs: 1710000000 * 1000,
+    });
     const times = useChartStore.getState().candles.map((c) => c.time);
     expect(times[0]).toBe(1709996400);
     expect(times).toContain(c1.time);
     expect(times).toContain(c2.time);
+  });
+
+  it("drops shapes with points outside closed candle times", async () => {
+    const outOfWindow = {
+      ...validShape("off-window"),
+      points: [
+        { time: c1.time, price: 1 },
+        { time: c2.time, price: 2 },
+        { time: 9999999999, price: 1.5 },
+      ],
+    };
+
+    const fetchMock = vi.fn(async () =>
+      streamResponse([
+        sseChunk("shapes", { shapes: [validShape("ok"), outOfWindow] }),
+        sseChunk("done", {}),
+      ]),
+    );
+
+    const client = createCopilotClient({
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      getClosedTimes: () => new Set([c0.time, c1.time, c2.time]),
+    });
+
+    await client.analyze("filter times");
+
+    expect(useShapeStore.getState().previews().map((s) => s.id)).toEqual(["ok"]);
+    expect(useAiStore.getState().lastError).toContain("off-window");
+    const agentMsg = useAiStore.getState().messages.find((m) => m.role === "agent");
+    expect(agentMsg?.content).toContain("Dropped invalid shapes: off-window");
   });
 
   it("clearAll shapes when chart shapesResetSignal increments", async () => {
@@ -339,7 +381,7 @@ describe("use-copilot / createCopilotClient", () => {
 
     const client = createCopilotClient({
       fetchImpl: fetchMock as unknown as typeof fetch,
-      getClosedTimes: () => new Set([c1.time, c2.time]),
+      getClosedTimes: () => new Set([c0.time, c1.time, c2.time]),
     });
 
     await client.analyze("parse");

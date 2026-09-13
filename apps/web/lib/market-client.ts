@@ -31,10 +31,16 @@ export type WsConnection = {
   close: () => void;
 };
 
+export type FetchKlinesRange = {
+  startTimeMs?: number;
+  endTimeMs?: number;
+};
+
 export type FetchKlines = (
   symbol: string,
   interval: string,
   limit?: number,
+  range?: FetchKlinesRange,
 ) => Promise<KlinesSnapshot>;
 
 export type FetchTicker = (symbol: string) => Promise<number>;
@@ -49,8 +55,15 @@ export async function fetchKlines(
   symbol: string,
   interval: string,
   limit = 500,
+  range?: FetchKlinesRange,
 ): Promise<KlinesSnapshot> {
-  const res = await fetch(klinesUrl(symbol, interval, limit));
+  const res = await fetch(
+    klinesUrl(symbol, interval, {
+      limit,
+      startTimeMs: range?.startTimeMs,
+      endTimeMs: range?.endTimeMs,
+    }),
+  );
   const body: unknown = await res.json().catch(() => null);
 
   if (!res.ok) {

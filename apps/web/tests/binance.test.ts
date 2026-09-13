@@ -60,6 +60,11 @@ describe("binance", () => {
     expect(klinesUrl("ETHUSDT", "15m", 100)).toBe(
       "https://api.binance.com/api/v3/klines?symbol=ETHUSDT&interval=15m&limit=100",
     );
+    expect(
+      klinesUrl("BTCUSDT", "1h", { limit: 1000, startTimeMs: 1000, endTimeMs: 2000 }),
+    ).toBe(
+      "https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1h&limit=1000&startTime=1000&endTime=2000",
+    );
     expect(tickerUrl("BTCUSDT")).toBe(
       "https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT",
     );

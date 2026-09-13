@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import ValidationError
 
 from cryptosignal_copilot.agent import AgentRunner, PydanticAiRunner
-from cryptosignal_copilot.config import LlmConfigError, health_payload, load_llm_config
+from cryptosignal_copilot.config import LlmConfigError, health_payload, load_llm_config, validate_llm_env_on_startup
 from cryptosignal_copilot.schema import AnalyzeRequest
 
 
@@ -84,6 +84,7 @@ def create_app(runner: AgentRunner | None = None) -> FastAPI:
                         yield sse(event_name, data)
             except Exception:
                 async with state_lock:
+                    latest_request["value"] = None
                     is_draining["value"] = False
                     drain_done.set()
                 raise
@@ -93,4 +94,5 @@ def create_app(runner: AgentRunner | None = None) -> FastAPI:
     return app
 
 
+validate_llm_env_on_startup()
 app = create_app()

@@ -84,8 +84,9 @@ class AnalyzeResult(BaseModel):
 
 def filter_preview_shapes(
     raw_shapes: list[Any],
+    allowed_times: set[int] | None = None,
 ) -> tuple[list[dict[str, Any]], list[str]]:
-    """Force preview status, keep valid shapes, return dropped ids."""
+    """Force preview status, keep valid shapes on closed candle times, return dropped ids."""
     valid: list[dict[str, Any]] = []
     dropped_ids: list[str] = []
     for raw in raw_shapes:
@@ -102,6 +103,10 @@ def filter_preview_shapes(
         except (ValidationError, ValueError):
             dropped_ids.append(str(data.get("id", "?")))
             continue
+        if allowed_times is not None:
+            if any(p.time not in allowed_times for p in validated.points):
+                dropped_ids.append(validated.id)
+                continue
         valid.append(validated.model_dump())
     return valid, dropped_ids
 

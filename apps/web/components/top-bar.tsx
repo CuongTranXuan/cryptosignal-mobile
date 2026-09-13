@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
+import { normalizeSpotSymbol } from "../lib/binance";
 import { INTERVALS, type Interval } from "../lib/pattern-shape";
+import { feedBadgeLabel } from "../lib/terminal-controls";
 import { useChartStore } from "../lib/stores/chart-store";
 
 const INTERVAL_LABELS: Record<Interval, string> = {
@@ -19,6 +21,7 @@ export function TopBar() {
   const connection = useChartStore((s) => s.connection);
   const setSymbol = useChartStore((s) => s.setSymbol);
   const setInterval = useChartStore((s) => s.setInterval);
+  const setConnection = useChartStore((s) => s.setConnection);
   const resetShapesSignal = useChartStore((s) => s.resetShapesSignal);
 
   const [draft, setDraft] = useState(symbol);
@@ -28,8 +31,11 @@ export function TopBar() {
 
   const onSubmitSymbol = (e: FormEvent) => {
     e.preventDefault();
-    const next = draft.trim().toUpperCase();
-    if (!next) return;
+    const next = normalizeSpotSymbol(draft);
+    if (!next) {
+      setConnection("pair-unavailable");
+      return;
+    }
     if (next !== symbol) {
       setSymbol(next);
       resetShapesSignal();
@@ -44,6 +50,7 @@ export function TopBar() {
 
   const pct = tickerPercent;
   const pctPositive = pct != null && pct >= 0;
+  const feedLabel = feedBadgeLabel(connection);
 
   return (
     <header className="flex h-12 w-full flex-none items-center justify-between border-b border-[#2b313a] bg-[#181a20] px-4">
@@ -104,7 +111,7 @@ export function TopBar() {
             }`}
           />
           <span className="text-[#848e9c]">
-            Feed: <strong className="text-white">{connection}</strong>
+            Feed: <strong className="text-white">{feedLabel}</strong>
           </span>
         </div>
       </div>

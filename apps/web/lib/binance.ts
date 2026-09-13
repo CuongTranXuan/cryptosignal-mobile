@@ -10,8 +10,28 @@ export function normalizeSpotSymbol(raw: string): string | null {
   return SPOT_USDT.test(normalized) ? normalized : null;
 }
 
-export function klinesUrl(symbol: string, interval: Interval | string, limit = 500): string {
-  return `${BINANCE_REST}/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
+export type KlinesUrlOptions = {
+  limit?: number;
+  startTimeMs?: number;
+  endTimeMs?: number;
+};
+
+export function klinesUrl(
+  symbol: string,
+  interval: Interval | string,
+  limitOrOptions: number | KlinesUrlOptions = 500,
+): string {
+  const opts: KlinesUrlOptions =
+    typeof limitOrOptions === "number" ? { limit: limitOrOptions } : limitOrOptions;
+  const limit = opts.limit ?? 500;
+  const params = new URLSearchParams({
+    symbol,
+    interval: String(interval),
+    limit: String(limit),
+  });
+  if (opts.startTimeMs != null) params.set("startTime", String(opts.startTimeMs));
+  if (opts.endTimeMs != null) params.set("endTime", String(opts.endTimeMs));
+  return `${BINANCE_REST}/api/v3/klines?${params.toString()}`;
 }
 
 export function tickerUrl(symbol: string): string {

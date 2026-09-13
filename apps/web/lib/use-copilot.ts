@@ -54,6 +54,29 @@ function closedCandlesFromChart(
   return candles.slice(0, -1);
 }
 
+function resolveClosedTimes(
+  candles: Candle[],
+  closedTimes: Set<number> | undefined,
+): Set<number> {
+  if (closedTimes) return closedTimes;
+  return new Set(closedCandlesFromChart(candles, undefined).map((c) => c.time));
+}
+
+/** Keep shapes whose every point.time is in the allowed closed candle set. */
+export function filterShapesToClosedTimes(
+  shapes: PatternShape[],
+  allowedTimes: Set<number>,
+): { valid: PatternShape[]; droppedIds: string[] } {
+  const valid: PatternShape[] = [];
+  const droppedIds: string[] = [];
+  for (const shape of shapes) {
+    const ok = shape.points.every((p) => allowedTimes.has(p.time));
+    if (ok) valid.push(shape);
+    else droppedIds.push(shape.id);
+  }
+  return { valid, droppedIds };
+}
+
 function isSuperseded(data: Record<string, unknown>): boolean {
   return data.superseded === true || data.note === "superseded";
 }
@@ -73,6 +96,13 @@ function parseSseBlocks(buffer: string): { events: { event: string; data: string
     events.push({ event, data: dataLines.join("\n") });
   }
   return { events, rest };
+}
+
+function noteDroppedShapes(ids: string[]): void {
+  if (ids.length === 0) return;
+  const note = `Dropped invalid shapes: ${ids.join(", ")}`;
+  useAiStore.getState().appendText(note);
+  useAiStore.setState({ lastError: note });
 }
 
 export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient {
@@ -118,31 +148,40 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
       }
       case "shapes": {
         const list = Array.isArray(data.shapes) ? data.shapes : [];
-        const valid: PatternShape[] = [];
-        const invalidIds: string[] = [];
+        const zodValid: PatternShape[] = [];
+        const droppedIds: string[] = [];
         for (const item of list) {
           const parsed = PatternShapeSchema.safeParse(item);
           if (parsed.success) {
-            valid.push(parsed.data);
+            zodValid.push(parsed.data);
           } else {
             const id =
               item && typeof item === "object" && "id" in item
                 ? String((item as { id: unknown }).id)
                 : "unknown";
-            invalidIds.push(id);
+            droppedIds.push(id);
           }
         }
+        const chart = useChartStore.getState();
+        const allowedTimes = resolveClosedTimes(chart.candles, deps.getClosedTimes?.());
+        const { valid, droppedIds: outOfWindow } = filterShapesToClosedTimes(
+          zodValid,
+          allowedTimes,
+        );
+        droppedIds.push(...outOfWindow);
         useShapeStore.getState().setPreview(valid);
-        if (invalidIds.length > 0) {
-          useAiStore.setState({
-            lastError: `Dropped invalid shapes: ${invalidIds.join(", ")}`,
-          });
-        }
+        noteDroppedShapes(droppedIds);
         return "ok";
       }
       case "extendRange": {
+        const fromSec = typeof data.from === "number" ? data.from : null;
+        const toSec = typeof data.to === "number" ? data.to : null;
         const chart = useChartStore.getState();
-        const snapshot = await fetchKlines(chart.symbol, chart.interval, 1000);
+        const range =
+          fromSec != null && toSec != null
+            ? { startTimeMs: fromSec * 1000, endTimeMs: toSec * 1000 }
+            : undefined;
+        const snapshot = await fetchKlines(chart.symbol, chart.interval, 1000, range);
         useChartStore.getState().setCandles(mergeCandles(chart.candles, snapshot.candles));
         return "ok";
       }

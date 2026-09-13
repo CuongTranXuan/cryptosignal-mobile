@@ -3,7 +3,7 @@ import {
   HEAD_SHOULDERS_PROMPT,
   TRIANGLES_PROMPT,
 } from "../lib/use-copilot";
-import { isDrawDisabled, isSendDisabled } from "../lib/terminal-controls";
+import { feedBadgeLabel, isDrawDisabled, isSendDisabled } from "../lib/terminal-controls";
 
 describe("terminal-controls", () => {
   it("exposes the locked preset prompts", () => {
@@ -26,5 +26,12 @@ describe("terminal-controls", () => {
   it("disables draw when there are no preview shapes", () => {
     expect(isDrawDisabled(0)).toBe(true);
     expect(isDrawDisabled(2)).toBe(false);
+  });
+
+  it("maps feed connection to human badge copy", () => {
+    expect(feedBadgeLabel("live")).toBe("Live");
+    expect(feedBadgeLabel("reconnecting")).toBe("Reconnecting");
+    expect(feedBadgeLabel("history-error")).toBe("History unavailable");
+    expect(feedBadgeLabel("pair-unavailable")).toBe("Pair not available");
   });
 });

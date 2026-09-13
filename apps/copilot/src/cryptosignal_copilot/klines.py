@@ -13,6 +13,7 @@ async def fetch_klines(
     start_time: int | None = None,
     end_time: int | None = None,
     *,
+    timeout_s: float = 20,
     client: httpx.AsyncClient | None = None,
 ) -> list[Candle]:
     limit = max(1, min(int(limit), 1000))
@@ -22,7 +23,7 @@ async def fetch_klines(
     if end_time is not None:
         params["endTime"] = end_time
     own = client is None
-    http = client or httpx.AsyncClient(timeout=20)
+    http = client or httpx.AsyncClient(timeout=timeout_s)
     try:
         response = await http.get(KLINES_URL, params=params)
         response.raise_for_status()

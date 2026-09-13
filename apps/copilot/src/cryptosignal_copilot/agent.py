@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Protocol
 
 from pydantic_ai import Agent
@@ -30,6 +30,7 @@ class _ToolState:
     extend_to: int | None = None
     tool_failed: bool = False
     request_from: int = 0
+    tool_times: set[int] = field(default_factory=set)
 
 
 class PydanticAiRunner:
@@ -58,11 +59,14 @@ class PydanticAiRunner:
                     limit=limit,
                     start_time=startTime,
                     end_time=endTime,
+                    timeout_s=cfg.timeout_s,
                 )
             except Exception:
                 state.tool_failed = True
                 return []
             if candles:
+                for c in candles:
+                    state.tool_times.add(c.time)
                 min_t = min(c.time for c in candles)
                 max_t = max(c.time for c in candles)
                 if min_t < state.request_from:
@@ -98,7 +102,8 @@ class PydanticAiRunner:
         if output.summary:
             yield "text", {"delta": output.summary}
 
-        valid_shapes, dropped_ids = filter_preview_shapes(output.shapes)
+        allowed_times = {c.time for c in request.closedCandles} | state.tool_times
+        valid_shapes, dropped_ids = filter_preview_shapes(output.shapes, allowed_times)
 
         if dropped_ids:
             yield "text", {"delta": f"Dropped invalid shapes: {', '.join(dropped_ids)}"}

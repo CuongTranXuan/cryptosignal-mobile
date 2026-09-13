@@ -4,6 +4,8 @@ import os
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
+VALID_LLM_STYLES = frozenset({"openai", "anthropic"})
+
 
 class LlmConfigError(Exception):
     pass
@@ -16,6 +18,15 @@ class LlmConfig:
     api_key: str
     model: str
     timeout_s: float
+
+
+def validate_llm_env_on_startup() -> None:
+    """Raise if LLM_API_STYLE is set to an unknown value. Missing env is allowed (health 503)."""
+    style = os.environ.get("LLM_API_STYLE", "").strip().lower()
+    if not style:
+        return
+    if style not in VALID_LLM_STYLES:
+        raise SystemExit(f"unknown LLM_API_STYLE: {style}")
 
 
 def load_llm_config() -> LlmConfig:
@@ -36,7 +47,7 @@ def load_llm_config() -> LlmConfig:
     ]
     if missing:
         raise LlmConfigError(f"LLM config missing: {', '.join(missing)}")
-    if style not in {"openai", "anthropic"}:
+    if style not in VALID_LLM_STYLES:
         raise LlmConfigError(f"unknown LLM_API_STYLE: {style}")
     return LlmConfig(
         style=style,

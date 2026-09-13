@@ -67,7 +67,9 @@ Web alone can show the live chart. Copilot actions fail visibly until `apps/copi
 | `LLM_BASE_URL` | yes | Provider SDK `base_url` (passed through) |
 | `LLM_API_KEY` | yes | Never logged; never sent to the browser |
 | `LLM_MODEL` | yes | Model id as the vendor expects |
-| `LLM_TIMEOUT_S` | no | Default `60` |
+| `LLM_TIMEOUT_S` | no | Default `60`. Applied to Binance `get_klines` httpx and to the OpenAI/Anthropic SDK HTTP clients used by the model provider. |
+
+v1 emits the model summary as **one SSE `text` event after completion** (not token-streamed). Token streaming can be added later via `agent.run_stream` without changing the SSE event names.
 
 Provider examples (documentation only):
 

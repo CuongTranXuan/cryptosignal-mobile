@@ -165,3 +165,35 @@ def test_filter_preview_shapes_drops_invalid():
     assert len(valid) == 1
     assert valid[0]["id"] == "ok"
     assert valid[0]["status"] == "preview"
+
+
+def test_filter_preview_shapes_drops_points_outside_closed_times():
+    on_window = {
+        "id": "ok",
+        "symbol": "BTCUSDT",
+        "interval": "1h",
+        "kind": "trendline",
+        "name": "Line",
+        "status": "preview",
+        "source": "agent",
+        "confidence": 0.8,
+        "points": [{"time": 1, "price": 1.0}, {"time": 2, "price": 2.0}],
+        "priceLow": None,
+        "priceHigh": None,
+    }
+    off_window = {
+        "id": "off",
+        "symbol": "BTCUSDT",
+        "interval": "1h",
+        "kind": "trendline",
+        "name": "Off",
+        "status": "preview",
+        "source": "agent",
+        "confidence": 0.5,
+        "points": [{"time": 1, "price": 1.0}, {"time": 99, "price": 2.0}],
+        "priceLow": None,
+        "priceHigh": None,
+    }
+    valid, dropped = filter_preview_shapes([on_window, off_window], {1, 2})
+    assert [s["id"] for s in valid] == ["ok"]
+    assert dropped == ["off"]
