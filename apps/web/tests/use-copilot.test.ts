@@ -1,0 +1,350 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { Candle, PatternShape } from "../lib/pattern-shape";
+import { useChartStore } from "../lib/stores/chart-store";
+import { useShapeStore } from "../lib/stores/shape-store";
+import { useAiStore } from "../lib/stores/ai-store";
+import {
+  AUTO_DRAW_PROMPT,
+  HEAD_SHOULDERS_PROMPT,
+  TRIANGLES_PROMPT,
+  createCopilotClient,
+} from "../lib/use-copilot";
+
+const c1: Candle = {
+  time: 1710000000,
+  open: 1,
+  high: 2,
+  low: 0.5,
+  close: 1.5,
+  volume: 10,
+};
+
+const c2: Candle = {
+  time: 1710003600,
+  open: 1.5,
+  high: 2.5,
+  low: 1.4,
+  close: 2.0,
+  volume: 8,
+};
+
+const c3Forming: Candle = {
+  time: 1710007200,
+  open: 2,
+  high: 2.2,
+  low: 1.9,
+  close: 2.1,
+  volume: 5,
+};
+
+const validShape = (id = "s1"): PatternShape => ({
+  id,
+  symbol: "BTCUSDT",
+  interval: "1h",
+  kind: "polyline",
+  name: "Triangle",
+  status: "preview",
+  source: "agent",
+  confidence: 0.8,
+  points: [
+    { time: 1710000000, price: 1 },
+    { time: 1710003600, price: 2 },
+    { time: 1710007200, price: 1.5 },
+  ],
+  priceLow: null,
+  priceHigh: null,
+});
+
+function sseChunk(event: string, data: unknown): string {
+  return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+}
+
+function streamResponse(chunks: string[], status = 200): Response {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    start(controller) {
+      for (const chunk of chunks) {
+        controller.enqueue(encoder.encode(chunk));
+      }
+      controller.close();
+    },
+  });
+  return new Response(stream, {
+    status,
+    headers: { "Content-Type": "text/event-stream" },
+  });
+}
+
+function resetStores() {
+  useChartStore.setState({
+    symbol: "BTCUSDT",
+    interval: "1h",
+    candles: [c1, c2, c3Forming],
+    tickerPercent: null,
+    connection: "live",
+    shapesResetSignal: 0,
+  });
+  useShapeStore.setState({ shapes: [], selectedId: null });
+  useAiStore.setState({
+    mode: "manual",
+    messages: [],
+    inFlight: false,
+    lastError: null,
+    panelWidth: 360,
+    health: null,
+  });
+}
+
+describe("use-copilot / createCopilotClient", () => {
+  beforeEach(() => {
+    resetStores();
+    vi.restoreAllMocks();
+  });
+
+  it("exposes exact preset prompt strings", () => {
+    expect(TRIANGLES_PROMPT).toBe(
+      "Find symmetrical triangles in this closed-candle window and return PatternShape polyline(s).",
+    );
+    expect(HEAD_SHOULDERS_PROMPT).toBe(
+      "Find head and shoulders in this closed-candle window and return PatternShape polyline(s).",
+    );
+    expect(AUTO_DRAW_PROMPT).toBe("Auto-Draw: update patterns for the latest closed candle.");
+  });
+
+  it("streams text+shapes into agent message and setPreview", async () => {
+    const fetchMock = vi.fn(async () =>
+      streamResponse([
+        sseChunk("text", { delta: "Found " }),
+        sseChunk("text", { delta: "a triangle" }),
+        sseChunk("shapes", { shapes: [validShape("tri-1")] }),
+        sseChunk("done", {}),
+      ]),
+    );
+
+    const client = createCopilotClient({
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      baseUrl: "http://127.0.0.1:8000",
+      getClosedTimes: () => new Set([c1.time, c2.time]),
+    });
+
+    await client.analyze(TRIANGLES_PROMPT);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const call = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(call[0]).toBe("http://127.0.0.1:8000/v1/copilot/analyze");
+    expect(call[1].method).toBe("POST");
+    const body = JSON.parse(String(call[1].body));
+    expect(body.prompt).toBe(TRIANGLES_PROMPT);
+    expect(body.closedCandles).toEqual([c1, c2]);
+    expect(body.from).toBe(c1.time);
+    expect(body.to).toBe(c2.time);
+
+    const ai = useAiStore.getState();
+    expect(ai.inFlight).toBe(false);
+    expect(ai.messages).toEqual([
+      expect.objectContaining({ role: "user", content: TRIANGLES_PROMPT }),
+      expect.objectContaining({ role: "agent", content: "Found a triangle" }),
+    ]);
+    expect(useShapeStore.getState().previews().map((s) => s.id)).toEqual(["tri-1"]);
+  });
+
+  it("error event fails without touching committed shapes or calling setPreview", async () => {
+    const committed = { ...validShape("keep"), status: "committed" as const };
+    useShapeStore.setState({ shapes: [committed], selectedId: null });
+
+    const fetchMock = vi.fn(async () =>
+      streamResponse([
+        sseChunk("text", { delta: "oops" }),
+        sseChunk("error", { message: "Copilot failed: provider unauthorized" }),
+        sseChunk("done", {}),
+      ]),
+    );
+
+    const client = createCopilotClient({
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      getClosedTimes: () => new Set([c1.time, c2.time]),
+    });
+
+    await client.analyze("find patterns");
+
+    expect(useAiStore.getState().lastError).toBe("Copilot failed: provider unauthorized");
+    expect(useAiStore.getState().inFlight).toBe(false);
+    expect(useShapeStore.getState().committed()).toEqual([
+      expect.objectContaining({ id: "keep", status: "committed" }),
+    ]);
+    expect(useShapeStore.getState().previews()).toHaveLength(0);
+  });
+
+  it("maps HTTP 401/403/429/503 to spec error strings", async () => {
+    for (const [status, message] of [
+      [401, "Copilot failed: provider unauthorized"],
+      [403, "Copilot failed: provider unauthorized"],
+      [429, "Copilot failed: provider rate-limited"],
+      [503, "Copilot failed"],
+    ] as const) {
+      resetStores();
+      const fetchMock = vi.fn(async () => new Response(JSON.stringify({ error: "x" }), { status }));
+      const client = createCopilotClient({
+        fetchImpl: fetchMock as unknown as typeof fetch,
+        getClosedTimes: () => new Set([c1.time, c2.time]),
+      });
+      await client.analyze("hi");
+      expect(useAiStore.getState().lastError).toBe(message);
+      expect(useAiStore.getState().inFlight).toBe(false);
+    }
+  });
+
+  it("does not call analyze when only a forming candle exists", async () => {
+    useChartStore.setState({ candles: [c3Forming] });
+    const fetchMock = vi.fn();
+    const client = createCopilotClient({
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      getClosedTimes: () => new Set(),
+    });
+    await client.analyze("hi");
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(useAiStore.getState().inFlight).toBe(false);
+  });
+
+  it("Auto-Draw coalesce queues while inFlight and runs one follow-up on finish", async () => {
+    let resolveFirst!: (value: Response) => void;
+    const firstPromise = new Promise<Response>((r) => {
+      resolveFirst = r;
+    });
+    let calls = 0;
+    const fetchMock = vi.fn(async () => {
+      calls += 1;
+      if (calls === 1) return firstPromise;
+      return streamResponse([
+        sseChunk("text", { delta: "follow-up" }),
+        sseChunk("shapes", { shapes: [validShape("auto-2")] }),
+        sseChunk("done", {}),
+      ]);
+    });
+
+    const client = createCopilotClient({
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      getClosedTimes: () => new Set([c1.time, c2.time]),
+    });
+
+    useAiStore.getState().setMode("auto");
+
+    const first = client.analyze("manual start");
+    await vi.waitFor(() => expect(useAiStore.getState().inFlight).toBe(true));
+
+    client.onClosedKline();
+    client.onClosedKline();
+
+    resolveFirst(
+      streamResponse([
+        sseChunk("text", { delta: "first" }),
+        sseChunk("shapes", { shapes: [validShape("auto-1")] }),
+        sseChunk("done", {}),
+      ]),
+    );
+    await first;
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(useAiStore.getState().inFlight).toBe(false));
+
+    const bodies = (fetchMock.mock.calls as unknown as [string, RequestInit][]).map((c) =>
+      JSON.parse(String(c[1].body)),
+    );
+    expect(bodies[1]?.prompt).toBe(AUTO_DRAW_PROMPT);
+    expect(useShapeStore.getState().previews().map((s) => s.id)).toEqual(["auto-2"]);
+  });
+
+  it("superseded done finishes without failure and does not clear previews", async () => {
+    useShapeStore.getState().setPreview([validShape("prior")]);
+
+    const fetchMock = vi.fn(async () =>
+      streamResponse([sseChunk("done", { superseded: true })]),
+    );
+
+    const client = createCopilotClient({
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      getClosedTimes: () => new Set([c1.time, c2.time]),
+    });
+
+    await client.analyze("queued waiter");
+
+    expect(useAiStore.getState().lastError).toBeNull();
+    expect(useAiStore.getState().inFlight).toBe(false);
+    expect(useShapeStore.getState().previews().map((s) => s.id)).toEqual(["prior"]);
+  });
+
+  it("extendRange merges fetched klines into chart store", async () => {
+    const fetchKlines = vi.fn(async () => ({
+      candles: [
+        { time: 1709996400, open: 0.5, high: 1, low: 0.4, close: 0.9, volume: 3 },
+        c1,
+      ],
+      closeTimesMs: [1709999999999, 1710003599999],
+    }));
+
+    const fetchMock = vi.fn(async () =>
+      streamResponse([
+        sseChunk("shapes", { shapes: [validShape("x")] }),
+        sseChunk("extendRange", { from: 1709996400, to: 1710000000 }),
+        sseChunk("done", {}),
+      ]),
+    );
+
+    const client = createCopilotClient({
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      fetchKlines,
+      getClosedTimes: () => new Set([c1.time, c2.time]),
+    });
+
+    await client.analyze("extend");
+
+    expect(fetchKlines).toHaveBeenCalledWith("BTCUSDT", "1h", expect.any(Number));
+    const times = useChartStore.getState().candles.map((c) => c.time);
+    expect(times[0]).toBe(1709996400);
+    expect(times).toContain(c1.time);
+    expect(times).toContain(c2.time);
+  });
+
+  it("clearAll shapes when chart shapesResetSignal increments", async () => {
+    useShapeStore.getState().setPreview([validShape("gone")]);
+    const client = createCopilotClient({
+      fetchImpl: vi.fn() as unknown as typeof fetch,
+    });
+    client.watchShapesReset();
+    useChartStore.getState().resetShapesSignal();
+    await vi.waitFor(() => expect(useShapeStore.getState().shapes).toHaveLength(0));
+    client.dispose();
+  });
+
+  it("drops invalid shapes and notes ids in lastError", async () => {
+    const bad = {
+      id: "bad-poly",
+      symbol: "BTCUSDT",
+      interval: "1h",
+      kind: "polyline",
+      name: "Broken",
+      status: "preview",
+      source: "agent",
+      confidence: 0.5,
+      points: [{ time: 1, price: 1 }],
+      priceLow: null,
+      priceHigh: null,
+    };
+
+    const fetchMock = vi.fn(async () =>
+      streamResponse([
+        sseChunk("shapes", { shapes: [validShape("ok"), bad] }),
+        sseChunk("done", {}),
+      ]),
+    );
+
+    const client = createCopilotClient({
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      getClosedTimes: () => new Set([c1.time, c2.time]),
+    });
+
+    await client.analyze("parse");
+
+    expect(useShapeStore.getState().previews().map((s) => s.id)).toEqual(["ok"]);
+    expect(useAiStore.getState().lastError).toContain("bad-poly");
+  });
+});
