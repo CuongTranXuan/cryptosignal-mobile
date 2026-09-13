@@ -1,10 +1,19 @@
 # dependencies
+.venv/
+apps/copilot/.venv/
 node_modules/
 
 # env
 .env
 .env.*
 !.env.example
+
+# python
+__pycache__/
+*.pyc
+
+# frontend
+.next/
 
 # os / editor
 .DS_Store
