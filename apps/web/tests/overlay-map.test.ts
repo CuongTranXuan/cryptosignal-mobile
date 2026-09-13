@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { PatternShape } from "../lib/pattern-shape";
-import { mapShapeToPixels, pixelsToPoint } from "../lib/overlay-map";
+import { mapShapeToPixels, mapZoneToRect, pixelsToPoint } from "../lib/overlay-map";
 
 const shape: PatternShape = {
   id: "poly-1",
@@ -69,5 +69,27 @@ describe("overlay-map", () => {
       { x: 20, y: 900 },
       { x: 60, y: 850 },
     ]);
+  });
+
+  it("mapZoneToRect maps priceLow/priceHigh and time bounds", () => {
+    const zone: PatternShape = {
+      ...shape,
+      id: "zone-1",
+      kind: "zone",
+      name: "Support",
+      points: [
+        { time: 10, price: 100 },
+        { time: 30, price: 100 },
+      ],
+      priceLow: 90,
+      priceHigh: 110,
+    };
+
+    expect(mapZoneToRect(zone, forwardApi, 800)).toEqual({
+      x: 20,
+      y: 890,
+      width: 40,
+      height: 20,
+    });
   });
 });

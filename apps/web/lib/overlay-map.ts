@@ -36,3 +36,38 @@ export function pixelsToPoint(
   if (time == null || price == null) return null;
   return { time, price };
 }
+
+export type ZoneRect = { x: number; y: number; width: number; height: number };
+
+export function mapZoneToRect(
+  shape: PatternShape,
+  api: ForwardCoordinateApi,
+  paneWidth: number,
+): ZoneRect | null {
+  if (shape.priceLow == null || shape.priceHigh == null) return null;
+  const yHigh = api.priceToCoordinate(shape.priceHigh);
+  const yLow = api.priceToCoordinate(shape.priceLow);
+  if (yHigh == null || yLow == null) return null;
+
+  let x1 = 0;
+  let x2 = paneWidth;
+  if (shape.points.length >= 2) {
+    const times = shape.points.map((p) => p.time);
+    const minT = Math.min(...times);
+    const maxT = Math.max(...times);
+    const cx1 = api.timeToCoordinate(minT);
+    const cx2 = api.timeToCoordinate(maxT);
+    if (cx1 != null && cx2 != null) {
+      x1 = Math.min(cx1, cx2);
+      x2 = Math.max(cx1, cx2);
+    }
+  }
+
+  const y = Math.min(yHigh, yLow);
+  return {
+    x: x1,
+    y,
+    width: Math.max(0, x2 - x1),
+    height: Math.abs(yLow - yHigh),
+  };
+}
