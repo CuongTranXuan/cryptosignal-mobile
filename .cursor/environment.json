@@ -1,0 +1,20 @@
+{
+  "name": "CryptoSignal Chart Terminal",
+  "install": "bash .cursor/install.sh",
+  "terminals": [
+    {
+      "name": "copilot",
+      "command": "cd apps/copilot && .venv/bin/uvicorn cryptosignal_copilot.app:app --app-dir src --env-file .env --host 127.0.0.1 --port 8000 --reload",
+      "description": "FastAPI + Pydantic AI copilot on http://127.0.0.1:8000 (needs LLM_API_KEY for analyze; health returns 503 until set)."
+    },
+    {
+      "name": "web",
+      "command": "cd apps/web && pnpm dev",
+      "description": "Next.js UI + TradingView Lightweight Charts on http://127.0.0.1:3000."
+    }
+  ],
+  "ports": [
+    { "name": "web", "port": 3000 },
+    { "name": "copilot", "port": 8000 }
+  ]
+}
