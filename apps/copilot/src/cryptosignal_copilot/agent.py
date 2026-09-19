@@ -95,6 +95,14 @@ class PydanticAiRunner:
             return [c.model_dump() for c in candles]
 
         prompt = _build_user_prompt(request)
+        # Emit immediately so the SSE connection is not idle for the whole LLM call
+        # (Next/ngrok/proxies often abort silent streams around ~30s).
+        yield "text", {
+            "delta": (
+                f"Analyzing {request.symbol} {request.interval} "
+                f"({len(request.closedCandles)} closed candles)…\n\n"
+            )
+        }
         try:
             result = await agent.run(prompt)
         except ModelHTTPError as exc:

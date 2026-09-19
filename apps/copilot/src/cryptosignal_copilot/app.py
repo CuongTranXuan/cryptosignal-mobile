@@ -89,8 +89,41 @@ def create_app(runner: AgentRunner | None = None) -> FastAPI:
                             drain_done.set()
                             break
                         latest_request["value"] = None
-                    async for event_name, data in use_runner.run(current):
-                        yield sse(event_name, data)
+
+                    queue: asyncio.Queue[tuple[str, str | None, dict | BaseException | None]] = asyncio.Queue()
+
+                    async def _produce(req: AnalyzeRequest = current) -> None:
+                        try:
+                            async for event_name, data in use_runner.run(req):
+                                await queue.put(("event", event_name, data))
+                        except BaseException as exc:  # noqa: BLE001 — forward to consumer
+                            await queue.put(("error", None, exc))
+                        finally:
+                            await queue.put(("end", None, None))
+
+                    task = asyncio.create_task(_produce())
+                    try:
+                        while True:
+                            try:
+                                kind, name, payload = await asyncio.wait_for(queue.get(), timeout=12.0)
+                            except asyncio.TimeoutError:
+                                # SSE comment keepalive — keeps Next/ngrok from killing idle streams
+                                yield ": keepalive\n\n"
+                                continue
+                            if kind == "end":
+                                break
+                            if kind == "error":
+                                assert isinstance(payload, BaseException)
+                                raise payload
+                            assert isinstance(name, str) and isinstance(payload, dict)
+                            yield sse(name, payload)
+                    finally:
+                        if not task.done():
+                            task.cancel()
+                            try:
+                                await task
+                            except (asyncio.CancelledError, Exception):
+                                pass
             except Exception:
                 async with state_lock:
                     latest_request["value"] = None
@@ -98,7 +131,15 @@ def create_app(runner: AgentRunner | None = None) -> FastAPI:
                     drain_done.set()
                 raise
 
-        return StreamingResponse(event_stream(), media_type="text/event-stream")
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache, no-transform",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     return app
 
