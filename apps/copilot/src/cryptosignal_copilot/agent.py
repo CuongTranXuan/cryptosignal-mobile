@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Protocol
 
 from pydantic_ai import Agent
+from pydantic_ai.output import PromptedOutput
 from pydantic_ai.exceptions import ModelHTTPError
 
 from cryptosignal_copilot.config import load_llm_config
@@ -45,9 +46,12 @@ class PydanticAiRunner:
         cfg = load_llm_config()
         model = build_model(cfg)
         state = _ToolState(request_from=request.from_)
+        # OmniRoute/agentrouter rejects OpenAI tool_choice="required" (pydantic-ai's
+        # default ToolOutput mode). PromptedOutput uses response_format=json_object
+        # with tool_choice=auto, which works through the gateway.
         agent: Agent[None, AnalyzeResult] = Agent(
             model,
-            output_type=AnalyzeResult,
+            output_type=PromptedOutput(AnalyzeResult),
             instructions=INSTRUCTIONS,
         )
 
