@@ -9,11 +9,18 @@ from pydantic_ai.exceptions import ModelHTTPError
 from cryptosignal_copilot.config import load_llm_config
 from cryptosignal_copilot.klines import fetch_klines
 from cryptosignal_copilot.model_factory import build_model
-from cryptosignal_copilot.schema import AnalyzeRequest, AnalyzeResult, filter_preview_shapes
+from cryptosignal_copilot.schema import (
+    AnalyzeRequest,
+    AnalyzeResult,
+    filter_agent_markers,
+    filter_preview_shapes,
+)
 
 INSTRUCTIONS = (
     "You are a crypto chart research assistant. Analyze only closed candles. "
-    "Return pattern geometry using unix seconds for time and absolute prices. "
+    "Return PatternShape overlays (trendline/polyline/zone) and optional AgentMarker "
+    "point signals as separate collections. AgentMarker.side is signal direction "
+    "(buy/sell/neutral), not an order. Never put side/quantity/apiKey on PatternShape. "
     "Never place orders, never request API keys or secrets, never invent OHLC — "
     "call get_klines when you need extra history."
 )
@@ -109,6 +116,12 @@ class PydanticAiRunner:
             yield "text", {"delta": f"Dropped invalid shapes: {', '.join(dropped_ids)}"}
 
         yield "shapes", {"shapes": valid_shapes}
+
+        if output.markers:
+            valid_markers, dropped_marker_ids = filter_agent_markers(output.markers, allowed_times)
+            if dropped_marker_ids:
+                yield "text", {"delta": f"Dropped invalid markers: {', '.join(dropped_marker_ids)}"}
+            yield "markers", {"markers": valid_markers}
 
         if state.extend_from is not None and state.extend_to is not None:
             yield "extendRange", {"from": state.extend_from, "to": state.extend_to}

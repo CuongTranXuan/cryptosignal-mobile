@@ -1,4 +1,5 @@
 from .schema import (
+    AgentMarker,
     AnalyzeRequest,
     AnalyzeResult,
     Candle,
@@ -7,10 +8,12 @@ from .schema import (
     Interval,
     PatternShape,
     PatternShapeModel,
+    parse_agent_marker,
     parse_pattern_shape,
 )
 
 __all__ = [
+    "AgentMarker",
     "AnalyzeRequest",
     "AnalyzeResult",
     "Candle",
@@ -19,5 +22,6 @@ __all__ = [
     "Interval",
     "PatternShape",
     "PatternShapeModel",
+    "parse_agent_marker",
     "parse_pattern_shape",
 ]

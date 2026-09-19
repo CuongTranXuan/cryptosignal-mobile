@@ -13,6 +13,7 @@ const PointSchema = z
 export const PatternShapeSchema = z
   .object({
     id: z.string().min(1),
+    agentId: z.string().min(1).optional(),
     symbol: z.string().min(1),
     interval: z.enum(INTERVALS),
     kind: z.enum(["trendline", "polyline", "zone"]),
@@ -42,6 +43,25 @@ export const PatternShapeSchema = z
 export type PatternShape = z.infer<typeof PatternShapeSchema>;
 export const parsePatternShape = (input: unknown): PatternShape => PatternShapeSchema.parse(input);
 
+/** Signal direction for series markers — not a trading order field. PatternShape still forbids `side`. */
+export const AgentMarkerSchema = z
+  .object({
+    id: z.string().min(1),
+    agentId: z.string().min(1).optional(),
+    symbol: z.string().min(1),
+    interval: z.enum(INTERVALS),
+    time: z.number().int(),
+    side: z.enum(["buy", "sell", "neutral"]),
+    position: z.enum(["aboveBar", "belowBar", "inBar"]),
+    shape: z.enum(["arrowUp", "arrowDown", "circle", "square"]),
+    label: z.string().min(1).optional(),
+    confidence: z.number().min(0).max(1),
+    source: z.literal("agent"),
+  })
+  .strict();
+export type AgentMarker = z.infer<typeof AgentMarkerSchema>;
+export const parseAgentMarker = (input: unknown): AgentMarker => AgentMarkerSchema.parse(input);
+
 export const CandleSchema = z
   .object({
     time: z.number().int(),
@@ -62,6 +82,7 @@ export const AnalyzeRequestSchema = z
     to: z.number().int(),
     closedCandles: z.array(CandleSchema),
     existingShapes: z.array(PatternShapeSchema),
+    existingMarkers: z.array(AgentMarkerSchema).optional(),
     prompt: z.string().min(1),
   })
   .strict();

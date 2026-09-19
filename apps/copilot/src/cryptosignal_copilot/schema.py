@@ -6,6 +6,8 @@ INTERVALS = ("1m", "15m", "1h", "4h", "1d")
 Interval = Literal["1m", "15m", "1h", "4h", "1d"]
 Kind = Literal["trendline", "polyline", "zone"]
 Status = Literal["preview", "committed"]
+# Trading-order keys. PatternShape forbids `side` as an order field.
+# AgentMarker.side is signal direction (buy|sell|neutral), not an order.
 FORBIDDEN = {"order", "side", "quantity", "apiKey", "secret", "leverage"}
 
 
@@ -30,6 +32,7 @@ class PatternShape(BaseModel):
     points: list[Point]
     priceLow: float | None
     priceHigh: float | None
+    agentId: str | None = None
 
     @model_validator(mode="after")
     def check_geometry(self) -> "PatternShape":
@@ -48,6 +51,37 @@ PatternShapeModel = PatternShape
 
 def parse_pattern_shape(input_data: object) -> PatternShape:
     return PatternShape.model_validate(input_data)
+
+
+class AgentMarker(BaseModel):
+    """Point signal for LWC series markers. `side` is signal direction, not an order field."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    agentId: str | None = None
+    symbol: str
+    interval: Interval
+    time: int
+    side: Literal["buy", "sell", "neutral"]
+    position: Literal["aboveBar", "belowBar", "inBar"]
+    shape: Literal["arrowUp", "arrowDown", "circle", "square"]
+    label: str | None = None
+    confidence: float = Field(ge=0, le=1)
+    source: Literal["agent"]
+
+
+def parse_agent_marker(input_data: object) -> AgentMarker:
+    return AgentMarker.model_validate(input_data)
+
+
+def _dump_omit_unset_agent_id(model: PatternShape | AgentMarker) -> dict[str, Any]:
+    data = model.model_dump()
+    if data.get("agentId") is None:
+        data.pop("agentId", None)
+    if isinstance(model, AgentMarker) and data.get("label") is None:
+        data.pop("label", None)
+    return data
 
 
 class Candle(BaseModel):
@@ -70,6 +104,7 @@ class AnalyzeRequest(BaseModel):
     to: int
     closedCandles: list[Candle]
     existingShapes: list[PatternShape]
+    existingMarkers: list[AgentMarker] = Field(default_factory=list)
     prompt: str
 
 
@@ -80,6 +115,7 @@ class AnalyzeResult(BaseModel):
 
     summary: str
     shapes: list[dict[str, Any]]
+    markers: list[dict[str, Any]] = Field(default_factory=list)
 
 
 def filter_preview_shapes(
@@ -107,7 +143,34 @@ def filter_preview_shapes(
             if any(p.time not in allowed_times for p in validated.points):
                 dropped_ids.append(validated.id)
                 continue
-        valid.append(validated.model_dump())
+        valid.append(_dump_omit_unset_agent_id(validated))
+    return valid, dropped_ids
+
+
+def filter_agent_markers(
+    raw_markers: list[Any],
+    allowed_times: set[int] | None = None,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Keep valid AgentMarker rows on closed candle times, return dropped ids."""
+    valid: list[dict[str, Any]] = []
+    dropped_ids: list[str] = []
+    for raw in raw_markers:
+        if hasattr(raw, "model_dump"):
+            data = raw.model_dump()
+        elif isinstance(raw, dict):
+            data = dict(raw)
+        else:
+            dropped_ids.append("?")
+            continue
+        try:
+            validated = AgentMarker.model_validate(data)
+        except (ValidationError, ValueError):
+            dropped_ids.append(str(data.get("id", "?")))
+            continue
+        if allowed_times is not None and validated.time not in allowed_times:
+            dropped_ids.append(validated.id)
+            continue
+        valid.append(_dump_omit_unset_agent_id(validated))
     return valid, dropped_ids
 
 

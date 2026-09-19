@@ -1,0 +1,11 @@
+{
+  "id": "mrk_sweep_1",
+  "symbol": "BTCUSDT",
+  "interval": "1h",
+  "time": 1710000000,
+  "side": "buy",
+  "position": "belowBar",
+  "shape": "arrowUp",
+  "confidence": 0.81,
+  "source": "agent"
+}
