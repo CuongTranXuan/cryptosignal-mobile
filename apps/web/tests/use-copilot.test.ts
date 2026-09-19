@@ -156,7 +156,7 @@ describe("use-copilot / createCopilotClient", () => {
       expect.objectContaining({ role: "user", content: TRIANGLES_PROMPT }),
       expect.objectContaining({
         role: "agent",
-        content: "Found a triangle\n\nDrew 1 shape on the chart.",
+        content: expect.stringMatching(/Found a triangle[\s\S]*Drew 1 shape on the chart/),
       }),
     ]);
     expect(useShapeStore.getState().previews().map((s) => s.id)).toEqual([]);
@@ -202,9 +202,9 @@ describe("use-copilot / createCopilotClient", () => {
     );
     expect(useMarkerStore.getState().markers.map((m) => m.id)).toEqual(["mrk-1"]);
     const agentMsg = useAiStore.getState().messages.find((m) => m.role === "agent");
-    expect(agentMsg?.content).toContain("Drew 1 shape on the chart.");
+    expect(agentMsg?.content).toContain("Drew 1 shape on the chart");
     expect(agentMsg?.content).toContain("Placed 1 marker on the chart.");
-    expect(useAiStore.getState().messages.find((m) => m.role === "agent")?.content).toContain("off");
+    expect(useAiStore.getState().messages.find((m) => m.role === "agent")?.content).toContain("Skipped");
   });
 
   it("error event fails without touching committed shapes or calling setPreview", async () => {
@@ -395,8 +395,8 @@ describe("use-copilot / createCopilotClient", () => {
     expect(useShapeStore.getState().committed().map((s) => s.id)).toEqual(["ok"]);
     expect(useAiStore.getState().lastError).toBeNull();
     const agentMsg = useAiStore.getState().messages.find((m) => m.role === "agent");
-    expect(agentMsg?.content).toContain("Drew 1 shape on the chart.");
-    expect(agentMsg?.content).toContain("Dropped invalid shapes: off-window");
+    expect(agentMsg?.content).toContain("Drew 1 shape on the chart");
+    expect(agentMsg?.content).toContain("Skipped");
   });
 
   it("clearAll shapes when chart shapesResetSignal increments", async () => {
@@ -458,6 +458,6 @@ describe("use-copilot / createCopilotClient", () => {
     expect(useAiStore.getState().lastError).toBeNull();
     expect(
       useAiStore.getState().messages.find((m) => m.role === "agent")?.content,
-    ).toContain("bad-poly");
+    ).toContain("Skipped");
   });
 });

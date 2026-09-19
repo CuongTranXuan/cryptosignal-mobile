@@ -19,8 +19,9 @@ from cryptosignal_copilot.schema import (
 
 INSTRUCTIONS = (
     "You are a crypto chart research assistant. Analyze only closed candles. "
-    "Always fill `summary` with a clear multi-sentence explanation for the chat panel: "
-    "what you see, why it matters, and what overlays you drew. "
+    "Always fill `summary` as a friendly chat reply (not a terse log): open with what you see, "
+    "name key levels/times, explain the pattern, say what you are drawing and why, and end with "
+    "a short takeaway. Use several short paragraphs. "
     "Also return drawable PatternShape overlays (trendline/polyline/zone) whenever the "
     "prompt asks for analysis or drawing — do not return text-only when shapes would help. "
     "Every shape point.time MUST be an exact unix second from closedCandles (or get_klines); "
@@ -126,22 +127,28 @@ class PydanticAiRunner:
         if state.tool_failed:
             yield "text", {"delta": "Extra history skipped"}
 
+        yield "text", {"delta": "Model finished. Building overlays…"}
+
         output = result.output
         if output.summary:
-            yield "text", {"delta": output.summary}
+            yield "text", {"delta": "\n\n" + output.summary}
 
         allowed_times = {c.time for c in request.closedCandles} | state.tool_times
         valid_shapes, dropped_ids = filter_preview_shapes(output.shapes, allowed_times, symbol=request.symbol, interval=request.interval)
 
         if dropped_ids:
-            yield "text", {"delta": f"Dropped invalid shapes: {', '.join(dropped_ids)}"}
+            yield "text", {"delta": f"\n\nSkipped {len(dropped_ids)} invalid shape(s) (bad schema or times outside candles)."}
 
         yield "shapes", {"shapes": valid_shapes}
+        if valid_shapes:
+            names = ", ".join(getattr(s, "name", "?") for s in valid_shapes[:5])
+            more = f" (+{len(valid_shapes) - 5} more)" if len(valid_shapes) > 5 else ""
+            yield "text", {"delta": f"\n\nOverlays ready: {len(valid_shapes)} — {names}{more}."}
 
         if output.markers:
             valid_markers, dropped_marker_ids = filter_agent_markers(output.markers, allowed_times)
             if dropped_marker_ids:
-                yield "text", {"delta": f"Dropped invalid markers: {', '.join(dropped_marker_ids)}"}
+                yield "text", {"delta": f"\n\nSkipped {len(dropped_marker_ids)} invalid marker(s)."}
             yield "markers", {"markers": valid_markers}
 
         if state.extend_from is not None and state.extend_to is not None:

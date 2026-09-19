@@ -28,6 +28,7 @@ export type CopilotClientDeps = {
   fetchImpl?: typeof fetch;
   fetchKlines?: FetchKlines;
   getClosedTimes?: () => Set<number> | undefined;
+  getCoordApi?: () => import("./chart-api").ChartCoordinateApi | null;
   baseUrl?: string;
 };
 
@@ -128,13 +129,16 @@ function parseSseBlocks(buffer: string): { events: { event: string; data: string
 
 function noteDroppedShapes(ids: string[]): void {
   if (ids.length === 0) return;
-  // Chat note only — do not set lastError (that looks like a hard Copilot failure).
-  useAiStore.getState().appendText(`\n\nDropped invalid shapes: ${ids.join(", ")}`);
+  useAiStore.getState().appendText(
+    `\n\n(Skipped ${ids.length} incomplete shape${ids.length === 1 ? "" : "s"} — missing fields or off-window times.)`,
+  );
 }
 
 function noteDroppedMarkers(ids: string[]): void {
   if (ids.length === 0) return;
-  useAiStore.getState().appendText(`\n\nDropped invalid markers: ${ids.join(", ")}`);
+  useAiStore.getState().appendText(
+    `\n\n(Skipped ${ids.length} incomplete marker${ids.length === 1 ? "" : "s"}.)`,
+  );
 }
 
 export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient {
@@ -211,10 +215,16 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
         useShapeStore.getState().setPreview(valid);
         if (valid.length > 0) {
           useShapeStore.getState().commitPreview();
-          const n = valid.length;
-          useAiStore.getState().appendText(
-            `\n\nDrew ${n} shape${n === 1 ? "" : "s"} on the chart.`,
+          const lines = valid.map(
+            (s) =>
+              `• ${s.name} (${s.kind}, ${Math.round(s.confidence * 100)}%, ${s.points.length} pts)`,
           );
+          useAiStore.getState().appendText(
+            `\n\nDrew ${valid.length} shape${valid.length === 1 ? "" : "s"} on the chart:\n${lines.join("\n")}`,
+          );
+          const times = valid.flatMap((s) => s.points.map((pt) => pt.time));
+          deps.getCoordApi?.()?.revealTimes(times);
+          useAiStore.getState().appendText("\nScrolled the chart to show those overlays.");
         }
         noteDroppedShapes(droppedIds);
         return "ok";

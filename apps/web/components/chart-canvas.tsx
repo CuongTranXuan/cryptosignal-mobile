@@ -152,6 +152,17 @@ export function ChartCanvas({ coordApiRef }: ChartCanvasProps) {
           const v = s.coordinateToPrice(y);
           return v == null ? null : Number(v);
         },
+        revealTimes: (times) => {
+          if (!times.length) return;
+          const minT = Math.min(...times);
+          const maxT = Math.max(...times);
+          const span = Math.max(maxT - minT, 3600);
+          const pad = Math.max(Math.floor(span * 0.25), 6 * 3600);
+          c.timeScale().setVisibleRange({
+            from: (minT - pad) as UTCTimestamp,
+            to: (maxT + pad) as UTCTimestamp,
+          });
+        },
       };
       const pane = c.paneSize(0);
       if (overlayBoxRef.current) {
