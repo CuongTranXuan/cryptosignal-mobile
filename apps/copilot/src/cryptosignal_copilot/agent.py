@@ -89,12 +89,16 @@ class PydanticAiRunner:
         try:
             result = await agent.run(prompt)
         except ModelHTTPError as exc:
+            detail = _provider_error_detail(exc)
             if exc.status_code in (401, 403):
-                yield "error", {"message": "Copilot failed: provider unauthorized"}
+                msg = "Copilot failed: provider unauthorized"
+                if detail:
+                    msg = f"{msg} ({detail})"
+                yield "error", {"message": msg}
             elif exc.status_code == 429:
                 yield "error", {"message": "Copilot failed: provider rate-limited"}
             else:
-                yield "error", {"message": "Copilot failed"}
+                yield "error", {"message": "Copilot failed" if not detail else f"Copilot failed ({detail})"}
             yield "done", {}
             return
         except Exception:

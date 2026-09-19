@@ -20,7 +20,8 @@ export const HEAD_SHOULDERS_PROMPT =
 
 export const AUTO_DRAW_PROMPT = "Auto-Draw: update patterns for the latest closed candle.";
 
-const DEFAULT_BASE = "http://127.0.0.1:8000";
+/** Empty = same-origin (Next rewrite proxies to the local FastAPI copilot). */
+const DEFAULT_BASE = "";
 
 export type CopilotClientDeps = {
   fetchImpl?: typeof fetch;
@@ -38,10 +39,15 @@ export type CopilotClient = {
 };
 
 function resolveBaseUrl(explicit?: string): string {
-  if (explicit) return explicit.replace(/\/$/, "");
+  if (explicit !== undefined) return explicit.replace(/\/$/, "");
   const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process
     ?.env;
-  return (env?.NEXT_PUBLIC_COPILOT_URL || DEFAULT_BASE).replace(/\/$/, "");
+  const fromEnv = env?.NEXT_PUBLIC_COPILOT_URL;
+  // Empty env var means same-origin; only fall back when unset.
+  if (fromEnv === undefined || fromEnv === null) {
+    return DEFAULT_BASE;
+  }
+  return fromEnv.replace(/\/$/, "");
 }
 
 function mapHttpError(status: number): string {

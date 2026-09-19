@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import asyncio
 import json
 from collections.abc import AsyncIterator
@@ -21,10 +22,18 @@ def sse(event: str, data: dict) -> str:
 def create_app(runner: AgentRunner | None = None) -> FastAPI:
     use_runner: AgentRunner = runner if runner is not None else PydanticAiRunner()
     app = FastAPI()
+    # Same-origin via Next rewrite is preferred. Extra origins (comma-separated) or "*" for ngrok.
+    raw = os.environ.get("COPILOT_CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000")
+    if raw.strip() == "*":
+        cors_origins = ["*"]
+        cors_credentials = False
+    else:
+        cors_origins = [o.strip() for o in raw.split(",") if o.strip()]
+        cors_credentials = True
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
-        allow_credentials=True,
+        allow_origins=cors_origins,
+        allow_credentials=cors_credentials,
         allow_methods=["*"],
         allow_headers=["*"],
     )
