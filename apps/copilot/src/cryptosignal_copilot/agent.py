@@ -19,6 +19,10 @@ from cryptosignal_copilot.schema import (
 
 INSTRUCTIONS = (
     "You are a crypto chart research assistant. Analyze only closed candles. "
+    "LANGUAGE (DEFAULT): Write `summary` and ALL chat-facing text in Vietnamese (Tiếng Việt). "
+    "Do not reply in English unless the user explicitly asks for English. "
+    "Keep JSON/schema field names in English exactly as required "
+    "(kind, name, PatternShape, AgentMarker, points, priceLow, priceHigh, side, etc.). "
     "Default analysis/draw window is the visible chart range reflected in request from/to and "
     "closedCandles. If the user defines another range (full history, last N days/weeks/bars, "
     "from–to times, earlier/previous swing, etc.), use get_klines and/or the provided candles "
@@ -26,9 +30,9 @@ INSTRUCTIONS = (
     "When the prompt mentions the visible window / this window / viewport and does not name "
     "another range, stay strictly inside the provided closedCandles set and do not call "
     "get_klines for older history. "
-    "Always fill `summary` as a friendly chat reply (not a terse log): open with what you see, "
-    "name key levels/times, explain the pattern, say what you are drawing and why, and end with "
-    "a short takeaway. Use several short paragraphs. "
+    "Always fill `summary` as a friendly Vietnamese chat reply (not a terse log): open with "
+    "what you see, name key levels/times, explain the pattern, say what you are drawing and why, "
+    "and end with a short takeaway. Use several short paragraphs. "
     "Also return drawable PatternShape overlays (trendline/polyline/zone) whenever the "
     "prompt asks for analysis or drawing — do not return text-only when shapes would help. "
     "Every shape point.time MUST be an exact unix second from closedCandles (or get_klines); "
@@ -107,8 +111,8 @@ class PydanticAiRunner:
         # (Next/ngrok/proxies often abort silent streams around ~30s).
         yield "text", {
             "delta": (
-                f"Analyzing {request.symbol} {request.interval} "
-                f"({len(request.closedCandles)} closed candles)…\n\n"
+                f"Đang phân tích {request.symbol} {request.interval} "
+                f"({len(request.closedCandles)} nến đã đóng)…\n\n"
             )
         }
         try:
@@ -116,25 +120,25 @@ class PydanticAiRunner:
         except ModelHTTPError as exc:
             detail = _provider_error_detail(exc)
             if exc.status_code in (401, 403):
-                msg = "Copilot failed: provider unauthorized"
+                msg = "Copilot thất bại: nhà cung cấp không được ủy quyền"
                 if detail:
                     msg = f"{msg} ({detail})"
                 yield "error", {"message": msg}
             elif exc.status_code == 429:
-                yield "error", {"message": "Copilot failed: provider rate-limited"}
+                yield "error", {"message": "Copilot thất bại: nhà cung cấp bị giới hạn tốc độ"}
             else:
-                yield "error", {"message": "Copilot failed" if not detail else f"Copilot failed ({detail})"}
+                yield "error", {"message": "Copilot thất bại" if not detail else f"Copilot thất bại ({detail})"}
             yield "done", {}
             return
         except Exception:
-            yield "error", {"message": "Copilot failed"}
+            yield "error", {"message": "Copilot thất bại"}
             yield "done", {}
             return
 
         if state.tool_failed:
-            yield "text", {"delta": "Extra history skipped"}
+            yield "text", {"delta": "Đã bỏ qua lịch sử bổ sung"}
 
-        yield "text", {"delta": "Model finished. Building overlays…"}
+        yield "text", {"delta": "Mô hình đã xong. Đang dựng lớp phủ…"}
 
         output = result.output
         if output.summary:
@@ -144,18 +148,18 @@ class PydanticAiRunner:
         valid_shapes, dropped_ids = filter_preview_shapes(output.shapes, allowed_times, symbol=request.symbol, interval=request.interval)
 
         if dropped_ids:
-            yield "text", {"delta": f"\n\nSkipped {len(dropped_ids)} invalid shape(s) (bad schema or times outside candles)."}
+            yield "text", {"delta": f"\n\nĐã bỏ qua {len(dropped_ids)} hình không hợp lệ (sai schema hoặc thời gian ngoài tập nến)."}
 
         yield "shapes", {"shapes": valid_shapes}
         if valid_shapes:
             names = ", ".join(getattr(s, "name", "?") for s in valid_shapes[:5])
-            more = f" (+{len(valid_shapes) - 5} more)" if len(valid_shapes) > 5 else ""
-            yield "text", {"delta": f"\n\nOverlays ready: {len(valid_shapes)} — {names}{more}."}
+            more = f" (+{len(valid_shapes) - 5} nữa)" if len(valid_shapes) > 5 else ""
+            yield "text", {"delta": f"\n\nLớp phủ sẵn sàng: {len(valid_shapes)} — {names}{more}."}
 
         if output.markers:
             valid_markers, dropped_marker_ids = filter_agent_markers(output.markers, allowed_times)
             if dropped_marker_ids:
-                yield "text", {"delta": f"\n\nSkipped {len(dropped_marker_ids)} invalid marker(s)."}
+                yield "text", {"delta": f"\n\nĐã bỏ qua {len(dropped_marker_ids)} marker không hợp lệ."}
             yield "markers", {"markers": valid_markers}
 
         if state.extend_from is not None and state.extend_to is not None:
@@ -193,11 +197,11 @@ def _build_user_prompt(request: AnalyzeRequest) -> str:
     n = len(request.closedCandles)
     return (
         f"Symbol={request.symbol} interval={request.interval}\n"
-        f"PRIMARY ANALYSIS WINDOW: from={request.from_} to={request.to} "
-        f"({n} closed candles). Analyze this window. "
-        f"All shape point.time values MUST be times from this closedCandles set "
-        f"(or get_klines only if the user asked for older history). "
-        f"Prefer the most recent bars in the window when the user does not name another range.\n"
-        f"User prompt: {request.prompt}\n"
+        f"CỬA SỔ PHÂN TÍCH CHÍNH: from={request.from_} to={request.to} "
+        f"({n} nến đã đóng). Phân tích cửa sổ này. "
+        f"Mọi point.time của shape PHẢI là thời gian từ tập closedCandles này "
+        f"(hoặc get_klines chỉ khi người dùng yêu cầu lịch sử cũ hơn). "
+        f"Ưu tiên các thanh gần nhất trong cửa sổ khi người dùng không nêu khoảng khác.\n"
+        f"Prompt người dùng: {request.prompt}\n"
         f"Request JSON: {payload}"
     )
