@@ -1,19 +1,19 @@
-"""Copilot agent defaults to Vietnamese for chat-facing text."""
+"""Copilot agent defaults to English for chat-facing text and SSE scaffolding."""
 
 from cryptosignal_copilot.agent import INSTRUCTIONS, _build_user_prompt
 from cryptosignal_copilot.schema import AnalyzeRequest
 
 
-def test_instructions_require_vietnamese_summary():
-    assert "Vietnamese" in INSTRUCTIONS or "Tiếng Việt" in INSTRUCTIONS
+def test_instructions_default_english_summary():
+    assert "LANGUAGE:" in INSTRUCTIONS
+    assert "English by default" in INSTRUCTIONS
+    assert "Only use Vietnamese if the user explicitly asks" in INSTRUCTIONS
+    # Must not default the model to Vietnamese chat output.
+    assert "Write `summary` and chat-facing text in Vietnamese" not in INSTRUCTIONS
+    assert "ALL chat-facing text in Vietnamese" not in INSTRUCTIONS
+    assert "Do not reply in English unless the user explicitly asks" not in INSTRUCTIONS
     assert "kind" in INSTRUCTIONS
     assert "PatternShape" in INSTRUCTIONS
-    assert "Do not reply in English unless the user explicitly asks" in INSTRUCTIONS
-    # System LANGUAGE instruction itself should stay mostly English (avoid heavy VI
-    # scaffolding that has tripped agentrouter content-blocked).
-    assert "LANGUAGE:" in INSTRUCTIONS
-    assert "Tiếng Việt" not in INSTRUCTIONS
-    assert "ALL chat-facing text in Vietnamese (Tiếng Việt)" not in INSTRUCTIONS
     # OmniRoute 2026-09-19: no get_klines tool (custom-tool reject) — instructions
     # must not tell the model to call a klines tool that is not registered.
     assert "get_klines" not in INSTRUCTIONS
@@ -40,6 +40,7 @@ def test_build_user_prompt_english_window_annotation():
     assert "closed candles" in prompt
     assert "User prompt: Tìm tam giác" in prompt
     # Vietnamese window headers must not be injected (agentrouter content-block risk).
+    # Client prompts may still be VI; scaffolding stays English.
     assert "CỬA SỔ PHÂN TÍCH CHÍNH" not in prompt
     assert "nến đã đóng" not in prompt
     assert "Prompt người dùng" not in prompt
