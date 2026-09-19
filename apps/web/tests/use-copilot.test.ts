@@ -307,6 +307,54 @@ describe("use-copilot / createCopilotClient", () => {
     expect(body.prompt).toContain("mode=viewport");
   });
 
+  it("widens closed candles when the user names full history", async () => {
+    const extra: Candle[] = [];
+    for (let i = 0; i < 40; i++) {
+      extra.push({
+        time: 1709852400 + i * 3600,
+        open: 1,
+        high: 2,
+        low: 0.5,
+        close: 1.5,
+        volume: 1,
+      });
+    }
+    useChartStore.setState({ candles: [...extra, c0, c1, c2, c3Forming] });
+    const closed = new Set([...extra, c0, c1, c2].map((c) => c.time));
+    const visible = { from: c0.time, to: c2.time };
+
+    const fetchMock = vi.fn(async () =>
+      streamResponse([
+        sseChunk("text", { delta: "ok" }),
+        sseChunk("done", {}),
+      ]),
+    );
+
+    const client = createCopilotClient({
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      getClosedTimes: () => closed,
+      getCoordApi: () =>
+        ({
+          timeToCoordinate: () => null,
+          priceToCoordinate: () => null,
+          coordinateToTime: () => null,
+          coordinateToPrice: () => null,
+          revealTimes: vi.fn(),
+          getVisibleTimeRange: () => visible,
+        }) as import("../lib/chart-api").ChartCoordinateApi,
+    });
+
+    await client.analyze("Draw the major trend across full history");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const body = JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body));
+    expect(body.closedCandles.length).toBe(closed.size);
+    expect(body.from).toBe(extra[0]!.time);
+    expect(body.to).toBe(c2.time);
+    expect(body.prompt).toContain("mode=all");
+    expect(body.prompt).toMatch(/full\/loaded history|named another range/i);
+  });
+
   it("does not call analyze when only a forming candle exists", async () => {
     useChartStore.setState({ candles: [c3Forming] });
     const fetchMock = vi.fn();
