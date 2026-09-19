@@ -205,6 +205,13 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
         );
         droppedIds.push(...outOfWindow);
         useShapeStore.getState().setPreview(valid);
+        if (valid.length > 0) {
+          useShapeStore.getState().commitPreview();
+          const n = valid.length;
+          useAiStore.getState().appendText(
+            `\n\nDrew ${n} shape${n === 1 ? "" : "s"} on the chart.`,
+          );
+        }
         noteDroppedShapes(droppedIds);
         return "ok";
       }
@@ -232,6 +239,12 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
         );
         droppedIds.push(...outOfWindow);
         useMarkerStore.getState().setMarkers(valid);
+        if (valid.length > 0) {
+          const n = valid.length;
+          useAiStore.getState().appendText(
+            `\n\nPlaced ${n} marker${n === 1 ? "" : "s"} on the chart.`,
+          );
+        }
         noteDroppedMarkers(droppedIds);
         return "ok";
       }

@@ -154,9 +154,13 @@ describe("use-copilot / createCopilotClient", () => {
     expect(ai.inFlight).toBe(false);
     expect(ai.messages).toEqual([
       expect.objectContaining({ role: "user", content: TRIANGLES_PROMPT }),
-      expect.objectContaining({ role: "agent", content: "Found a triangle" }),
+      expect.objectContaining({
+        role: "agent",
+        content: "Found a triangle\n\nDrew 1 shape on the chart.",
+      }),
     ]);
-    expect(useShapeStore.getState().previews().map((s) => s.id)).toEqual(["tri-1"]);
+    expect(useShapeStore.getState().previews().map((s) => s.id)).toEqual([]);
+    expect(useShapeStore.getState().committed().map((s) => s.id)).toEqual(["tri-1"]);
     expect(body.existingMarkers).toEqual([]);
     expect(useMarkerStore.getState().markers).toEqual([]);
   });
@@ -192,9 +196,14 @@ describe("use-copilot / createCopilotClient", () => {
 
     await client.analyze("signals");
 
-    expect(useShapeStore.getState().previews().map((s) => s.id)).toEqual(["tri-1"]);
-    expect(useShapeStore.getState().committed().map((s) => s.id)).toEqual(["keep"]);
+    expect(useShapeStore.getState().previews().map((s) => s.id)).toEqual([]);
+    expect(useShapeStore.getState().committed().map((s) => s.id).sort()).toEqual(
+      ["keep", "tri-1"].sort(),
+    );
     expect(useMarkerStore.getState().markers.map((m) => m.id)).toEqual(["mrk-1"]);
+    const agentMsg = useAiStore.getState().messages.find((m) => m.role === "agent");
+    expect(agentMsg?.content).toContain("Drew 1 shape on the chart.");
+    expect(agentMsg?.content).toContain("Placed 1 marker on the chart.");
     expect(useAiStore.getState().lastError).toContain("off");
   });
 
@@ -300,7 +309,8 @@ describe("use-copilot / createCopilotClient", () => {
       JSON.parse(String(c[1].body)),
     );
     expect(bodies[1]?.prompt).toBe(AUTO_DRAW_PROMPT);
-    expect(useShapeStore.getState().previews().map((s) => s.id)).toEqual(["auto-2"]);
+    expect(useShapeStore.getState().previews().map((s) => s.id)).toEqual([]);
+    expect(useShapeStore.getState().committed().map((s) => s.id)).toContain("auto-2");
   });
 
   it("superseded done finishes without failure and does not clear previews", async () => {
@@ -381,9 +391,11 @@ describe("use-copilot / createCopilotClient", () => {
 
     await client.analyze("filter times");
 
-    expect(useShapeStore.getState().previews().map((s) => s.id)).toEqual(["ok"]);
+    expect(useShapeStore.getState().previews().map((s) => s.id)).toEqual([]);
+    expect(useShapeStore.getState().committed().map((s) => s.id)).toEqual(["ok"]);
     expect(useAiStore.getState().lastError).toContain("off-window");
     const agentMsg = useAiStore.getState().messages.find((m) => m.role === "agent");
+    expect(agentMsg?.content).toContain("Drew 1 shape on the chart.");
     expect(agentMsg?.content).toContain("Dropped invalid shapes: off-window");
   });
 
@@ -441,7 +453,8 @@ describe("use-copilot / createCopilotClient", () => {
 
     await client.analyze("parse");
 
-    expect(useShapeStore.getState().previews().map((s) => s.id)).toEqual(["ok"]);
+    expect(useShapeStore.getState().previews().map((s) => s.id)).toEqual([]);
+    expect(useShapeStore.getState().committed().map((s) => s.id)).toEqual(["ok"]);
     expect(useAiStore.getState().lastError).toContain("bad-poly");
   });
 });
