@@ -7,9 +7,11 @@ import {
   COPILOT_ERROR_UNAUTHORIZED,
   copilotDrewShapes,
   copilotPlacedMarkers,
+  copilotShapeSummaryLine,
   copilotSkippedMarkers,
   copilotSkippedShapes,
   COPILOT_SCROLLED_TO_OVERLAYS,
+  mapCopilotSseError,
 } from "./copilot-strings";
 import { fetchKlines as defaultFetchKlines, type FetchKlines } from "./market-client";
 import { coerceAgentMarker, coerceAgentShape } from "./normalize-agent-shape";
@@ -230,9 +232,13 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
         useShapeStore.getState().setPreview(valid);
         if (valid.length > 0) {
           useShapeStore.getState().commitPreview();
-          const lines = valid.map(
-            (s) =>
-              `• ${s.name} (${s.kind}, ${Math.round(s.confidence * 100)}%, ${s.points.length} pts)`,
+          const lines = valid.map((s) =>
+            copilotShapeSummaryLine(
+              s.name,
+              s.kind,
+              Math.round(s.confidence * 100),
+              s.points.length,
+            ),
           );
           useAiStore.getState().appendText(copilotDrewShapes(valid.length, lines));
           const times = valid.flatMap((s) => s.points.map((pt) => pt.time));
@@ -294,7 +300,7 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
       case "error": {
         const message =
           typeof data.message === "string" && data.message.trim()
-            ? data.message
+            ? mapCopilotSseError(data.message)
             : COPILOT_ERROR;
         useAiStore.getState().fail(message);
         return "error";

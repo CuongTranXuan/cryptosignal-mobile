@@ -8,6 +8,7 @@ import {
   COPILOT_ACTION_HEAD_SHOULDERS,
   COPILOT_EMPTY_STATE,
   COPILOT_INPUT_PLACEHOLDER,
+  COPILOT_LOADING,
   COPILOT_OFFLINE,
   COPILOT_SEND,
   COPILOT_TAB_AUTO_DRAW,
@@ -148,7 +149,7 @@ export function CopilotPanel({ client }: CopilotPanelProps) {
             <div className="mb-0.5 text-[10px] uppercase tracking-wide text-[#848e9c]">
               {copilotRoleLabel(m.role)}
             </div>
-            <div className="whitespace-pre-wrap">{m.content || (inFlight ? "…" : "")}</div>
+            <div className="whitespace-pre-wrap">{m.content || (inFlight ? COPILOT_LOADING : "")}</div>
           </div>
         ))}
         {lastError && (

@@ -118,13 +118,13 @@ describe("use-copilot / createCopilotClient", () => {
 
   it("exposes exact preset prompt strings", () => {
     expect(TRIANGLES_PROMPT).toBe(
-      "Tìm tam giác cân trong cửa sổ nến đã đóng này. Return PatternShape polyline(s). Reply and summarize in English; output all text in English.",
+      "Tìm tam giác cân trong cửa sổ nến đã đóng này. Return PatternShape polyline(s). Reply and summarize in Vietnamese; output all text in Vietnamese.",
     );
     expect(HEAD_SHOULDERS_PROMPT).toBe(
-      "Tìm mẫu vai đầu vai trong cửa sổ nến đã đóng này. Return PatternShape polyline(s). Reply and summarize in English; output all text in English.",
+      "Tìm mẫu vai đầu vai trong cửa sổ nến đã đóng này. Return PatternShape polyline(s). Reply and summarize in Vietnamese; output all text in Vietnamese.",
     );
     expect(AUTO_DRAW_PROMPT).toBe(
-      "Tự vẽ: cập nhật mẫu hình cho nến đóng mới nhất. Update patterns for the latest closed candle. Reply and summarize in English; output all text in English.",
+      "Tự vẽ: cập nhật mẫu hình cho nến đóng mới nhất. Update patterns for the latest closed candle. Reply and summarize in Vietnamese; output all text in Vietnamese.",
     );
   });
 
@@ -210,7 +210,7 @@ describe("use-copilot / createCopilotClient", () => {
     expect(useMarkerStore.getState().markers.map((m) => m.id)).toEqual(["mrk-1"]);
     const agentMsg = useAiStore.getState().messages.find((m) => m.role === "agent");
     expect(agentMsg?.content).toContain("Đã vẽ 1 hình trên biểu đồ");
-    expect(agentMsg?.content).toContain("Đã đặt 1 marker trên biểu đồ.");
+    expect(agentMsg?.content).toContain("Đã đặt 1 đánh dấu trên biểu đồ.");
     expect(useAiStore.getState().messages.find((m) => m.role === "agent")?.content).toContain("Bỏ qua");
   });
 
@@ -233,7 +233,7 @@ describe("use-copilot / createCopilotClient", () => {
 
     await client.analyze("find patterns");
 
-    expect(useAiStore.getState().lastError).toBe("Copilot failed: provider unauthorized");
+    expect(useAiStore.getState().lastError).toBe(COPILOT_ERROR_UNAUTHORIZED);
     expect(useAiStore.getState().inFlight).toBe(false);
     expect(useShapeStore.getState().committed()).toEqual([
       expect.objectContaining({ id: "keep", status: "committed" }),
