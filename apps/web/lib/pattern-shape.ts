@@ -19,7 +19,7 @@ export const PatternShapeSchema = z
     kind: z.enum(["trendline", "polyline", "zone"]),
     name: z.string().min(1),
     status: z.enum(["preview", "committed"]),
-    source: z.literal("agent"),
+    source: z.enum(["agent", "human"]),
     confidence: z.number().min(0).max(1),
     points: z.array(PointSchema),
     priceLow: z.number().nullable(),

@@ -9,15 +9,20 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import type { ChartCoordinateApi } from "../lib/chart-api";
+import { buildHumanShape, shouldAutoCommit } from "../lib/human-draw";
 import { mapShapeToPixels, mapZoneToRect, pixelsToPoint } from "../lib/overlay-map";
 import type { PatternShape } from "../lib/pattern-shape";
+import { useChartStore } from "../lib/stores/chart-store";
+import { useDrawToolStore } from "../lib/stores/draw-tool-store";
 import { useShapeStore } from "../lib/stores/shape-store";
+import { DrawToolbar } from "./draw-toolbar";
 
 const NODE_R = 5;
 /** Hit-target radius in px (diameter ≥ 16) so nodes are easy to grab. */
 const NODE_HIT_R = 8;
 const PREVIEW_STROKE = "#f0b90b";
 const COMMITTED_STROKE = "#0ecb81";
+const HUMAN_STROKE = "#3b82f6";
 const ZONE_FILL = "rgba(240, 185, 11, 0.18)";
 
 type ShapeOverlayProps = {
@@ -35,6 +40,16 @@ export function ShapeOverlay({ coordApiRef, overlayTick }: ShapeOverlayProps) {
   const patchPoints = useShapeStore((s) => s.patchPoints);
   const patchZone = useShapeStore((s) => s.patchZone);
   const select = useShapeStore((s) => s.select);
+  const addCommitted = useShapeStore((s) => s.addCommitted);
+
+  const tool = useDrawToolStore((s) => s.tool);
+  const draftPoints = useDrawToolStore((s) => s.draftPoints);
+  const addDraftPoint = useDrawToolStore((s) => s.addDraftPoint);
+  const clearDraft = useDrawToolStore((s) => s.clearDraft);
+  const setTool = useDrawToolStore((s) => s.setTool);
+
+  const symbol = useChartStore((s) => s.symbol);
+  const interval = useChartStore((s) => s.interval);
 
   const svgRef = useRef<SVGSVGElement | null>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
@@ -54,6 +69,23 @@ export function ShapeOverlay({ coordApiRef, overlayTick }: ShapeOverlayProps) {
 
   const api = coordApiRef.current;
   void overlayTick;
+
+  const finishWithPoints = useCallback(
+    (points: PatternShape["points"], activeTool: typeof tool) => {
+      if (activeTool === "none") return;
+      const shape = buildHumanShape({ tool: activeTool, points, symbol, interval });
+      if (!shape) return;
+      addCommitted(shape);
+      clearDraft();
+      setTool("none");
+    },
+    [addCommitted, clearDraft, interval, setTool, symbol],
+  );
+
+  const onFinishPolyline = useCallback(() => {
+    const points = useDrawToolStore.getState().draftPoints;
+    finishWithPoints(points, "polyline");
+  }, [finishWithPoints]);
 
   const onPointerMove = useCallback(
     (e: ReactPointerEvent) => {
@@ -93,8 +125,42 @@ export function ShapeOverlay({ coordApiRef, overlayTick }: ShapeOverlayProps) {
     dragRef.current = null;
   }, []);
 
+  const onSvgPointerDown = useCallback(
+    (e: ReactPointerEvent) => {
+      if (tool === "none") return;
+      if (e.button !== 0) return;
+      const coord = coordApiRef.current;
+      if (!coord || !svgRef.current) return;
+      const rect = svgRef.current.getBoundingClientRect();
+      const point = pixelsToPoint(e.clientX - rect.left, e.clientY - rect.top, coord);
+      if (point == null) return;
+      e.stopPropagation();
+      e.preventDefault();
+
+      const nextPoints = [...useDrawToolStore.getState().draftPoints, point];
+      addDraftPoint(point);
+      if (shouldAutoCommit(tool, nextPoints.length)) {
+        finishWithPoints(nextPoints, tool);
+      }
+    },
+    [addDraftPoint, coordApiRef, finishWithPoints, tool],
+  );
+
   const committed = shapes.filter((s) => s.status === "committed");
   const previews = shapes.filter((s) => s.status === "preview");
+  const drawing = tool !== "none";
+
+  const draftPixels =
+    api && draftPoints.length > 0
+      ? draftPoints
+          .map((p) => {
+            const x = api.timeToCoordinate(p.time);
+            const y = api.priceToCoordinate(p.price);
+            if (x == null || y == null) return null;
+            return { x, y };
+          })
+          .filter((p): p is { x: number; y: number } => p != null)
+      : [];
 
   return (
     <div className="pointer-events-none absolute inset-0">
@@ -104,7 +170,10 @@ export function ShapeOverlay({ coordApiRef, overlayTick }: ShapeOverlayProps) {
             <div className="mb-1 text-[#848e9c]">Active Layers ({committed.length}):</div>
           )}
           {committed.map((s) => (
-            <div key={s.id} className="flex items-center gap-1 text-[#0ecb81]">
+            <div
+              key={s.id}
+              className={`flex items-center gap-1 ${s.source === "human" ? "text-[#3b82f6]" : "text-[#0ecb81]"}`}
+            >
               <span>
                 • {s.name} ({Math.round(s.confidence * 100)}%)
               </span>
@@ -118,9 +187,10 @@ export function ShapeOverlay({ coordApiRef, overlayTick }: ShapeOverlayProps) {
 
       <svg
         ref={svgRef}
-        className="pointer-events-none absolute inset-0 h-full w-full"
+        className={`absolute inset-0 h-full w-full ${drawing ? "pointer-events-auto cursor-crosshair" : "pointer-events-none"}`}
         width={size.w}
         height={size.h}
+        onPointerDown={onSvgPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={endDrag}
         onPointerLeave={endDrag}
@@ -128,13 +198,41 @@ export function ShapeOverlay({ coordApiRef, overlayTick }: ShapeOverlayProps) {
         {shapes.map((shape) => {
           if (!api) return null;
           if (shape.kind === "zone") {
-            return renderZone(shape, api, size.w, selectedId, dragRef);
+            return renderZone(shape, api, size.w, selectedId, dragRef, !drawing);
           }
-          return renderPath(shape, api, selectedId, dragRef, select);
+          return renderPath(shape, api, selectedId, dragRef, select, !drawing);
         })}
+        {draftPixels.length >= 2 && (
+          <path
+            d={draftPixels.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ")}
+            fill="none"
+            stroke={HUMAN_STROKE}
+            strokeWidth={1.5}
+            strokeDasharray="4 3"
+            className="pointer-events-none"
+          />
+        )}
+        {draftPixels.map((p, i) => (
+          <circle
+            key={`draft-${i}`}
+            cx={p.x}
+            cy={p.y}
+            r={NODE_R}
+            fill={HUMAN_STROKE}
+            className="pointer-events-none"
+          />
+        ))}
       </svg>
+
+      <DrawToolbar onFinishPolyline={onFinishPolyline} />
     </div>
   );
+}
+
+function shapeStroke(shape: PatternShape): string {
+  if (shape.status === "preview") return PREVIEW_STROKE;
+  if (shape.source === "human") return HUMAN_STROKE;
+  return COMMITTED_STROKE;
 }
 
 function renderZone(
@@ -143,10 +241,11 @@ function renderZone(
   paneWidth: number,
   selectedId: string | null,
   dragRef: MutableRefObject<DragState | null>,
+  interactive: boolean,
 ) {
   const rect = mapZoneToRect(shape, api, paneWidth);
   if (!rect || rect.height <= 0) return null;
-  const stroke = shape.status === "preview" ? PREVIEW_STROKE : COMMITTED_STROKE;
+  const stroke = shapeStroke(shape);
   const dash = shape.status === "preview" ? "6 4" : undefined;
   const selected = selectedId === shape.id;
 
@@ -163,7 +262,7 @@ function renderZone(
         strokeDasharray={dash}
         className="pointer-events-none"
       />
-      {selected && shape.priceHigh != null && shape.priceLow != null && (
+      {interactive && selected && shape.priceHigh != null && shape.priceLow != null && (
         <>
           <circle
             cx={rect.x + rect.width / 2}
@@ -219,10 +318,11 @@ function renderPath(
   selectedId: string | null,
   dragRef: MutableRefObject<DragState | null>,
   select: (id: string | null) => void,
+  interactive: boolean,
 ) {
   const pixels = mapShapeToPixels(shape, api);
   if (pixels.length < 2) return null;
-  const stroke = shape.status === "preview" ? PREVIEW_STROKE : COMMITTED_STROKE;
+  const stroke = shapeStroke(shape);
   const dash = shape.status === "preview" ? "6 4" : undefined;
   const selected = selectedId === shape.id;
   const d = pixels.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
@@ -235,9 +335,10 @@ function renderPath(
         stroke={stroke}
         strokeWidth={selected ? 2.5 : 1.5}
         strokeDasharray={dash}
-        className="pointer-events-auto"
-        style={{ cursor: "pointer" }}
+        className={interactive ? "pointer-events-auto" : "pointer-events-none"}
+        style={{ cursor: interactive ? "pointer" : "default" }}
         onPointerDown={(e) => {
+          if (!interactive) return;
           e.stopPropagation();
           select(shape.id);
         }}
@@ -251,9 +352,10 @@ function renderPath(
           fill={selected ? stroke : "transparent"}
           stroke={stroke}
           strokeWidth={1.5}
-          className="pointer-events-auto"
-          style={{ cursor: selected ? "grab" : "pointer" }}
+          className={interactive ? "pointer-events-auto" : "pointer-events-none"}
+          style={{ cursor: interactive ? (selected ? "grab" : "pointer") : "default" }}
           onPointerDown={(e) => {
+            if (!interactive) return;
             e.stopPropagation();
             select(shape.id);
             e.currentTarget.setPointerCapture(e.pointerId);

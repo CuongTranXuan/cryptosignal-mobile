@@ -27,7 +27,7 @@ class PatternShape(BaseModel):
     kind: Kind
     name: str
     status: Status
-    source: Literal["agent"]
+    source: Literal["agent", "human"]
     confidence: float = Field(ge=0, le=1)
     points: list[Point]
     priceLow: float | None
