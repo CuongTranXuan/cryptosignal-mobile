@@ -12,10 +12,17 @@ describe("PatternShape", () => {
     const shape = parsePatternShape(fixture);
     expect(shape.kind).toBe("polyline");
     expect(shape.points).toHaveLength(3);
+    expect(shape.agentId).toBeUndefined();
+  });
+
+  it("accepts optional agentId without requiring it", () => {
+    const shape = parsePatternShape({ ...fixture, agentId: "agent-alpha" });
+    expect(shape.agentId).toBe("agent-alpha");
   });
 
   it("rejects order-like keys", () => {
     expect(() => parsePatternShape({ ...fixture, side: "BUY", quantity: 1 })).toThrow();
+    expect(() => parsePatternShape({ ...fixture, side: "buy" })).toThrow();
   });
 
   it("rejects unknown keys on points and candles", () => {

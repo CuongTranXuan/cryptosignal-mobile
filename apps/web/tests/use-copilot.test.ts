@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Candle, PatternShape } from "../lib/pattern-shape";
+import type { AgentMarker, Candle, PatternShape } from "../lib/pattern-shape";
 import { useChartStore } from "../lib/stores/chart-store";
+import { useMarkerStore } from "../lib/stores/marker-store";
 import { useShapeStore } from "../lib/stores/shape-store";
 import { useAiStore } from "../lib/stores/ai-store";
 import {
@@ -94,6 +95,7 @@ function resetStores() {
     shapesResetSignal: 0,
   });
   useShapeStore.setState({ shapes: [], selectedId: null });
+  useMarkerStore.setState({ markers: [] });
   useAiStore.setState({
     mode: "manual",
     messages: [],
@@ -155,6 +157,45 @@ describe("use-copilot / createCopilotClient", () => {
       expect.objectContaining({ role: "agent", content: "Found a triangle" }),
     ]);
     expect(useShapeStore.getState().previews().map((s) => s.id)).toEqual(["tri-1"]);
+    expect(body.existingMarkers).toEqual([]);
+    expect(useMarkerStore.getState().markers).toEqual([]);
+  });
+
+  it("streams markers into the marker store without touching shapes", async () => {
+    const committed = { ...validShape("keep"), status: "committed" as const };
+    useShapeStore.setState({ shapes: [committed], selectedId: null });
+
+    const marker: AgentMarker = {
+      id: "mrk-1",
+      symbol: "BTCUSDT",
+      interval: "1h",
+      time: c1.time,
+      side: "buy",
+      position: "belowBar",
+      shape: "arrowUp",
+      confidence: 0.7,
+      source: "agent",
+    };
+
+    const fetchMock = vi.fn(async () =>
+      streamResponse([
+        sseChunk("shapes", { shapes: [validShape("tri-1")] }),
+        sseChunk("markers", { markers: [marker, { ...marker, id: "off", time: 999 }] }),
+        sseChunk("done", {}),
+      ]),
+    );
+
+    const client = createCopilotClient({
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      getClosedTimes: () => new Set([c0.time, c1.time, c2.time]),
+    });
+
+    await client.analyze("signals");
+
+    expect(useShapeStore.getState().previews().map((s) => s.id)).toEqual(["tri-1"]);
+    expect(useShapeStore.getState().committed().map((s) => s.id)).toEqual(["keep"]);
+    expect(useMarkerStore.getState().markers.map((m) => m.id)).toEqual(["mrk-1"]);
+    expect(useAiStore.getState().lastError).toContain("off");
   });
 
   it("error event fails without touching committed shapes or calling setPreview", async () => {
@@ -348,12 +389,26 @@ describe("use-copilot / createCopilotClient", () => {
 
   it("clearAll shapes when chart shapesResetSignal increments", async () => {
     useShapeStore.getState().setPreview([validShape("gone")]);
+    useMarkerStore.getState().setMarkers([
+      {
+        id: "mrk-gone",
+        symbol: "BTCUSDT",
+        interval: "1h",
+        time: c1.time,
+        side: "buy",
+        position: "belowBar",
+        shape: "arrowUp",
+        confidence: 0.5,
+        source: "agent",
+      },
+    ]);
     const client = createCopilotClient({
       fetchImpl: vi.fn() as unknown as typeof fetch,
     });
     client.watchShapesReset();
     useChartStore.getState().resetShapesSignal();
     await vi.waitFor(() => expect(useShapeStore.getState().shapes).toHaveLength(0));
+    expect(useMarkerStore.getState().markers).toHaveLength(0);
     client.dispose();
   });
 
