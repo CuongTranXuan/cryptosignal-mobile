@@ -18,6 +18,7 @@ import { CHART_THEME } from "../lib/chart-theme";
 import { mapAgentMarkersToSeriesMarkers } from "../lib/marker-map";
 import { toVolumeData } from "../lib/volume-map";
 import { useChartStore } from "../lib/stores/chart-store";
+import { useDrawToolStore } from "../lib/stores/draw-tool-store";
 import { useMarkerStore } from "../lib/stores/marker-store";
 import { ShapeOverlay } from "./shape-overlay";
 
@@ -67,6 +68,7 @@ export function ChartCanvas({ coordApiRef }: ChartCanvasProps) {
   const connection = useChartStore((s) => s.connection);
   const symbol = useChartStore((s) => s.symbol);
   const markers = useMarkerStore((s) => s.markers);
+  const drawTool = useDrawToolStore((s) => s.tool);
 
 
   const last = candles.length > 0 ? candles[candles.length - 1]! : null;
@@ -229,6 +231,21 @@ export function ChartCanvas({ coordApiRef }: ChartCanvasProps) {
     setOverlayTick((n) => n + 1);
   }, [candles]);
 
+
+  // Drawing mode: stop LWC from eating pointer events under the overlay.
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    const drawing = drawTool !== "none";
+    chart.applyOptions({
+      handleScroll: !drawing,
+      handleScale: !drawing,
+    });
+    if (overlayBoxRef.current) {
+      overlayBoxRef.current.style.pointerEvents = drawing ? "auto" : "none";
+    }
+  }, [drawTool, overlayTick]);
+
   useEffect(() => {
     markersApiRef.current?.setMarkers(toSeriesMarkers(mapAgentMarkersToSeriesMarkers(markers)));
   }, [markers, overlayTick]);
@@ -265,7 +282,7 @@ export function ChartCanvas({ coordApiRef }: ChartCanvasProps) {
       </div>
       <div className="relative min-h-0 flex-1">
         <div ref={containerRef} className="absolute inset-0" />
-        <div ref={overlayBoxRef} className="pointer-events-none absolute inset-x-0 top-0">
+        <div ref={overlayBoxRef} className="absolute inset-x-0 top-0" style={{ pointerEvents: "none" }}>
           <ShapeOverlay coordApiRef={coordApiRef} overlayTick={overlayTick} />
         </div>
       </div>

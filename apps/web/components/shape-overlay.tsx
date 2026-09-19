@@ -163,7 +163,7 @@ export function ShapeOverlay({ coordApiRef, overlayTick }: ShapeOverlayProps) {
       : [];
 
   return (
-    <div className="pointer-events-none absolute inset-0">
+    <div className={`absolute inset-0 ${drawing ? "pointer-events-auto" : "pointer-events-none"}`}>
       {(committed.length > 0 || previews.length > 0) && (
         <div className="pointer-events-none absolute left-3 top-3 z-10 rounded border border-[#2b313a] bg-[#181a20]/90 p-2 text-xs backdrop-blur">
           {committed.length > 0 && (
@@ -188,8 +188,9 @@ export function ShapeOverlay({ coordApiRef, overlayTick }: ShapeOverlayProps) {
       <svg
         ref={svgRef}
         className={`absolute inset-0 h-full w-full ${drawing ? "pointer-events-auto cursor-crosshair" : "pointer-events-none"}`}
-        width={size.w}
-        height={size.h}
+        width={size.w || "100%"}
+        height={size.h || "100%"}
+        style={drawing ? { touchAction: "none" } : undefined}
         onPointerDown={onSvgPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={endDrag}
