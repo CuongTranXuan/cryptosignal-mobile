@@ -133,6 +133,30 @@ class PydanticAiRunner:
         yield "done", {}
 
 
+
+def _provider_error_detail(exc: ModelHTTPError) -> str:
+    """Best-effort short detail from provider HTTP errors (never raises)."""
+    try:
+        body = getattr(exc, "body", None)
+        if isinstance(body, dict):
+            err = body.get("error")
+            if isinstance(err, dict):
+                msg = err.get("message") or err.get("code")
+                if msg:
+                    return str(msg)[:240]
+            if body.get("message"):
+                return str(body["message"])[:240]
+        if isinstance(body, str) and body.strip():
+            return body.strip()[:240]
+    except Exception:
+        pass
+    try:
+        msg = getattr(exc, "message", None) or str(exc)
+        return str(msg)[:240]
+    except Exception:
+        return ""
+
+
 def _build_user_prompt(request: AnalyzeRequest) -> str:
     payload = request.model_dump(by_alias=True)
     return (

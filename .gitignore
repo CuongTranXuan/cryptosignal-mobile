@@ -32,3 +32,5 @@ tsconfig.tsbuildinfo
 **/tsconfig.tsbuildinfo
 .worktrees/
 docs/superpowers/
+
+.dev-stack/
