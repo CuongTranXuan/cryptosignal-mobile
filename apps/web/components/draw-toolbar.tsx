@@ -85,9 +85,9 @@ export function DrawToolbar({
       )}
       {tool !== "none" && (
         <span className="ml-1 max-w-[9rem] truncate text-[10px] font-medium text-[#f0b90b]">
-          {tool === "trendline" && "Click 2 points"}
+          {tool === "trendline" && `${draftPoints.length}/2 clicks`}
           {tool === "polyline" && `${draftPoints.length} pts · Finish when ≥3`}
-          {tool === "zone" && "Click 2 corners"}
+          {tool === "zone" && `${draftPoints.length}/2 corners`}
         </span>
       )}
     </div>

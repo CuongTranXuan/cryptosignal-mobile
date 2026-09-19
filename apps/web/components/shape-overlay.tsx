@@ -204,7 +204,9 @@ export function ShapeOverlay({ coordApiRef, overlayTick }: ShapeOverlayProps) {
             y={0}
             width="100%"
             height="100%"
-            fill="rgba(0,0,0,0)"
+            // Fully transparent fills often skip hit-testing in Chromium.
+            fill="#000000"
+            fillOpacity={0.001}
             className="pointer-events-auto"
           />
         )}
