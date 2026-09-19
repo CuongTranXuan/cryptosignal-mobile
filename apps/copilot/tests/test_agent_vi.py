@@ -14,6 +14,10 @@ def test_instructions_require_vietnamese_summary():
     assert "LANGUAGE:" in INSTRUCTIONS
     assert "Tiếng Việt" not in INSTRUCTIONS
     assert "ALL chat-facing text in Vietnamese (Tiếng Việt)" not in INSTRUCTIONS
+    # OmniRoute 2026-09-19: no get_klines tool (custom-tool reject) — instructions
+    # must not tell the model to call a klines tool that is not registered.
+    assert "get_klines" not in INSTRUCTIONS
+    assert "closedCandles" in INSTRUCTIONS
 
 
 def test_build_user_prompt_english_window_annotation():
@@ -39,3 +43,4 @@ def test_build_user_prompt_english_window_annotation():
     assert "CỬA SỔ PHÂN TÍCH CHÍNH" not in prompt
     assert "nến đã đóng" not in prompt
     assert "Prompt người dùng" not in prompt
+    assert "get_klines" not in prompt
