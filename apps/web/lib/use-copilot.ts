@@ -1,4 +1,15 @@
 import { mergeCandles } from "./binance";
+import {
+  AUTO_DRAW_PROMPT,
+  COPILOT_ERROR,
+  COPILOT_ERROR_RATE_LIMITED,
+  COPILOT_ERROR_UNAUTHORIZED,
+  copilotDrewShapes,
+  copilotPlacedMarkers,
+  copilotSkippedMarkers,
+  copilotSkippedShapes,
+  COPILOT_SCROLLED_TO_OVERLAYS,
+} from "./copilot-strings";
 import { fetchKlines as defaultFetchKlines, type FetchKlines } from "./market-client";
 import { coerceAgentMarker, coerceAgentShape } from "./normalize-agent-shape";
 import {
@@ -25,13 +36,7 @@ export {
   timesInsideVisibleRange,
 } from "./analysis-window";
 
-export const TRIANGLES_PROMPT =
-  "Find symmetrical triangles in this closed-candle window and return PatternShape polyline(s).";
-
-export const HEAD_SHOULDERS_PROMPT =
-  "Find head and shoulders in this closed-candle window and return PatternShape polyline(s).";
-
-export const AUTO_DRAW_PROMPT = "Auto-Draw: update patterns for the latest closed candle.";
+export { AUTO_DRAW_PROMPT, HEAD_SHOULDERS_PROMPT, TRIANGLES_PROMPT } from "./copilot-strings";
 
 /** Empty = same-origin (Next rewrite proxies to the local FastAPI copilot). */
 const DEFAULT_BASE = "";
@@ -65,9 +70,9 @@ function resolveBaseUrl(explicit?: string): string {
 }
 
 function mapHttpError(status: number): string {
-  if (status === 401 || status === 403) return "Copilot failed: provider unauthorized";
-  if (status === 429) return "Copilot failed: provider rate-limited";
-  return "Copilot failed";
+  if (status === 401 || status === 403) return COPILOT_ERROR_UNAUTHORIZED;
+  if (status === 429) return COPILOT_ERROR_RATE_LIMITED;
+  return COPILOT_ERROR;
 }
 
 function closedCandlesFromChart(
@@ -141,16 +146,12 @@ function parseSseBlocks(buffer: string): { events: { event: string; data: string
 
 function noteDroppedShapes(ids: string[]): void {
   if (ids.length === 0) return;
-  useAiStore.getState().appendText(
-    `\n\n(Skipped ${ids.length} incomplete shape${ids.length === 1 ? "" : "s"} — missing fields or off-window times.)`,
-  );
+  useAiStore.getState().appendText(copilotSkippedShapes(ids.length));
 }
 
 function noteDroppedMarkers(ids: string[]): void {
   if (ids.length === 0) return;
-  useAiStore.getState().appendText(
-    `\n\n(Skipped ${ids.length} incomplete marker${ids.length === 1 ? "" : "s"}.)`,
-  );
+  useAiStore.getState().appendText(copilotSkippedMarkers(ids.length));
 }
 
 export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient {
@@ -231,14 +232,12 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
             (s) =>
               `• ${s.name} (${s.kind}, ${Math.round(s.confidence * 100)}%, ${s.points.length} pts)`,
           );
-          useAiStore.getState().appendText(
-            `\n\nDrew ${valid.length} shape${valid.length === 1 ? "" : "s"} on the chart:\n${lines.join("\n")}`,
-          );
+          useAiStore.getState().appendText(copilotDrewShapes(valid.length, lines));
           const times = valid.flatMap((s) => s.points.map((pt) => pt.time));
           const visible = deps.getCoordApi?.()?.getVisibleTimeRange?.() ?? null;
           if (!timesInsideVisibleRange(times, visible)) {
             deps.getCoordApi?.()?.revealTimes(times);
-            useAiStore.getState().appendText("\nScrolled the chart to show those overlays.");
+            useAiStore.getState().appendText(COPILOT_SCROLLED_TO_OVERLAYS);
           }
         }
         noteDroppedShapes(droppedIds);
@@ -273,10 +272,7 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
         droppedIds.push(...outOfWindow);
         useMarkerStore.getState().setMarkers(valid);
         if (valid.length > 0) {
-          const n = valid.length;
-          useAiStore.getState().appendText(
-            `\n\nPlaced ${n} marker${n === 1 ? "" : "s"} on the chart.`,
-          );
+          useAiStore.getState().appendText(copilotPlacedMarkers(valid.length));
         }
         noteDroppedMarkers(droppedIds);
         return "ok";
@@ -297,7 +293,7 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
         const message =
           typeof data.message === "string" && data.message.trim()
             ? data.message
-            : "Copilot failed";
+            : COPILOT_ERROR;
         useAiStore.getState().fail(message);
         return "error";
       }
@@ -319,7 +315,7 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
 
   async function consumeSse(response: Response): Promise<void> {
     if (!response.body) {
-      useAiStore.getState().fail("Copilot failed");
+      useAiStore.getState().fail(COPILOT_ERROR);
       return;
     }
     const reader = response.body.getReader();
@@ -348,7 +344,7 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
     }
 
     if (useAiStore.getState().inFlight) {
-      if (sawError) useAiStore.getState().fail(useAiStore.getState().lastError ?? "Copilot failed");
+      if (sawError) useAiStore.getState().fail(useAiStore.getState().lastError ?? COPILOT_ERROR);
       else useAiStore.getState().finish();
     }
   }
@@ -398,7 +394,7 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
 
       await consumeSse(res);
     } catch {
-      useAiStore.getState().fail("Copilot failed");
+      useAiStore.getState().fail(COPILOT_ERROR);
     } finally {
       analyzing = false;
       if (useAiStore.getState().inFlight) {

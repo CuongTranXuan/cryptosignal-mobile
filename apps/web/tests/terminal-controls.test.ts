@@ -8,10 +8,10 @@ import { feedBadgeLabel, isDrawDisabled, isSendDisabled } from "../lib/terminal-
 describe("terminal-controls", () => {
   it("exposes the locked preset prompts", () => {
     expect(TRIANGLES_PROMPT).toBe(
-      "Find symmetrical triangles in this closed-candle window and return PatternShape polyline(s).",
+      "Tìm tam giác cân trong cửa sổ nến đã đóng và trả về đường polyline PatternShape.",
     );
     expect(HEAD_SHOULDERS_PROMPT).toBe(
-      "Find head and shoulders in this closed-candle window and return PatternShape polyline(s).",
+      "Tìm mẫu vai đầu vai trong cửa sổ nến đã đóng và trả về đường polyline PatternShape.",
     );
   });
 

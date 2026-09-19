@@ -6,10 +6,13 @@ import { useShapeStore } from "../lib/stores/shape-store";
 import { useAiStore } from "../lib/stores/ai-store";
 import {
   AUTO_DRAW_PROMPT,
+  COPILOT_ERROR,
+  COPILOT_ERROR_RATE_LIMITED,
+  COPILOT_ERROR_UNAUTHORIZED,
   HEAD_SHOULDERS_PROMPT,
   TRIANGLES_PROMPT,
-  createCopilotClient,
-} from "../lib/use-copilot";
+} from "../lib/copilot-strings";
+import { createCopilotClient } from "../lib/use-copilot";
 
 const c0: Candle = {
   time: 1709996400,
@@ -114,12 +117,12 @@ describe("use-copilot / createCopilotClient", () => {
 
   it("exposes exact preset prompt strings", () => {
     expect(TRIANGLES_PROMPT).toBe(
-      "Find symmetrical triangles in this closed-candle window and return PatternShape polyline(s).",
+      "Tìm tam giác cân trong cửa sổ nến đã đóng và trả về đường polyline PatternShape.",
     );
     expect(HEAD_SHOULDERS_PROMPT).toBe(
-      "Find head and shoulders in this closed-candle window and return PatternShape polyline(s).",
+      "Tìm mẫu vai đầu vai trong cửa sổ nến đã đóng và trả về đường polyline PatternShape.",
     );
-    expect(AUTO_DRAW_PROMPT).toBe("Auto-Draw: update patterns for the latest closed candle.");
+    expect(AUTO_DRAW_PROMPT).toBe("Tự vẽ: cập nhật mẫu hình cho nến đóng mới nhất.");
   });
 
   it("streams text+shapes into agent message and setPreview", async () => {
@@ -157,7 +160,7 @@ describe("use-copilot / createCopilotClient", () => {
       expect.objectContaining({ role: "user", content: TRIANGLES_PROMPT }),
       expect.objectContaining({
         role: "agent",
-        content: expect.stringMatching(/Found a triangle[\s\S]*Drew 1 shape on the chart/),
+        content: expect.stringMatching(/Found a triangle[\s\S]*Đã vẽ 1 hình trên biểu đồ/),
       }),
     ]);
     expect(useShapeStore.getState().previews().map((s) => s.id)).toEqual([]);
@@ -203,9 +206,9 @@ describe("use-copilot / createCopilotClient", () => {
     );
     expect(useMarkerStore.getState().markers.map((m) => m.id)).toEqual(["mrk-1"]);
     const agentMsg = useAiStore.getState().messages.find((m) => m.role === "agent");
-    expect(agentMsg?.content).toContain("Drew 1 shape on the chart");
-    expect(agentMsg?.content).toContain("Placed 1 marker on the chart.");
-    expect(useAiStore.getState().messages.find((m) => m.role === "agent")?.content).toContain("Skipped");
+    expect(agentMsg?.content).toContain("Đã vẽ 1 hình trên biểu đồ");
+    expect(agentMsg?.content).toContain("Đã đặt 1 marker trên biểu đồ.");
+    expect(useAiStore.getState().messages.find((m) => m.role === "agent")?.content).toContain("Bỏ qua");
   });
 
   it("error event fails without touching committed shapes or calling setPreview", async () => {
@@ -237,10 +240,10 @@ describe("use-copilot / createCopilotClient", () => {
 
   it("maps HTTP 401/403/429/503 to spec error strings", async () => {
     for (const [status, message] of [
-      [401, "Copilot failed: provider unauthorized"],
-      [403, "Copilot failed: provider unauthorized"],
-      [429, "Copilot failed: provider rate-limited"],
-      [503, "Copilot failed"],
+      [401, COPILOT_ERROR_UNAUTHORIZED],
+      [403, COPILOT_ERROR_UNAUTHORIZED],
+      [429, COPILOT_ERROR_RATE_LIMITED],
+      [503, COPILOT_ERROR],
     ] as const) {
       resetStores();
       const fetchMock = vi.fn(async () => new Response(JSON.stringify({ error: "x" }), { status }));
@@ -497,8 +500,8 @@ describe("use-copilot / createCopilotClient", () => {
     expect(useShapeStore.getState().committed().map((s) => s.id)).toEqual(["ok"]);
     expect(useAiStore.getState().lastError).toBeNull();
     const agentMsg = useAiStore.getState().messages.find((m) => m.role === "agent");
-    expect(agentMsg?.content).toContain("Drew 1 shape on the chart");
-    expect(agentMsg?.content).toContain("Skipped");
+    expect(agentMsg?.content).toContain("Đã vẽ 1 hình trên biểu đồ");
+    expect(agentMsg?.content).toContain("Bỏ qua");
   });
 
   it("clearAll shapes when chart shapesResetSignal increments", async () => {
@@ -560,6 +563,6 @@ describe("use-copilot / createCopilotClient", () => {
     expect(useAiStore.getState().lastError).toBeNull();
     expect(
       useAiStore.getState().messages.find((m) => m.role === "agent")?.content,
-    ).toContain("Skipped");
+    ).toContain("Bỏ qua");
   });
 });
