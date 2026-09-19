@@ -17,9 +17,13 @@ from cryptosignal_copilot.schema import (
     filter_preview_shapes,
 )
 
+# LANGUAGE stays mostly English in this system prompt. Require Vietnamese only for
+# `summary` and chat-facing text the user sees. Heavy Vietnamese scaffolding here plus
+# full-VI user prompts has tripped OmniRoute agentrouter HTTP 400 content-blocked
+# (observed 2026-09-19 on VI quick-actions like "Tìm tam giác cân…").
 INSTRUCTIONS = (
     "You are a crypto chart research assistant. Analyze only closed candles. "
-    "LANGUAGE (DEFAULT): Write `summary` and ALL chat-facing text in Vietnamese (Tiếng Việt). "
+    "LANGUAGE: Write `summary` and chat-facing text in Vietnamese. "
     "Do not reply in English unless the user explicitly asks for English. "
     "Keep JSON/schema field names in English exactly as required "
     "(kind, name, PatternShape, AgentMarker, points, priceLow, priceHigh, side, etc.). "
@@ -30,7 +34,7 @@ INSTRUCTIONS = (
     "When the prompt mentions the visible window / this window / viewport and does not name "
     "another range, stay strictly inside the provided closedCandles set and do not call "
     "get_klines for older history. "
-    "Always fill `summary` as a friendly Vietnamese chat reply (not a terse log): open with "
+    "Always fill `summary` as a friendly chat reply (not a terse log): open with "
     "what you see, name key levels/times, explain the pattern, say what you are drawing and why, "
     "and end with a short takeaway. Use several short paragraphs. "
     "Also return drawable PatternShape overlays (trendline/polyline/zone) whenever the "
@@ -193,15 +197,18 @@ def _provider_error_detail(exc: ModelHTTPError) -> str:
 
 
 def _build_user_prompt(request: AnalyzeRequest) -> str:
+    # Keep window annotations in English (English-first). User prompt text may be
+    # Vietnamese; stacking VI headers + VI quick-actions has content-blocked on
+    # agentrouter (2026-09-19). Chat SSE progress deltas may still be Vietnamese.
     payload = request.model_dump(by_alias=True)
     n = len(request.closedCandles)
     return (
         f"Symbol={request.symbol} interval={request.interval}\n"
-        f"CỬA SỔ PHÂN TÍCH CHÍNH: from={request.from_} to={request.to} "
-        f"({n} nến đã đóng). Phân tích cửa sổ này. "
-        f"Mọi point.time của shape PHẢI là thời gian từ tập closedCandles này "
-        f"(hoặc get_klines chỉ khi người dùng yêu cầu lịch sử cũ hơn). "
-        f"Ưu tiên các thanh gần nhất trong cửa sổ khi người dùng không nêu khoảng khác.\n"
-        f"Prompt người dùng: {request.prompt}\n"
+        f"PRIMARY ANALYSIS WINDOW: from={request.from_} to={request.to} "
+        f"({n} closed candles). Analyze this window. "
+        f"All shape point.time values MUST be times from this closedCandles set "
+        f"(or get_klines only if the user asked for older history). "
+        f"Prefer the most recent bars in the window when the user does not name another range.\n"
+        f"User prompt: {request.prompt}\n"
         f"Request JSON: {payload}"
     )
