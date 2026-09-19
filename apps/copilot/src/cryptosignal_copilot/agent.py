@@ -24,7 +24,7 @@ INSTRUCTIONS = (
     "Also return drawable PatternShape overlays (trendline/polyline/zone) whenever the "
     "prompt asks for analysis or drawing — do not return text-only when shapes would help. "
     "Every shape point.time MUST be an exact unix second from closedCandles (or get_klines); "
-    "never invent times. Prefer 1–3 high-confidence shapes over many weak ones. "
+    "never invent times. Prefer 1–3 high-confidence shapes over many weak ones. Each shape MUST use fields id,symbol,interval,kind,name,status,source,confidence,points,priceLow,priceHigh (kind is trendline|polyline|zone; source is agent; status is preview; priceLow/priceHigh null for lines). Never use type/label/color instead of kind/name. Polyline needs >=3 points (use trendline for 2). "
     "Optional AgentMarker point signals are a separate collection; AgentMarker.side is "
     "signal direction (buy/sell/neutral), not an order. Never put side/quantity/apiKey on "
     "PatternShape. Never place orders, never request API keys or secrets, never invent "
@@ -123,7 +123,7 @@ class PydanticAiRunner:
             yield "text", {"delta": output.summary}
 
         allowed_times = {c.time for c in request.closedCandles} | state.tool_times
-        valid_shapes, dropped_ids = filter_preview_shapes(output.shapes, allowed_times)
+        valid_shapes, dropped_ids = filter_preview_shapes(output.shapes, allowed_times, symbol=request.symbol, interval=request.interval)
 
         if dropped_ids:
             yield "text", {"delta": f"Dropped invalid shapes: {', '.join(dropped_ids)}"}

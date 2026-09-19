@@ -125,16 +125,32 @@ export function ShapeOverlay({ coordApiRef, overlayTick }: ShapeOverlayProps) {
     dragRef.current = null;
   }, []);
 
-  const onSvgPointerDown = useCallback(
-    (e: ReactPointerEvent) => {
+  const onDrawPointerDown = useCallback(
+    (e: ReactPointerEvent<HTMLElement>) => {
       if (tool === "none") return;
       if (e.button !== 0) return;
       const coord = coordApiRef.current;
-      if (!coord || !svgRef.current) return;
-      const rect = svgRef.current.getBoundingClientRect();
+      if (!coord) return;
+      const target = e.currentTarget;
+      const rect = target.getBoundingClientRect();
       const raw = pixelsToPoint(e.clientX - rect.left, e.clientY - rect.top, coord);
       if (raw == null) return;
-      const point = { time: Math.round(raw.time), price: raw.price };
+      // Snap time to nearest closed candle so shapes always land on the series.
+      const candles = useChartStore.getState().candles;
+      let time = Math.round(raw.time);
+      if (candles.length > 0) {
+        let best = candles[0]!.time;
+        let bestDist = Math.abs(best - time);
+        for (const c of candles) {
+          const d = Math.abs(c.time - time);
+          if (d < bestDist) {
+            best = c.time;
+            bestDist = d;
+          }
+        }
+        time = best;
+      }
+      const point = { time, price: raw.price };
       e.stopPropagation();
       e.preventDefault();
 
@@ -186,30 +202,23 @@ export function ShapeOverlay({ coordApiRef, overlayTick }: ShapeOverlayProps) {
         </div>
       )}
 
+      {drawing && (
+        <div
+          className="absolute inset-0 z-20 cursor-crosshair"
+          style={{ pointerEvents: "auto", touchAction: "none" }}
+          onPointerDown={onDrawPointerDown}
+        />
+      )}
+
       <svg
         ref={svgRef}
-        className={`absolute inset-0 h-full w-full ${drawing ? "pointer-events-auto cursor-crosshair" : "pointer-events-none"}`}
+        className={`absolute inset-0 z-10 h-full w-full ${drawing ? "pointer-events-none" : "pointer-events-none"}`}
         width={size.w || "100%"}
         height={size.h || "100%"}
-        style={drawing ? { touchAction: "none" } : undefined}
-        onPointerDown={onSvgPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={endDrag}
         onPointerLeave={endDrag}
       >
-        {/* Empty SVG space is not hit-testable by default — capture the full pane while drawing. */}
-        {drawing && (
-          <rect
-            x={0}
-            y={0}
-            width="100%"
-            height="100%"
-            // Fully transparent fills often skip hit-testing in Chromium.
-            fill="#000000"
-            fillOpacity={0.001}
-            className="pointer-events-auto"
-          />
-        )}
         {shapes.map((shape) => {
           if (!api) return null;
           if (shape.kind === "zone") {

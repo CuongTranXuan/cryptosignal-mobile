@@ -1,5 +1,6 @@
 import { mergeCandles } from "./binance";
 import { fetchKlines as defaultFetchKlines, type FetchKlines } from "./market-client";
+import { coerceAgentMarker, coerceAgentShape } from "./normalize-agent-shape";
 import {
   AgentMarkerSchema,
   PatternShapeSchema,
@@ -127,16 +128,13 @@ function parseSseBlocks(buffer: string): { events: { event: string; data: string
 
 function noteDroppedShapes(ids: string[]): void {
   if (ids.length === 0) return;
-  const note = `Dropped invalid shapes: ${ids.join(", ")}`;
-  useAiStore.getState().appendText(note);
-  useAiStore.setState({ lastError: note });
+  // Chat note only — do not set lastError (that looks like a hard Copilot failure).
+  useAiStore.getState().appendText(`\n\nDropped invalid shapes: ${ids.join(", ")}`);
 }
 
 function noteDroppedMarkers(ids: string[]): void {
   if (ids.length === 0) return;
-  const note = `Dropped invalid markers: ${ids.join(", ")}`;
-  useAiStore.getState().appendText(note);
-  useAiStore.setState({ lastError: note });
+  useAiStore.getState().appendText(`\n\nDropped invalid markers: ${ids.join(", ")}`);
 }
 
 export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient {
@@ -185,19 +183,25 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
         const list = Array.isArray(data.shapes) ? data.shapes : [];
         const zodValid: PatternShape[] = [];
         const droppedIds: string[] = [];
+        const chart = useChartStore.getState();
         for (const item of list) {
-          const parsed = PatternShapeSchema.safeParse(item);
+          const coerced = coerceAgentShape(item, {
+            symbol: chart.symbol,
+            interval: chart.interval,
+          });
+          const parsed = PatternShapeSchema.safeParse(coerced);
           if (parsed.success) {
             zodValid.push(parsed.data);
           } else {
             const id =
               item && typeof item === "object" && "id" in item
                 ? String((item as { id: unknown }).id)
-                : "unknown";
+                : typeof coerced === "object" && coerced && "id" in coerced
+                  ? String((coerced as { id: unknown }).id)
+                  : "unknown";
             droppedIds.push(id);
           }
         }
-        const chart = useChartStore.getState();
         const allowedTimes = resolveClosedTimes(chart.candles, deps.getClosedTimes?.());
         const { valid, droppedIds: outOfWindow } = filterShapesToClosedTimes(
           zodValid,
@@ -219,8 +223,13 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
         const list = Array.isArray(data.markers) ? data.markers : [];
         const zodValid: AgentMarker[] = [];
         const droppedIds: string[] = [];
+        const chart = useChartStore.getState();
         for (const item of list) {
-          const parsed = AgentMarkerSchema.safeParse(item);
+          const coerced = coerceAgentMarker(item, {
+            symbol: chart.symbol,
+            interval: chart.interval,
+          });
+          const parsed = AgentMarkerSchema.safeParse(coerced);
           if (parsed.success) {
             zodValid.push(parsed.data);
           } else {
@@ -231,7 +240,6 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
             droppedIds.push(id);
           }
         }
-        const chart = useChartStore.getState();
         const allowedTimes = resolveClosedTimes(chart.candles, deps.getClosedTimes?.());
         const { valid, droppedIds: outOfWindow } = filterMarkersToClosedTimes(
           zodValid,

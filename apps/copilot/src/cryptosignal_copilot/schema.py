@@ -118,9 +118,95 @@ class AnalyzeResult(BaseModel):
     markers: list[dict[str, Any]] = Field(default_factory=list)
 
 
+def coerce_agent_shape(raw: dict[str, Any], *, symbol: str, interval: str) -> dict[str, Any]:
+    """Map common LLM sloppy overlays into PatternShape fields."""
+    data = dict(raw)
+    if data.get("kind") is None and isinstance(data.get("type"), str):
+        data["kind"] = data.pop("type")
+    else:
+        data.pop("type", None)
+    if data.get("name") is None and isinstance(data.get("label"), str):
+        data["name"] = data["label"]
+    data.pop("label", None)
+    for key in ("color", "lineWidth", "role", "style", "stroke", "fill"):
+        data.pop(key, None)
+    if not data.get("id"):
+        data["id"] = f"agent_{id(data) & 0xFFFFFF:x}"
+    data.setdefault("symbol", symbol)
+    data.setdefault("interval", interval)
+    data.setdefault("status", "preview")
+    data.setdefault("source", "agent")
+    data.setdefault("confidence", 0.7)
+    if "priceLow" not in data:
+        data["priceLow"] = None
+    if "priceHigh" not in data:
+        data["priceHigh"] = None
+    points = data.get("points")
+    if data.get("kind") == "polyline" and isinstance(points, list) and len(points) == 2:
+        data["kind"] = "trendline"
+    if data.get("kind") == "zone" and isinstance(points, list) and len(points) >= 2:
+        prices = []
+        for pt in points:
+            if isinstance(pt, dict) and pt.get("price") is not None:
+                try:
+                    prices.append(float(pt["price"]))
+                except (TypeError, ValueError):
+                    pass
+        if len(prices) >= 2 and (data.get("priceLow") is None or data.get("priceHigh") is None):
+            data["priceLow"] = min(prices)
+            data["priceHigh"] = max(prices)
+    if isinstance(points, list):
+        fixed = []
+        for pt in points:
+            if not isinstance(pt, dict):
+                continue
+            try:
+                fixed.append({"time": int(round(float(pt["time"]))), "price": float(pt["price"])})
+            except (KeyError, TypeError, ValueError):
+                continue
+        data["points"] = fixed
+    return data
+
+
+def coerce_agent_marker(raw: dict[str, Any], *, symbol: str, interval: str) -> dict[str, Any]:
+    data = dict(raw)
+    if not data.get("id"):
+        data["id"] = f"marker_{id(data) & 0xFFFFFF:x}"
+    data.setdefault("symbol", symbol)
+    data.setdefault("interval", interval)
+    data.setdefault("source", "agent")
+    data.setdefault("confidence", 0.7)
+    if data.get("time") is not None:
+        try:
+            data["time"] = int(round(float(data["time"])))
+        except (TypeError, ValueError):
+            pass
+    if data.get("position") is None and isinstance(data.get("placement"), str):
+        data["position"] = data["placement"]
+    if data.get("shape") is None and isinstance(data.get("marker"), str):
+        data["shape"] = data["marker"]
+    if data.get("side") is None and isinstance(data.get("direction"), str):
+        data["side"] = data["direction"]
+    if data.get("side") == "long":
+        data["side"] = "buy"
+    if data.get("side") == "short":
+        data["side"] = "sell"
+    if data.get("position") is None:
+        data["position"] = "aboveBar" if data.get("side") == "sell" else "belowBar"
+    if data.get("shape") is None:
+        side = data.get("side")
+        data["shape"] = "arrowDown" if side == "sell" else "arrowUp" if side == "buy" else "circle"
+    for key in ("color", "placement", "marker", "direction"):
+        data.pop(key, None)
+    return data
+
+
 def filter_preview_shapes(
     raw_shapes: list[Any],
     allowed_times: set[int] | None = None,
+    *,
+    symbol: str | None = None,
+    interval: str | None = None,
 ) -> tuple[list[dict[str, Any]], list[str]]:
     """Force preview status, keep valid shapes on closed candle times, return dropped ids."""
     valid: list[dict[str, Any]] = []
@@ -133,6 +219,8 @@ def filter_preview_shapes(
         else:
             dropped_ids.append("?")
             continue
+        if symbol and interval:
+            data = coerce_agent_shape(data, symbol=symbol, interval=interval)
         data["status"] = "preview"
         try:
             validated = PatternShape.model_validate(data)

@@ -204,7 +204,7 @@ describe("use-copilot / createCopilotClient", () => {
     const agentMsg = useAiStore.getState().messages.find((m) => m.role === "agent");
     expect(agentMsg?.content).toContain("Drew 1 shape on the chart.");
     expect(agentMsg?.content).toContain("Placed 1 marker on the chart.");
-    expect(useAiStore.getState().lastError).toContain("off");
+    expect(useAiStore.getState().messages.find((m) => m.role === "agent")?.content).toContain("off");
   });
 
   it("error event fails without touching committed shapes or calling setPreview", async () => {
@@ -393,7 +393,7 @@ describe("use-copilot / createCopilotClient", () => {
 
     expect(useShapeStore.getState().previews().map((s) => s.id)).toEqual([]);
     expect(useShapeStore.getState().committed().map((s) => s.id)).toEqual(["ok"]);
-    expect(useAiStore.getState().lastError).toContain("off-window");
+    expect(useAiStore.getState().lastError).toBeNull();
     const agentMsg = useAiStore.getState().messages.find((m) => m.role === "agent");
     expect(agentMsg?.content).toContain("Drew 1 shape on the chart.");
     expect(agentMsg?.content).toContain("Dropped invalid shapes: off-window");
@@ -455,6 +455,9 @@ describe("use-copilot / createCopilotClient", () => {
 
     expect(useShapeStore.getState().previews().map((s) => s.id)).toEqual([]);
     expect(useShapeStore.getState().committed().map((s) => s.id)).toEqual(["ok"]);
-    expect(useAiStore.getState().lastError).toContain("bad-poly");
+    expect(useAiStore.getState().lastError).toBeNull();
+    expect(
+      useAiStore.getState().messages.find((m) => m.role === "agent")?.content,
+    ).toContain("bad-poly");
   });
 });

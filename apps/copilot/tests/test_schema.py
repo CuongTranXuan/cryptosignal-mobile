@@ -65,3 +65,25 @@ def test_filter_agent_markers_drops_invalid_and_out_of_window():
     assert [m["id"] for m in valid] == ["ok"]
     assert dropped == ["bad-side", "off-window"]
     assert "agentId" not in valid[0]
+
+
+def test_coerce_llm_sloppy_polyline_into_pattern_shape():
+    from cryptosignal_copilot.schema import coerce_agent_shape, filter_preview_shapes
+    raw = {
+        "type": "polyline",
+        "label": "Sym triangle upper",
+        "color": "#ef5350",
+        "points": [
+            {"time": 100, "price": 1},
+            {"time": 200, "price": 2},
+            {"time": 300, "price": 3},
+        ],
+    }
+    valid, dropped = filter_preview_shapes(
+        [raw], {100, 200, 300}, symbol="BTCUSDT", interval="1h"
+    )
+    assert dropped == []
+    assert len(valid) == 1
+    assert valid[0]["kind"] == "polyline"
+    assert valid[0]["name"] == "Sym triangle upper"
+    assert valid[0]["source"] == "agent"
