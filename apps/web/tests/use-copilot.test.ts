@@ -118,13 +118,13 @@ describe("use-copilot / createCopilotClient", () => {
 
   it("exposes exact preset prompt strings", () => {
     expect(TRIANGLES_PROMPT).toBe(
-      "Find symmetrical triangles in this closed-candle window and return PatternShape polyline(s). Reply and summarize in Vietnamese; output all text in Vietnamese.",
+      "Tìm tam giác cân trong cửa sổ nến đã đóng này. Return PatternShape polyline(s). Reply and summarize in English; output all text in English.",
     );
     expect(HEAD_SHOULDERS_PROMPT).toBe(
-      "Find head and shoulders in this closed-candle window and return PatternShape polyline(s). Reply and summarize in Vietnamese; output all text in Vietnamese.",
+      "Tìm mẫu vai đầu vai trong cửa sổ nến đã đóng này. Return PatternShape polyline(s). Reply and summarize in English; output all text in English.",
     );
     expect(AUTO_DRAW_PROMPT).toBe(
-      "Auto-Draw: update patterns for the latest closed candle. Reply and summarize in Vietnamese; output all text in Vietnamese.",
+      "Tự vẽ: cập nhật mẫu hình cho nến đóng mới nhất. Update patterns for the latest closed candle. Reply and summarize in English; output all text in English.",
     );
   });
 

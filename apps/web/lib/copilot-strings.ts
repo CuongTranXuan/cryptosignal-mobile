@@ -11,20 +11,21 @@ export const COPILOT_ACTION_HEAD_SHOULDERS = "Vai đầu vai";
 export const COPILOT_ACTION_DRAW_ON_CHART = "Vẽ lên biểu đồ";
 export const COPILOT_ACTION_EDIT_COORDS = "Sửa tọa độ";
 
-/** Appended to preset analyze prompts so models keep technical English input but reply in Vietnamese. */
-export const COPILOT_VIETNAMESE_OUTPUT_INSTRUCTION =
-  "Reply and summarize in Vietnamese; output all text in Vietnamese.";
+/** Appended to preset analyze prompts so models reply in English despite Vietnamese user-facing asks. */
+export const COPILOT_ENGLISH_OUTPUT_INSTRUCTION =
+  "Reply and summarize in English; output all text in English.";
 
 export const TRIANGLES_PROMPT =
-  "Find symmetrical triangles in this closed-candle window and return PatternShape polyline(s). " +
-  COPILOT_VIETNAMESE_OUTPUT_INSTRUCTION;
+  "Tìm tam giác cân trong cửa sổ nến đã đóng này. Return PatternShape polyline(s). " +
+  COPILOT_ENGLISH_OUTPUT_INSTRUCTION;
 
 export const HEAD_SHOULDERS_PROMPT =
-  "Find head and shoulders in this closed-candle window and return PatternShape polyline(s). " +
-  COPILOT_VIETNAMESE_OUTPUT_INSTRUCTION;
+  "Tìm mẫu vai đầu vai trong cửa sổ nến đã đóng này. Return PatternShape polyline(s). " +
+  COPILOT_ENGLISH_OUTPUT_INSTRUCTION;
 
 export const AUTO_DRAW_PROMPT =
-  "Auto-Draw: update patterns for the latest closed candle. " + COPILOT_VIETNAMESE_OUTPUT_INSTRUCTION;
+  "Tự vẽ: cập nhật mẫu hình cho nến đóng mới nhất. Update patterns for the latest closed candle. " +
+  COPILOT_ENGLISH_OUTPUT_INSTRUCTION;
 
 export const COPILOT_EMPTY_STATE =
   "Hãy nhờ Copilot tìm mẫu hình trong cửa sổ nến đã đóng.";
