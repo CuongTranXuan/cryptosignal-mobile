@@ -24,17 +24,24 @@ export function DrawToolbar({
   const remove = useShapeStore((s) => s.remove);
 
   return (
-    <div className="pointer-events-auto absolute bottom-3 left-3 z-20 flex items-center gap-1 rounded border border-[#2b313a] bg-[#181a20]/95 p-1 text-xs shadow-lg backdrop-blur">
+    <div
+      role="toolbar"
+      aria-label="Draw tools"
+      className="pointer-events-auto absolute right-3 top-3 z-30 flex items-center gap-1.5 rounded-md border-2 border-[#f0b90b] bg-[#0b0e14] px-2 py-1.5 text-xs shadow-[0_0_0_1px_rgba(240,185,11,0.35),0_8px_24px_rgba(0,0,0,0.55)]"
+    >
+      <span className="mr-1 rounded bg-[#f0b90b] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#0b0e14]">
+        Draw
+      </span>
       {TOOLS.map((t) => (
         <button
           key={t.id}
           type="button"
           title={t.title}
           onClick={() => setTool(t.id)}
-          className={`rounded px-2 py-1 font-medium transition ${
+          className={`rounded px-2.5 py-1 font-semibold transition ${
             tool === t.id
               ? "bg-[#f0b90b] text-[#0b0e14]"
-              : "text-[#848e9c] hover:bg-[#2b313a] hover:text-white"
+              : "bg-[#1e2329] text-[#eaecef] hover:bg-[#2b313a]"
           }`}
         >
           {t.label}
@@ -44,7 +51,7 @@ export function DrawToolbar({
         <button
           type="button"
           onClick={() => onFinishPolyline?.()}
-          className="rounded bg-[#0ecb81] px-2 py-1 font-medium text-[#0b0e14]"
+          className="rounded bg-[#0ecb81] px-2.5 py-1 font-semibold text-[#0b0e14]"
         >
           Finish
         </button>
@@ -54,14 +61,14 @@ export function DrawToolbar({
           <button
             type="button"
             onClick={() => undoDraftPoint()}
-            className="rounded px-2 py-1 text-[#848e9c] hover:bg-[#2b313a] hover:text-white"
+            className="rounded bg-[#1e2329] px-2 py-1 font-medium text-[#eaecef] hover:bg-[#2b313a]"
           >
             Undo
           </button>
           <button
             type="button"
             onClick={() => clearDraft()}
-            className="rounded px-2 py-1 text-[#848e9c] hover:bg-[#2b313a] hover:text-white"
+            className="rounded bg-[#1e2329] px-2 py-1 font-medium text-[#eaecef] hover:bg-[#2b313a]"
           >
             Cancel
           </button>
@@ -71,16 +78,16 @@ export function DrawToolbar({
         <button
           type="button"
           onClick={() => remove(selectedId)}
-          className="rounded px-2 py-1 text-[#f6465d] hover:bg-[#2b313a]"
+          className="rounded bg-[#1e2329] px-2 py-1 font-medium text-[#f6465d] hover:bg-[#2b313a]"
         >
           Delete
         </button>
       )}
       {tool !== "none" && (
-        <span className="ml-1 max-w-[10rem] truncate text-[10px] text-[#474d57]">
-          {tool === "trendline" && "2 clicks"}
-          {tool === "polyline" && `${draftPoints.length} pts`}
-          {tool === "zone" && "2 corners"}
+        <span className="ml-1 max-w-[9rem] truncate text-[10px] font-medium text-[#f0b90b]">
+          {tool === "trendline" && "Click 2 points"}
+          {tool === "polyline" && `${draftPoints.length} pts · Finish when ≥3`}
+          {tool === "zone" && "Click 2 corners"}
         </span>
       )}
     </div>
