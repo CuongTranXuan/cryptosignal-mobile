@@ -1,8 +1,15 @@
 import { mergeCandles } from "./binance";
 import { fetchKlines as defaultFetchKlines, type FetchKlines } from "./market-client";
-import { PatternShapeSchema, type Candle, type PatternShape } from "./pattern-shape";
+import {
+  AgentMarkerSchema,
+  PatternShapeSchema,
+  type AgentMarker,
+  type Candle,
+  type PatternShape,
+} from "./pattern-shape";
 import { useAiStore } from "./stores/ai-store";
 import { useChartStore } from "./stores/chart-store";
+import { useMarkerStore } from "./stores/marker-store";
 import { useShapeStore } from "./stores/shape-store";
 
 export const TRIANGLES_PROMPT =
@@ -77,6 +84,20 @@ export function filterShapesToClosedTimes(
   return { valid, droppedIds };
 }
 
+/** Keep markers whose time is in the allowed closed candle set. */
+export function filterMarkersToClosedTimes(
+  markers: AgentMarker[],
+  allowedTimes: Set<number>,
+): { valid: AgentMarker[]; droppedIds: string[] } {
+  const valid: AgentMarker[] = [];
+  const droppedIds: string[] = [];
+  for (const marker of markers) {
+    if (allowedTimes.has(marker.time)) valid.push(marker);
+    else droppedIds.push(marker.id);
+  }
+  return { valid, droppedIds };
+}
+
 function isSuperseded(data: Record<string, unknown>): boolean {
   return data.superseded === true || data.note === "superseded";
 }
@@ -101,6 +122,13 @@ function parseSseBlocks(buffer: string): { events: { event: string; data: string
 function noteDroppedShapes(ids: string[]): void {
   if (ids.length === 0) return;
   const note = `Dropped invalid shapes: ${ids.join(", ")}`;
+  useAiStore.getState().appendText(note);
+  useAiStore.setState({ lastError: note });
+}
+
+function noteDroppedMarkers(ids: string[]): void {
+  if (ids.length === 0) return;
+  const note = `Dropped invalid markers: ${ids.join(", ")}`;
   useAiStore.getState().appendText(note);
   useAiStore.setState({ lastError: note });
 }
@@ -130,10 +158,11 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
       data = {};
     }
 
-    type SseEvent = "text" | "shapes" | "extendRange" | "error" | "done";
+    type SseEvent = "text" | "shapes" | "markers" | "extendRange" | "error" | "done";
     const isSseEvent = (value: string): value is SseEvent =>
       value === "text" ||
       value === "shapes" ||
+      value === "markers" ||
       value === "extendRange" ||
       value === "error" ||
       value === "done";
@@ -171,6 +200,33 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
         droppedIds.push(...outOfWindow);
         useShapeStore.getState().setPreview(valid);
         noteDroppedShapes(droppedIds);
+        return "ok";
+      }
+      case "markers": {
+        const list = Array.isArray(data.markers) ? data.markers : [];
+        const zodValid: AgentMarker[] = [];
+        const droppedIds: string[] = [];
+        for (const item of list) {
+          const parsed = AgentMarkerSchema.safeParse(item);
+          if (parsed.success) {
+            zodValid.push(parsed.data);
+          } else {
+            const id =
+              item && typeof item === "object" && "id" in item
+                ? String((item as { id: unknown }).id)
+                : "unknown";
+            droppedIds.push(id);
+          }
+        }
+        const chart = useChartStore.getState();
+        const allowedTimes = resolveClosedTimes(chart.candles, deps.getClosedTimes?.());
+        const { valid, droppedIds: outOfWindow } = filterMarkersToClosedTimes(
+          zodValid,
+          allowedTimes,
+        );
+        droppedIds.push(...outOfWindow);
+        useMarkerStore.getState().setMarkers(valid);
+        noteDroppedMarkers(droppedIds);
         return "ok";
       }
       case "extendRange": {
@@ -269,6 +325,7 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
       to,
       closedCandles,
       existingShapes: useShapeStore.getState().committed(),
+      existingMarkers: useMarkerStore.getState().markers,
       prompt,
     };
 
@@ -336,6 +393,7 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
         if (state.shapesResetSignal !== lastResetSignal) {
           lastResetSignal = state.shapesResetSignal;
           useShapeStore.getState().clearAll();
+          useMarkerStore.getState().clearAll();
         }
       });
     },
