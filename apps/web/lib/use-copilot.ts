@@ -2,6 +2,7 @@ import { mergeCandles } from "./binance";
 import {
   AUTO_DRAW_PROMPT,
   COPILOT_ERROR,
+  COPILOT_ERROR_CREDITS_EXHAUSTED,
   COPILOT_ERROR_RATE_LIMITED,
   COPILOT_ERROR_UNAUTHORIZED,
   copilotDrewShapes,
@@ -71,6 +72,7 @@ function resolveBaseUrl(explicit?: string): string {
 
 function mapHttpError(status: number): string {
   if (status === 401 || status === 403) return COPILOT_ERROR_UNAUTHORIZED;
+  if (status === 402) return COPILOT_ERROR_CREDITS_EXHAUSTED;
   if (status === 429) return COPILOT_ERROR_RATE_LIMITED;
   return COPILOT_ERROR;
 }

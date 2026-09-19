@@ -36,6 +36,7 @@ export const COPILOT_ROLE_AGENT = "copilot";
 
 export const COPILOT_ERROR = "Copilot lỗi";
 export const COPILOT_ERROR_UNAUTHORIZED = "Copilot lỗi: nhà cung cấp không được phép";
+export const COPILOT_ERROR_CREDITS_EXHAUSTED = "Copilot lỗi: hết credits nhà cung cấp";
 export const COPILOT_ERROR_RATE_LIMITED = "Copilot lỗi: nhà cung cấp giới hạn tần suất";
 
 export function copilotDrewShapes(count: number, lines: string[]): string {

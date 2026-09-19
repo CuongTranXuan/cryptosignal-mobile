@@ -7,6 +7,7 @@ import { useAiStore } from "../lib/stores/ai-store";
 import {
   AUTO_DRAW_PROMPT,
   COPILOT_ERROR,
+  COPILOT_ERROR_CREDITS_EXHAUSTED,
   COPILOT_ERROR_RATE_LIMITED,
   COPILOT_ERROR_UNAUTHORIZED,
   HEAD_SHOULDERS_PROMPT,
@@ -240,9 +241,10 @@ describe("use-copilot / createCopilotClient", () => {
     expect(useShapeStore.getState().previews()).toHaveLength(0);
   });
 
-  it("maps HTTP 401/403/429/503 to spec error strings", async () => {
+  it("maps HTTP 401/402/403/429/503 to spec error strings", async () => {
     for (const [status, message] of [
       [401, COPILOT_ERROR_UNAUTHORIZED],
+      [402, COPILOT_ERROR_CREDITS_EXHAUSTED],
       [403, COPILOT_ERROR_UNAUTHORIZED],
       [429, COPILOT_ERROR_RATE_LIMITED],
       [503, COPILOT_ERROR],
