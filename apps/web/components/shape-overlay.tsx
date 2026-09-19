@@ -132,8 +132,9 @@ export function ShapeOverlay({ coordApiRef, overlayTick }: ShapeOverlayProps) {
       const coord = coordApiRef.current;
       if (!coord || !svgRef.current) return;
       const rect = svgRef.current.getBoundingClientRect();
-      const point = pixelsToPoint(e.clientX - rect.left, e.clientY - rect.top, coord);
-      if (point == null) return;
+      const raw = pixelsToPoint(e.clientX - rect.left, e.clientY - rect.top, coord);
+      if (raw == null) return;
+      const point = { time: Math.round(raw.time), price: raw.price };
       e.stopPropagation();
       e.preventDefault();
 
@@ -196,6 +197,17 @@ export function ShapeOverlay({ coordApiRef, overlayTick }: ShapeOverlayProps) {
         onPointerUp={endDrag}
         onPointerLeave={endDrag}
       >
+        {/* Empty SVG space is not hit-testable by default — capture the full pane while drawing. */}
+        {drawing && (
+          <rect
+            x={0}
+            y={0}
+            width="100%"
+            height="100%"
+            fill="rgba(0,0,0,0)"
+            className="pointer-events-auto"
+          />
+        )}
         {shapes.map((shape) => {
           if (!api) return null;
           if (shape.kind === "zone") {
