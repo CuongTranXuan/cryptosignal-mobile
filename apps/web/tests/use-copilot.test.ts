@@ -145,7 +145,8 @@ describe("use-copilot / createCopilotClient", () => {
     expect(call[0]).toBe("http://127.0.0.1:8000/v1/copilot/analyze");
     expect(call[1].method).toBe("POST");
     const body = JSON.parse(String(call[1].body));
-    expect(body.prompt).toBe(TRIANGLES_PROMPT);
+    expect(body.prompt).toContain(TRIANGLES_PROMPT);
+    expect(body.prompt).toContain("[Analysis window]");
     expect(body.closedCandles).toEqual([c0, c1, c2]);
     expect(body.from).toBe(c0.time);
     expect(body.to).toBe(c2.time);
@@ -253,6 +254,59 @@ describe("use-copilot / createCopilotClient", () => {
     }
   });
 
+  it("sends viewport-aligned closed candles and annotated prompt", async () => {
+    const extra: Candle[] = [];
+    for (let i = 0; i < 40; i++) {
+      extra.push({
+        time: 1709852400 + i * 3600,
+        open: 1,
+        high: 2,
+        low: 0.5,
+        close: 1.5,
+        volume: 1,
+      });
+    }
+    const forming = c3Forming;
+    useChartStore.setState({ candles: [...extra, c0, c1, c2, forming] });
+    const closed = new Set([...extra, c0, c1, c2].map((c) => c.time));
+    // Visible only the last few closed bars (c0..c2)
+    const visible = { from: c0.time, to: c2.time };
+
+    const fetchMock = vi.fn(async () =>
+      streamResponse([
+        sseChunk("text", { delta: "ok" }),
+        sseChunk("done", {}),
+      ]),
+    );
+
+    const client = createCopilotClient({
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      getClosedTimes: () => closed,
+      getCoordApi: () =>
+        ({
+          timeToCoordinate: () => null,
+          priceToCoordinate: () => null,
+          coordinateToTime: () => null,
+          coordinateToPrice: () => null,
+          revealTimes: vi.fn(),
+          getVisibleTimeRange: () => visible,
+        }) as import("../lib/chart-api").ChartCoordinateApi,
+    });
+
+    await client.analyze("Find triangles in this window");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const body = JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body));
+    expect(body.from).toBeGreaterThanOrEqual(visible.from - 2 * 3600);
+    expect(body.to).toBe(c2.time);
+    expect(body.closedCandles.every((c: Candle) => c.time >= body.from && c.time <= body.to)).toBe(
+      true,
+    );
+    expect(body.closedCandles.length).toBeLessThan(closed.size);
+    expect(body.prompt).toContain("this window");
+    expect(body.prompt).toContain("mode=viewport");
+  });
+
   it("does not call analyze when only a forming candle exists", async () => {
     useChartStore.setState({ candles: [c3Forming] });
     const fetchMock = vi.fn();
@@ -308,7 +362,7 @@ describe("use-copilot / createCopilotClient", () => {
     const bodies = (fetchMock.mock.calls as unknown as [string, RequestInit][]).map((c) =>
       JSON.parse(String(c[1].body)),
     );
-    expect(bodies[1]?.prompt).toBe(AUTO_DRAW_PROMPT);
+    expect(bodies[1]?.prompt).toContain(AUTO_DRAW_PROMPT);
     expect(useShapeStore.getState().previews().map((s) => s.id)).toEqual([]);
     expect(useShapeStore.getState().committed().map((s) => s.id)).toContain("auto-2");
   });

@@ -8,10 +8,22 @@ import {
   type Candle,
   type PatternShape,
 } from "./pattern-shape";
+import {
+  annotatePromptWithWindow,
+  selectAnalysisCandles,
+  timesInsideVisibleRange,
+} from "./analysis-window";
 import { useAiStore } from "./stores/ai-store";
 import { useChartStore } from "./stores/chart-store";
 import { useMarkerStore } from "./stores/marker-store";
 import { useShapeStore } from "./stores/shape-store";
+
+export {
+  annotatePromptWithWindow,
+  promptRequestsVisibleWindow,
+  selectAnalysisCandles,
+  timesInsideVisibleRange,
+} from "./analysis-window";
 
 export const TRIANGLES_PROMPT =
   "Find symmetrical triangles in this closed-candle window and return PatternShape polyline(s).";
@@ -223,8 +235,11 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
             `\n\nDrew ${valid.length} shape${valid.length === 1 ? "" : "s"} on the chart:\n${lines.join("\n")}`,
           );
           const times = valid.flatMap((s) => s.points.map((pt) => pt.time));
-          deps.getCoordApi?.()?.revealTimes(times);
-          useAiStore.getState().appendText("\nScrolled the chart to show those overlays.");
+          const visible = deps.getCoordApi?.()?.getVisibleTimeRange?.() ?? null;
+          if (!timesInsideVisibleRange(times, visible)) {
+            deps.getCoordApi?.()?.revealTimes(times);
+            useAiStore.getState().appendText("\nScrolled the chart to show those overlays.");
+          }
         }
         noteDroppedShapes(droppedIds);
         return "ok";
@@ -346,24 +361,27 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
 
     const chart = useChartStore.getState();
     const closedTimes = deps.getClosedTimes?.();
-    const closedCandles = closedCandlesFromChart(chart.candles, closedTimes);
-    if (closedCandles.length === 0) return;
+    const allClosed = closedCandlesFromChart(chart.candles, closedTimes);
+    if (allClosed.length === 0) return;
+
+    const visibleRange = deps.getCoordApi?.()?.getVisibleTimeRange?.() ?? null;
+    const window = selectAnalysisCandles(allClosed, { visibleRange, prompt });
+    if (window.candles.length === 0) return;
 
     analyzing = true;
     useAiStore.getState().appendUser(prompt);
     useAiStore.getState().startAgent();
 
-    const from = closedCandles[0]!.time;
-    const to = closedCandles[closedCandles.length - 1]!.time;
+    const annotatedPrompt = annotatePromptWithWindow(prompt, window);
     const body = {
       symbol: chart.symbol,
       interval: chart.interval,
-      from,
-      to,
-      closedCandles,
+      from: window.from,
+      to: window.to,
+      closedCandles: window.candles,
       existingShapes: useShapeStore.getState().committed(),
       existingMarkers: useMarkerStore.getState().markers,
-      prompt,
+      prompt: annotatedPrompt,
     };
 
     try {

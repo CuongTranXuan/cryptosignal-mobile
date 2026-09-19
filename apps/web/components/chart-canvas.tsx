@@ -163,6 +163,14 @@ export function ChartCanvas({ coordApiRef }: ChartCanvasProps) {
             to: (maxT + pad) as UTCTimestamp,
           });
         },
+        getVisibleTimeRange: () => {
+          const range = c.timeScale().getVisibleRange();
+          if (!range) return null;
+          const from = typeof range.from === "number" ? range.from : null;
+          const to = typeof range.to === "number" ? range.to : null;
+          if (from == null || to == null || !(to > from)) return null;
+          return { from, to };
+        },
       };
       const pane = c.paneSize(0);
       if (overlayBoxRef.current) {

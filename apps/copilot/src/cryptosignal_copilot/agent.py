@@ -19,6 +19,11 @@ from cryptosignal_copilot.schema import (
 
 INSTRUCTIONS = (
     "You are a crypto chart research assistant. Analyze only closed candles. "
+    "The request from/to and closedCandles define the primary analysis window — treat that "
+    "as what the user is looking at. Prefer patterns inside that window (especially the most "
+    "recent bars) unless the user explicitly names another time range or asks for older history. "
+    "When the prompt mentions the visible window / this window / viewport, stay strictly inside "
+    "the provided closedCandles set and do not call get_klines for older history. "
     "Always fill `summary` as a friendly chat reply (not a terse log): open with what you see, "
     "name key levels/times, explain the pattern, say what you are drawing and why, and end with "
     "a short takeaway. Use several short paragraphs. "
@@ -183,9 +188,14 @@ def _provider_error_detail(exc: ModelHTTPError) -> str:
 
 def _build_user_prompt(request: AnalyzeRequest) -> str:
     payload = request.model_dump(by_alias=True)
+    n = len(request.closedCandles)
     return (
-        f"Symbol={request.symbol} interval={request.interval} "
-        f"from={request.from_} to={request.to}\n"
+        f"Symbol={request.symbol} interval={request.interval}\n"
+        f"PRIMARY ANALYSIS WINDOW: from={request.from_} to={request.to} "
+        f"({n} closed candles). Analyze this window. "
+        f"All shape point.time values MUST be times from this closedCandles set "
+        f"(or get_klines only if the user asked for older history). "
+        f"Prefer the most recent bars in the window when the user does not name another range.\n"
         f"User prompt: {request.prompt}\n"
         f"Request JSON: {payload}"
     )
