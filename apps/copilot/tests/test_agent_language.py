@@ -1,17 +1,19 @@
-"""Copilot agent defaults to English for chat-facing text and SSE scaffolding."""
+"""Copilot agent defaults to Vietnamese for chat-facing text; SSE progress is VI."""
 
 from cryptosignal_copilot.agent import INSTRUCTIONS, _build_user_prompt
 from cryptosignal_copilot.schema import AnalyzeRequest
 
 
-def test_instructions_default_english_summary():
+def test_instructions_default_vietnamese_summary():
     assert "LANGUAGE:" in INSTRUCTIONS
-    assert "English by default" in INSTRUCTIONS
-    assert "Only use Vietnamese if the user explicitly asks" in INSTRUCTIONS
-    # Must not default the model to Vietnamese chat output.
-    assert "Write `summary` and chat-facing text in Vietnamese" not in INSTRUCTIONS
+    assert "Write `summary` and chat-facing text in Vietnamese by default" in INSTRUCTIONS
+    assert "Do not reply in English unless the user explicitly asks for English" in INSTRUCTIONS
+    # Must not default the model to English chat output.
+    assert "English by default" not in INSTRUCTIONS
+    assert "Only use Vietnamese if the user explicitly asks" not in INSTRUCTIONS
+    # Soft VI scaffolding: avoid heavy Tiếng Việt phrases in the system prompt itself.
+    assert "Tiếng Việt" not in INSTRUCTIONS
     assert "ALL chat-facing text in Vietnamese" not in INSTRUCTIONS
-    assert "Do not reply in English unless the user explicitly asks" not in INSTRUCTIONS
     assert "kind" in INSTRUCTIONS
     assert "PatternShape" in INSTRUCTIONS
     # OmniRoute 2026-09-19: no get_klines tool (custom-tool reject) — instructions

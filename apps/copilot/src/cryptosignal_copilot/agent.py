@@ -15,20 +15,20 @@ from cryptosignal_copilot.schema import (
     filter_preview_shapes,
 )
 
-# LANGUAGE default is English for `summary` and chat-facing model text. Only switch
-# to Vietnamese when the user explicitly asks. System scaffolding stays English.
-# History: heavy Vietnamese scaffolding + full-VI user prompts tripped OmniRoute
-# agentrouter HTTP 400 content-blocked (observed 2026-09-19). Client quick-action
-# prompts may still be Vietnamese; keep window annotations / SSE progress / errors
-# in English so the stream is English-consistent.
+# LANGUAGE: require Vietnamese for `summary` and chat-facing text the user sees.
+# System scaffolding stays English. Heavy Vietnamese scaffolding here plus full-VI
+# user prompts has tripped OmniRoute agentrouter HTTP 400 content-blocked
+# (observed 2026-09-19 on VI quick-actions like "Tìm tam giác cân…").
+# Client quick-action prompts may still be Vietnamese; keep window annotations in
+# English to reduce content-block risk. SSE progress/errors are Vietnamese for the UI.
 #
 # OmniRoute 2026-09-19: openai→claude translation of pydantic-ai @agent.tool_plain
 # get_klines arrives as tools[0].type=custom; agentrouter then 400s with unknown
 # variant `custom` (expected web_search_*). Keep tools:[] — analyze with closedCandles only.
 INSTRUCTIONS = (
     "You are a crypto chart research assistant. Analyze only closed candles. "
-    "LANGUAGE: Write `summary` and chat-facing text in English by default. "
-    "Only use Vietnamese if the user explicitly asks for Vietnamese. "
+    "LANGUAGE: Write `summary` and chat-facing text in Vietnamese by default. "
+    "Do not reply in English unless the user explicitly asks for English. "
     "Keep JSON/schema field names in English exactly as required "
     "(kind, name, PatternShape, AgentMarker, points, priceLow, priceHigh, side, etc.). "
     "Default analysis/draw window is the visible chart range reflected in request from/to and "
@@ -80,8 +80,8 @@ class PydanticAiRunner:
         # (Next/ngrok/proxies often abort silent streams around ~30s).
         yield "text", {
             "delta": (
-                f"Analyzing {request.symbol} {request.interval} "
-                f"({len(request.closedCandles)} closed candles)…\n\n"
+                f"Đang phân tích {request.symbol} {request.interval} "
+                f"({len(request.closedCandles)} nến đã đóng)…\n\n"
             )
         }
         try:
@@ -91,11 +91,11 @@ class PydanticAiRunner:
             yield "done", {}
             return
         except Exception:
-            yield "error", {"message": "Copilot failed"}
+            yield "error", {"message": PROVIDER_GENERIC_FAILURE_MSG}
             yield "done", {}
             return
 
-        yield "text", {"delta": "Model finished. Building overlays…"}
+        yield "text", {"delta": "Mô hình đã xong. Đang dựng lớp phủ…"}
 
         output = result.output
         if output.summary:
@@ -105,28 +105,28 @@ class PydanticAiRunner:
         valid_shapes, dropped_ids = filter_preview_shapes(output.shapes, allowed_times, symbol=request.symbol, interval=request.interval)
 
         if dropped_ids:
-            yield "text", {"delta": f"\n\nSkipped {len(dropped_ids)} invalid shape(s) (bad schema or times outside candles)."}
+            yield "text", {"delta": f"\n\nĐã bỏ qua {len(dropped_ids)} hình không hợp lệ (sai schema hoặc thời gian ngoài tập nến)."}
 
         yield "shapes", {"shapes": valid_shapes}
         if valid_shapes:
             names = ", ".join(getattr(s, "name", "?") for s in valid_shapes[:5])
-            more = f" (+{len(valid_shapes) - 5} more)" if len(valid_shapes) > 5 else ""
-            yield "text", {"delta": f"\n\nOverlays ready: {len(valid_shapes)} — {names}{more}."}
+            more = f" (+{len(valid_shapes) - 5} nữa)" if len(valid_shapes) > 5 else ""
+            yield "text", {"delta": f"\n\nLớp phủ sẵn sàng: {len(valid_shapes)} — {names}{more}."}
 
         if output.markers:
             valid_markers, dropped_marker_ids = filter_agent_markers(output.markers, allowed_times)
             if dropped_marker_ids:
-                yield "text", {"delta": f"\n\nSkipped {len(dropped_marker_ids)} invalid marker(s)."}
+                yield "text", {"delta": f"\n\nĐã bỏ qua {len(dropped_marker_ids)} marker không hợp lệ."}
             yield "markers", {"markers": valid_markers}
 
         yield "done", {}
 
 
 
-PROVIDER_UNAUTHORIZED_MSG = "Copilot failed: provider unauthorized"
-PROVIDER_CREDITS_EXHAUSTED_MSG = "Copilot failed: provider credits exhausted"
-PROVIDER_RATE_LIMITED_MSG = "Copilot failed: provider rate-limited"
-PROVIDER_GENERIC_FAILURE_MSG = "Copilot failed"
+PROVIDER_UNAUTHORIZED_MSG = "Copilot thất bại: nhà cung cấp không được ủy quyền"
+PROVIDER_CREDITS_EXHAUSTED_MSG = "Copilot thất bại: hết credits nhà cung cấp"
+PROVIDER_RATE_LIMITED_MSG = "Copilot thất bại: nhà cung cấp bị giới hạn tốc độ"
+PROVIDER_GENERIC_FAILURE_MSG = "Copilot thất bại"
 
 _CREDITS_EXHAUSTED_MARKERS = (
     "credits exhausted",
@@ -209,9 +209,9 @@ def _provider_error_detail(exc: ModelHTTPError) -> str:
 
 
 def _build_user_prompt(request: AnalyzeRequest) -> str:
-    # Keep window annotations in English. User prompt text may be Vietnamese from
-    # the client (quick-actions); stacking VI headers + VI prompts has content-blocked
-    # on agentrouter (2026-09-19). SSE progress/errors stay English for stream consistency.
+    # Keep window annotations in English to reduce agentrouter content-block risk
+    # (observed 2026-09-19: stacking VI headers + VI quick-actions tripped HTTP 400).
+    # Chat SSE progress/errors are Vietnamese; summary language is Vietnamese by default.
     payload = request.model_dump(by_alias=True)
     n = len(request.closedCandles)
     return (
