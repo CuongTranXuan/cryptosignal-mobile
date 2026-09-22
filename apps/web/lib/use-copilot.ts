@@ -1,24 +1,54 @@
 import { mergeCandles } from "./binance";
+import {
+  AUTO_DRAW_PROMPT,
+  COPILOT_ERROR,
+  COPILOT_ERROR_CREDITS_EXHAUSTED,
+  COPILOT_ERROR_RATE_LIMITED,
+  COPILOT_ERROR_UNAUTHORIZED,
+  copilotDrewShapes,
+  copilotPlacedMarkers,
+  copilotShapeSummaryLine,
+  copilotSkippedMarkers,
+  copilotSkippedShapes,
+  COPILOT_SCROLLED_TO_OVERLAYS,
+  mapCopilotSseError,
+} from "./copilot-strings";
 import { fetchKlines as defaultFetchKlines, type FetchKlines } from "./market-client";
-import { PatternShapeSchema, type Candle, type PatternShape } from "./pattern-shape";
+import { coerceAgentMarker, coerceAgentShape } from "./normalize-agent-shape";
+import {
+  AgentMarkerSchema,
+  PatternShapeSchema,
+  type AgentMarker,
+  type Candle,
+  type PatternShape,
+} from "./pattern-shape";
+import {
+  annotatePromptWithWindow,
+  selectAnalysisCandles,
+  timesInsideVisibleRange,
+} from "./analysis-window";
 import { useAiStore } from "./stores/ai-store";
 import { useChartStore } from "./stores/chart-store";
+import { useMarkerStore } from "./stores/marker-store";
 import { useShapeStore } from "./stores/shape-store";
 
-export const TRIANGLES_PROMPT =
-  "Find symmetrical triangles in this closed-candle window and return PatternShape polyline(s).";
+export {
+  annotatePromptWithWindow,
+  promptRequestsVisibleWindow,
+  selectAnalysisCandles,
+  timesInsideVisibleRange,
+} from "./analysis-window";
 
-export const HEAD_SHOULDERS_PROMPT =
-  "Find head and shoulders in this closed-candle window and return PatternShape polyline(s).";
+export { AUTO_DRAW_PROMPT, HEAD_SHOULDERS_PROMPT, TRIANGLES_PROMPT } from "./copilot-strings";
 
-export const AUTO_DRAW_PROMPT = "Auto-Draw: update patterns for the latest closed candle.";
-
-const DEFAULT_BASE = "http://127.0.0.1:8000";
+/** Empty = same-origin (Next rewrite proxies to the local FastAPI copilot). */
+const DEFAULT_BASE = "";
 
 export type CopilotClientDeps = {
   fetchImpl?: typeof fetch;
   fetchKlines?: FetchKlines;
   getClosedTimes?: () => Set<number> | undefined;
+  getCoordApi?: () => import("./chart-api").ChartCoordinateApi | null;
   baseUrl?: string;
 };
 
@@ -31,16 +61,22 @@ export type CopilotClient = {
 };
 
 function resolveBaseUrl(explicit?: string): string {
-  if (explicit) return explicit.replace(/\/$/, "");
+  if (explicit !== undefined) return explicit.replace(/\/$/, "");
   const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process
     ?.env;
-  return (env?.NEXT_PUBLIC_COPILOT_URL || DEFAULT_BASE).replace(/\/$/, "");
+  const fromEnv = env?.NEXT_PUBLIC_COPILOT_URL;
+  // Empty env var means same-origin; only fall back when unset.
+  if (fromEnv === undefined || fromEnv === null) {
+    return DEFAULT_BASE;
+  }
+  return fromEnv.replace(/\/$/, "");
 }
 
 function mapHttpError(status: number): string {
-  if (status === 401 || status === 403) return "Copilot failed: provider unauthorized";
-  if (status === 429) return "Copilot failed: provider rate-limited";
-  return "Copilot failed";
+  if (status === 401 || status === 403) return COPILOT_ERROR_UNAUTHORIZED;
+  if (status === 402) return COPILOT_ERROR_CREDITS_EXHAUSTED;
+  if (status === 429) return COPILOT_ERROR_RATE_LIMITED;
+  return COPILOT_ERROR;
 }
 
 function closedCandlesFromChart(
@@ -77,6 +113,20 @@ export function filterShapesToClosedTimes(
   return { valid, droppedIds };
 }
 
+/** Keep markers whose time is in the allowed closed candle set. */
+export function filterMarkersToClosedTimes(
+  markers: AgentMarker[],
+  allowedTimes: Set<number>,
+): { valid: AgentMarker[]; droppedIds: string[] } {
+  const valid: AgentMarker[] = [];
+  const droppedIds: string[] = [];
+  for (const marker of markers) {
+    if (allowedTimes.has(marker.time)) valid.push(marker);
+    else droppedIds.push(marker.id);
+  }
+  return { valid, droppedIds };
+}
+
 function isSuperseded(data: Record<string, unknown>): boolean {
   return data.superseded === true || data.note === "superseded";
 }
@@ -100,9 +150,12 @@ function parseSseBlocks(buffer: string): { events: { event: string; data: string
 
 function noteDroppedShapes(ids: string[]): void {
   if (ids.length === 0) return;
-  const note = `Dropped invalid shapes: ${ids.join(", ")}`;
-  useAiStore.getState().appendText(note);
-  useAiStore.setState({ lastError: note });
+  useAiStore.getState().appendText(copilotSkippedShapes(ids.length));
+}
+
+function noteDroppedMarkers(ids: string[]): void {
+  if (ids.length === 0) return;
+  useAiStore.getState().appendText(copilotSkippedMarkers(ids.length));
 }
 
 export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient {
@@ -130,10 +183,11 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
       data = {};
     }
 
-    type SseEvent = "text" | "shapes" | "extendRange" | "error" | "done";
+    type SseEvent = "text" | "shapes" | "markers" | "extendRange" | "error" | "done";
     const isSseEvent = (value: string): value is SseEvent =>
       value === "text" ||
       value === "shapes" ||
+      value === "markers" ||
       value === "extendRange" ||
       value === "error" ||
       value === "done";
@@ -150,8 +204,64 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
         const list = Array.isArray(data.shapes) ? data.shapes : [];
         const zodValid: PatternShape[] = [];
         const droppedIds: string[] = [];
+        const chart = useChartStore.getState();
         for (const item of list) {
-          const parsed = PatternShapeSchema.safeParse(item);
+          const coerced = coerceAgentShape(item, {
+            symbol: chart.symbol,
+            interval: chart.interval,
+          });
+          const parsed = PatternShapeSchema.safeParse(coerced);
+          if (parsed.success) {
+            zodValid.push(parsed.data);
+          } else {
+            const id =
+              item && typeof item === "object" && "id" in item
+                ? String((item as { id: unknown }).id)
+                : typeof coerced === "object" && coerced && "id" in coerced
+                  ? String((coerced as { id: unknown }).id)
+                  : "unknown";
+            droppedIds.push(id);
+          }
+        }
+        const allowedTimes = resolveClosedTimes(chart.candles, deps.getClosedTimes?.());
+        const { valid, droppedIds: outOfWindow } = filterShapesToClosedTimes(
+          zodValid,
+          allowedTimes,
+        );
+        droppedIds.push(...outOfWindow);
+        useShapeStore.getState().setPreview(valid);
+        if (valid.length > 0) {
+          useShapeStore.getState().commitPreview();
+          const lines = valid.map((s) =>
+            copilotShapeSummaryLine(
+              s.name,
+              s.kind,
+              Math.round(s.confidence * 100),
+              s.points.length,
+            ),
+          );
+          useAiStore.getState().appendText(copilotDrewShapes(valid.length, lines));
+          const times = valid.flatMap((s) => s.points.map((pt) => pt.time));
+          const visible = deps.getCoordApi?.()?.getVisibleTimeRange?.() ?? null;
+          if (!timesInsideVisibleRange(times, visible)) {
+            deps.getCoordApi?.()?.revealTimes(times);
+            useAiStore.getState().appendText(COPILOT_SCROLLED_TO_OVERLAYS);
+          }
+        }
+        noteDroppedShapes(droppedIds);
+        return "ok";
+      }
+      case "markers": {
+        const list = Array.isArray(data.markers) ? data.markers : [];
+        const zodValid: AgentMarker[] = [];
+        const droppedIds: string[] = [];
+        const chart = useChartStore.getState();
+        for (const item of list) {
+          const coerced = coerceAgentMarker(item, {
+            symbol: chart.symbol,
+            interval: chart.interval,
+          });
+          const parsed = AgentMarkerSchema.safeParse(coerced);
           if (parsed.success) {
             zodValid.push(parsed.data);
           } else {
@@ -162,15 +272,17 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
             droppedIds.push(id);
           }
         }
-        const chart = useChartStore.getState();
         const allowedTimes = resolveClosedTimes(chart.candles, deps.getClosedTimes?.());
-        const { valid, droppedIds: outOfWindow } = filterShapesToClosedTimes(
+        const { valid, droppedIds: outOfWindow } = filterMarkersToClosedTimes(
           zodValid,
           allowedTimes,
         );
         droppedIds.push(...outOfWindow);
-        useShapeStore.getState().setPreview(valid);
-        noteDroppedShapes(droppedIds);
+        useMarkerStore.getState().setMarkers(valid);
+        if (valid.length > 0) {
+          useAiStore.getState().appendText(copilotPlacedMarkers(valid.length));
+        }
+        noteDroppedMarkers(droppedIds);
         return "ok";
       }
       case "extendRange": {
@@ -188,8 +300,8 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
       case "error": {
         const message =
           typeof data.message === "string" && data.message.trim()
-            ? data.message
-            : "Copilot failed";
+            ? mapCopilotSseError(data.message)
+            : COPILOT_ERROR;
         useAiStore.getState().fail(message);
         return "error";
       }
@@ -211,7 +323,7 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
 
   async function consumeSse(response: Response): Promise<void> {
     if (!response.body) {
-      useAiStore.getState().fail("Copilot failed");
+      useAiStore.getState().fail(COPILOT_ERROR);
       return;
     }
     const reader = response.body.getReader();
@@ -240,7 +352,7 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
     }
 
     if (useAiStore.getState().inFlight) {
-      if (sawError) useAiStore.getState().fail(useAiStore.getState().lastError ?? "Copilot failed");
+      if (sawError) useAiStore.getState().fail(useAiStore.getState().lastError ?? COPILOT_ERROR);
       else useAiStore.getState().finish();
     }
   }
@@ -253,23 +365,27 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
 
     const chart = useChartStore.getState();
     const closedTimes = deps.getClosedTimes?.();
-    const closedCandles = closedCandlesFromChart(chart.candles, closedTimes);
-    if (closedCandles.length === 0) return;
+    const allClosed = closedCandlesFromChart(chart.candles, closedTimes);
+    if (allClosed.length === 0) return;
+
+    const visibleRange = deps.getCoordApi?.()?.getVisibleTimeRange?.() ?? null;
+    const window = selectAnalysisCandles(allClosed, { visibleRange, prompt });
+    if (window.candles.length === 0) return;
 
     analyzing = true;
     useAiStore.getState().appendUser(prompt);
     useAiStore.getState().startAgent();
 
-    const from = closedCandles[0]!.time;
-    const to = closedCandles[closedCandles.length - 1]!.time;
+    const annotatedPrompt = annotatePromptWithWindow(prompt, window);
     const body = {
       symbol: chart.symbol,
       interval: chart.interval,
-      from,
-      to,
-      closedCandles,
+      from: window.from,
+      to: window.to,
+      closedCandles: window.candles,
       existingShapes: useShapeStore.getState().committed(),
-      prompt,
+      existingMarkers: useMarkerStore.getState().markers,
+      prompt: annotatedPrompt,
     };
 
     try {
@@ -286,7 +402,7 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
 
       await consumeSse(res);
     } catch {
-      useAiStore.getState().fail("Copilot failed");
+      useAiStore.getState().fail(COPILOT_ERROR);
     } finally {
       analyzing = false;
       if (useAiStore.getState().inFlight) {
@@ -336,6 +452,7 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
         if (state.shapesResetSignal !== lastResetSignal) {
           lastResetSignal = state.shapesResetSignal;
           useShapeStore.getState().clearAll();
+          useMarkerStore.getState().clearAll();
         }
       });
     },

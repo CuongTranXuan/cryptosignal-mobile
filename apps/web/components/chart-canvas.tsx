@@ -3,14 +3,23 @@
 import {
   CandlestickSeries,
   createChart,
+  createSeriesMarkers,
+  HistogramSeries,
   type CandlestickData,
+  type HistogramData,
   type IChartApi,
   type ISeriesApi,
+  type SeriesMarker,
   type UTCTimestamp,
 } from "lightweight-charts";
 import { useEffect, useRef, useState, type MutableRefObject } from "react";
 import type { ChartCoordinateApi } from "../lib/chart-api";
+import { CHART_THEME } from "../lib/chart-theme";
+import { mapAgentMarkersToSeriesMarkers } from "../lib/marker-map";
+import { toVolumeData } from "../lib/volume-map";
 import { useChartStore } from "../lib/stores/chart-store";
+import { useDrawToolStore } from "../lib/stores/draw-tool-store";
+import { useMarkerStore } from "../lib/stores/marker-store";
 import { ShapeOverlay } from "./shape-overlay";
 
 type ChartCanvasProps = {
@@ -27,10 +36,30 @@ function toCandleData(candles: { time: number; open: number; high: number; low: 
   }));
 }
 
+function toHistogramData(candles: Parameters<typeof toVolumeData>[0]): HistogramData[] {
+  return toVolumeData(candles).map((bar) => ({
+    time: bar.time as UTCTimestamp,
+    value: bar.value,
+    color: bar.color,
+  }));
+}
+
+function toSeriesMarkers(markers: ReturnType<typeof mapAgentMarkersToSeriesMarkers>): SeriesMarker<UTCTimestamp>[] {
+  return markers.map((m) => ({
+    ...m,
+    time: m.time as UTCTimestamp,
+  }));
+}
+
 export function ChartCanvas({ coordApiRef }: ChartCanvasProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const overlayBoxRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const volumeRef = useRef<ISeriesApi<"Histogram"> | null>(null);
+  const markersApiRef = useRef<{
+    setMarkers: (markers: SeriesMarker<UTCTimestamp>[]) => void;
+  } | null>(null);
   const lastDataRef = useRef<CandlestickData[]>([]);
   const [overlayTick, setOverlayTick] = useState(0);
 
@@ -38,6 +67,9 @@ export function ChartCanvas({ coordApiRef }: ChartCanvasProps) {
   const tickerPercent = useChartStore((s) => s.tickerPercent);
   const connection = useChartStore((s) => s.connection);
   const symbol = useChartStore((s) => s.symbol);
+  const markers = useMarkerStore((s) => s.markers);
+  const drawTool = useDrawToolStore((s) => s.tool);
+
 
   const last = candles.length > 0 ? candles[candles.length - 1]! : null;
   const pct = tickerPercent;
@@ -49,32 +81,47 @@ export function ChartCanvas({ coordApiRef }: ChartCanvasProps) {
 
     const chart = createChart(el, {
       layout: {
-        background: { color: "#161a25" },
-        textColor: "#848e9c",
+        background: { color: CHART_THEME.background },
+        textColor: CHART_THEME.muted,
         fontFamily: "var(--font-plex-mono), 'IBM Plex Mono', monospace",
       },
       grid: {
-        vertLines: { color: "#2b313a44" },
-        horzLines: { color: "#2b313a44" },
+        vertLines: { color: `${CHART_THEME.line}44` },
+        horzLines: { color: `${CHART_THEME.line}44` },
       },
-      rightPriceScale: { borderColor: "#2b313a" },
-      timeScale: { borderColor: "#2b313a", timeVisible: true, secondsVisible: false },
+      rightPriceScale: { borderColor: CHART_THEME.line },
+      timeScale: { borderColor: CHART_THEME.line, timeVisible: true, secondsVisible: false },
       crosshair: { mode: 1 },
       width: el.clientWidth,
       height: el.clientHeight,
     });
 
     const series = chart.addSeries(CandlestickSeries, {
-      upColor: "#0ecb81",
-      downColor: "#f6465d",
-      borderUpColor: "#0ecb81",
-      borderDownColor: "#f6465d",
-      wickUpColor: "#0ecb81",
-      wickDownColor: "#f6465d",
+      upColor: CHART_THEME.green,
+      downColor: CHART_THEME.red,
+      borderUpColor: CHART_THEME.green,
+      borderDownColor: CHART_THEME.red,
+      wickUpColor: CHART_THEME.green,
+      wickDownColor: CHART_THEME.red,
     });
+
+    const volumeSeries = chart.addSeries(
+      HistogramSeries,
+      {
+        priceFormat: { type: "volume" },
+        priceLineVisible: false,
+        lastValueVisible: false,
+      },
+      1,
+    );
+    const panes = chart.panes();
+    panes[0]?.setStretchFactor(3);
+    panes[1]?.setStretchFactor(1);
 
     chartRef.current = chart;
     seriesRef.current = series;
+    volumeRef.current = volumeSeries;
+    markersApiRef.current = createSeriesMarkers(series, []);
 
     const rebuildApi = () => {
       const s = seriesRef.current;
@@ -105,7 +152,30 @@ export function ChartCanvas({ coordApiRef }: ChartCanvasProps) {
           const v = s.coordinateToPrice(y);
           return v == null ? null : Number(v);
         },
+        revealTimes: (times) => {
+          if (!times.length) return;
+          const minT = Math.min(...times);
+          const maxT = Math.max(...times);
+          const span = Math.max(maxT - minT, 3600);
+          const pad = Math.max(Math.floor(span * 0.25), 6 * 3600);
+          c.timeScale().setVisibleRange({
+            from: (minT - pad) as UTCTimestamp,
+            to: (maxT + pad) as UTCTimestamp,
+          });
+        },
+        getVisibleTimeRange: () => {
+          const range = c.timeScale().getVisibleRange();
+          if (!range) return null;
+          const from = typeof range.from === "number" ? range.from : null;
+          const to = typeof range.to === "number" ? range.to : null;
+          if (from == null || to == null || !(to > from)) return null;
+          return { from, to };
+        },
       };
+      const pane = c.paneSize(0);
+      if (overlayBoxRef.current) {
+        overlayBoxRef.current.style.height = `${pane.height}px`;
+      }
       setOverlayTick((n) => n + 1);
     };
 
@@ -132,6 +202,8 @@ export function ChartCanvas({ coordApiRef }: ChartCanvasProps) {
       chart.remove();
       chartRef.current = null;
       seriesRef.current = null;
+      volumeRef.current = null;
+      markersApiRef.current = null;
       coordApiRef.current = null;
       lastDataRef.current = [];
     };
@@ -139,11 +211,14 @@ export function ChartCanvas({ coordApiRef }: ChartCanvasProps) {
 
   useEffect(() => {
     const series = seriesRef.current;
-    if (!series) return;
+    const volume = volumeRef.current;
+    if (!series || !volume) return;
 
     const mapped = toCandleData(candles);
+    const volumeMapped = toHistogramData(candles);
     if (mapped.length === 0) {
       series.setData([]);
+      volume.setData([]);
       lastDataRef.current = [];
       setOverlayTick((n) => n + 1);
       return;
@@ -152,6 +227,7 @@ export function ChartCanvas({ coordApiRef }: ChartCanvasProps) {
     const prev = lastDataRef.current;
     const lastMapped = mapped[mapped.length - 1]!;
     const prevLast = prev[prev.length - 1];
+    const lastVol = volumeMapped[volumeMapped.length - 1]!;
 
     const sameSeries =
       prev.length > 0 &&
@@ -161,15 +237,37 @@ export function ChartCanvas({ coordApiRef }: ChartCanvasProps) {
 
     if (sameSeries && prevLast && lastMapped.time === prevLast.time && mapped.length === prev.length) {
       series.update(lastMapped);
+      volume.update(lastVol);
     } else if (sameSeries && mapped.length === prev.length + 1) {
       series.update(lastMapped);
+      volume.update(lastVol);
     } else {
       series.setData(mapped);
+      volume.setData(volumeMapped);
     }
 
     lastDataRef.current = mapped;
     setOverlayTick((n) => n + 1);
   }, [candles]);
+
+
+  // Drawing mode: stop LWC from eating pointer events under the overlay.
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    const drawing = drawTool !== "none";
+    chart.applyOptions({
+      handleScroll: !drawing,
+      handleScale: !drawing,
+    });
+    if (overlayBoxRef.current) {
+      overlayBoxRef.current.style.pointerEvents = drawing ? "auto" : "none";
+    }
+  }, [drawTool, overlayTick]);
+
+  useEffect(() => {
+    markersApiRef.current?.setMarkers(toSeriesMarkers(mapAgentMarkersToSeriesMarkers(markers)));
+  }, [markers, overlayTick]);
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col bg-[#161a25]">
@@ -203,7 +301,9 @@ export function ChartCanvas({ coordApiRef }: ChartCanvasProps) {
       </div>
       <div className="relative min-h-0 flex-1">
         <div ref={containerRef} className="absolute inset-0" />
-        <ShapeOverlay coordApiRef={coordApiRef} overlayTick={overlayTick} />
+        <div ref={overlayBoxRef} className="absolute inset-x-0 top-0" style={{ pointerEvents: "none" }}>
+          <ShapeOverlay coordApiRef={coordApiRef} overlayTick={overlayTick} />
+        </div>
       </div>
     </div>
   );

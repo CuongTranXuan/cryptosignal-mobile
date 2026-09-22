@@ -1,12 +1,25 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { isDrawDisabled, isSendDisabled } from "../lib/terminal-controls";
 import {
+  COPILOT_ACTION_DRAW_ON_CHART,
+  COPILOT_ACTION_EDIT_COORDS,
+  COPILOT_ACTION_FIND_TRIANGLES,
+  COPILOT_ACTION_HEAD_SHOULDERS,
+  COPILOT_EMPTY_STATE,
+  COPILOT_INPUT_PLACEHOLDER,
+  COPILOT_LOADING,
+  COPILOT_OFFLINE,
+  COPILOT_SEND,
+  COPILOT_TAB_AUTO_DRAW,
+  COPILOT_TAB_MANUAL,
+  COPILOT_TITLE,
   HEAD_SHOULDERS_PROMPT,
   TRIANGLES_PROMPT,
-  type CopilotClient,
-} from "../lib/use-copilot";
+  copilotRoleLabel,
+} from "../lib/copilot-strings";
+import { isDrawDisabled, isSendDisabled } from "../lib/terminal-controls";
+import { type CopilotClient } from "../lib/use-copilot";
 import { useAiStore } from "../lib/stores/ai-store";
 import { useChartStore } from "../lib/stores/chart-store";
 import { useShapeStore } from "../lib/stores/shape-store";
@@ -55,14 +68,14 @@ export function CopilotPanel({ client }: CopilotPanelProps) {
   return (
     <aside className="flex h-full min-h-0 flex-col bg-[#181a20]">
       <div className="flex h-10 flex-none items-center justify-between border-b border-[#2b313a] px-3">
-        <span className="text-sm font-semibold text-white">Copilot</span>
+        <span className="text-sm font-semibold text-white">{COPILOT_TITLE}</span>
         <span className="font-[family-name:var(--font-plex-mono)] text-[11px] text-[#848e9c]">
           {health ? (
             <>
               {health.style}/{health.model}
             </>
           ) : (
-            "offline"
+            COPILOT_OFFLINE
           )}
         </span>
       </div>
@@ -75,7 +88,7 @@ export function CopilotPanel({ client }: CopilotPanelProps) {
             mode === "manual" ? "bg-[#2b313a] text-[#f0b90b]" : "text-[#848e9c] hover:bg-[#2b313a]"
           }`}
         >
-          Manual
+          {COPILOT_TAB_MANUAL}
         </button>
         <button
           type="button"
@@ -84,7 +97,7 @@ export function CopilotPanel({ client }: CopilotPanelProps) {
             mode === "auto" ? "bg-[#2b313a] text-[#f0b90b]" : "text-[#848e9c] hover:bg-[#2b313a]"
           }`}
         >
-          Auto-Draw
+          {COPILOT_TAB_AUTO_DRAW}
         </button>
       </div>
 
@@ -95,7 +108,7 @@ export function CopilotPanel({ client }: CopilotPanelProps) {
           onClick={() => send(TRIANGLES_PROMPT)}
           className="rounded border border-[#2b313a] px-2 py-1 text-xs text-[#eaecef] hover:border-[#f0b90b] disabled:cursor-not-allowed disabled:opacity-40"
         >
-          Find triangles
+          {COPILOT_ACTION_FIND_TRIANGLES}
         </button>
         <button
           type="button"
@@ -103,7 +116,7 @@ export function CopilotPanel({ client }: CopilotPanelProps) {
           onClick={() => send(HEAD_SHOULDERS_PROMPT)}
           className="rounded border border-[#2b313a] px-2 py-1 text-xs text-[#eaecef] hover:border-[#f0b90b] disabled:cursor-not-allowed disabled:opacity-40"
         >
-          Head & shoulders
+          {COPILOT_ACTION_HEAD_SHOULDERS}
         </button>
         <button
           type="button"
@@ -111,20 +124,20 @@ export function CopilotPanel({ client }: CopilotPanelProps) {
           onClick={() => commitPreview()}
           className="rounded border border-[#2b313a] px-2 py-1 text-xs text-[#0ecb81] hover:border-[#0ecb81] disabled:cursor-not-allowed disabled:opacity-40"
         >
-          Draw on chart
+          {COPILOT_ACTION_DRAW_ON_CHART}
         </button>
         <button
           type="button"
           onClick={onEditCoords}
           className="rounded border border-[#2b313a] px-2 py-1 text-xs text-[#f0b90b] hover:border-[#f0b90b]"
         >
-          Edit coords
+          {COPILOT_ACTION_EDIT_COORDS}
         </button>
       </div>
 
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3 text-sm">
         {messages.length === 0 && (
-          <p className="text-xs text-[#474d57]">Ask the copilot to find patterns in the closed window.</p>
+          <p className="text-xs text-[#474d57]">{COPILOT_EMPTY_STATE}</p>
         )}
         {messages.map((m) => (
           <div
@@ -133,8 +146,10 @@ export function CopilotPanel({ client }: CopilotPanelProps) {
               m.role === "user" ? "bg-[#295238]/40 text-[#eaecef]" : "bg-[#1e2329] text-[#eaecef]"
             }`}
           >
-            <div className="mb-0.5 text-[10px] uppercase tracking-wide text-[#848e9c]">{m.role}</div>
-            <div className="whitespace-pre-wrap">{m.content || (inFlight ? "…" : "")}</div>
+            <div className="mb-0.5 text-[10px] uppercase tracking-wide text-[#848e9c]">
+              {copilotRoleLabel(m.role)}
+            </div>
+            <div className="whitespace-pre-wrap">{m.content || (inFlight ? COPILOT_LOADING : "")}</div>
           </div>
         ))}
         {lastError && (
@@ -148,7 +163,7 @@ export function CopilotPanel({ client }: CopilotPanelProps) {
         <input
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
-          placeholder="Ask about this window…"
+          placeholder={COPILOT_INPUT_PLACEHOLDER}
           disabled={sendDisabled}
           className="min-w-0 flex-1 rounded border border-[#2b313a] bg-[#1e2329] px-2 py-1.5 text-xs text-white outline-none focus:border-[#f0b90b] disabled:opacity-40"
         />
@@ -157,7 +172,7 @@ export function CopilotPanel({ client }: CopilotPanelProps) {
           disabled={sendDisabled || !prompt.trim()}
           className="rounded bg-[#f0b90b] px-3 py-1.5 text-xs font-semibold text-[#0b0e14] disabled:cursor-not-allowed disabled:opacity-40"
         >
-          Send
+          {COPILOT_SEND}
         </button>
       </form>
     </aside>

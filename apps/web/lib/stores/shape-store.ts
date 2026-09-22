@@ -13,6 +13,7 @@ type ShapeState = {
   select: (id: string | null) => void;
   remove: (id: string) => void;
   clearAll: () => void;
+  addCommitted: (shape: PatternShape) => void;
   committed: () => PatternShape[];
   previews: () => PatternShape[];
 };
@@ -60,6 +61,11 @@ export const useShapeStore = create<ShapeState>((set, get) => ({
   },
 
   clearAll: () => set({ shapes: [], selectedId: null }),
+
+  addCommitted: (shape) => {
+    const committed = { ...shape, status: "committed" as const };
+    set({ shapes: [...get().shapes, committed], selectedId: committed.id });
+  },
 
   committed: () => get().shapes.filter((s) => s.status === "committed"),
 

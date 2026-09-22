@@ -1,21 +1,55 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Protocol
+from typing import AsyncIterator, Protocol
 
 from pydantic_ai import Agent
+from pydantic_ai.output import PromptedOutput
 from pydantic_ai.exceptions import ModelHTTPError
 
 from cryptosignal_copilot.config import load_llm_config
-from cryptosignal_copilot.klines import fetch_klines
 from cryptosignal_copilot.model_factory import build_model
-from cryptosignal_copilot.schema import AnalyzeRequest, AnalyzeResult, filter_preview_shapes
+from cryptosignal_copilot.schema import (
+    AnalyzeRequest,
+    AnalyzeResult,
+    filter_agent_markers,
+    filter_preview_shapes,
+)
 
+# LANGUAGE: require Vietnamese for `summary` and chat-facing text the user sees.
+# System scaffolding stays English. Heavy Vietnamese scaffolding here plus full-VI
+# user prompts has tripped OmniRoute agentrouter HTTP 400 content-blocked
+# (observed 2026-09-19 on VI quick-actions like "Tìm tam giác cân…").
+# Client quick-action prompts may still be Vietnamese; keep window annotations in
+# English to reduce content-block risk. SSE progress/errors are Vietnamese for the UI.
+#
+# OmniRoute 2026-09-19: openai→claude translation of pydantic-ai @agent.tool_plain
+# get_klines arrives as tools[0].type=custom; agentrouter then 400s with unknown
+# variant `custom` (expected web_search_*). Keep tools:[] — analyze with closedCandles only.
 INSTRUCTIONS = (
     "You are a crypto chart research assistant. Analyze only closed candles. "
-    "Return pattern geometry using unix seconds for time and absolute prices. "
-    "Never place orders, never request API keys or secrets, never invent OHLC — "
-    "call get_klines when you need extra history."
+    "LANGUAGE: Write `summary` and chat-facing text in Vietnamese by default. "
+    "Do not reply in English unless the user explicitly asks for English. "
+    "Keep JSON/schema field names in English exactly as required "
+    "(kind, name, PatternShape, AgentMarker, points, priceLow, priceHigh, side, etc.). "
+    "Default analysis/draw window is the visible chart range reflected in request from/to and "
+    "closedCandles. If the user defines another range (full history, last N days/weeks/bars, "
+    "from–to times, earlier/previous swing, etc.), use only the provided closedCandles and "
+    "from/to for that named range when those candles cover it — do not hard-lock every "
+    "request to the viewport, and do not claim or call any klines/history tool "
+    "(none is registered). "
+    "When the prompt mentions the visible window / this window / viewport and does not name "
+    "another range, stay strictly inside the provided closedCandles set. "
+    "Always fill `summary` as a friendly chat reply (not a terse log): open with "
+    "what you see, name key levels/times, explain the pattern, say what you are drawing and why, "
+    "and end with a short takeaway. Use several short paragraphs. "
+    "Also return drawable PatternShape overlays (trendline/polyline/zone) whenever the "
+    "prompt asks for analysis or drawing — do not return text-only when shapes would help. "
+    "Every shape point.time MUST be an exact unix second from the provided closedCandles; "
+    "never invent times. Prefer 1–3 high-confidence shapes over many weak ones. Each shape MUST use fields id,symbol,interval,kind,name,status,source,confidence,points,priceLow,priceHigh (kind is trendline|polyline|zone; source is agent; status is preview; priceLow/priceHigh null for lines). Never use type/label/color instead of kind/name. Polyline needs >=3 points (use trendline for 2). "
+    "Optional AgentMarker point signals are a separate collection; AgentMarker.side is "
+    "signal direction (buy/sell/neutral), not an order. Never put side/quantity/apiKey on "
+    "PatternShape. Never place orders, never request API keys or secrets, never invent "
+    "OHLC — use only the OHLC in the provided closedCandles."
 )
 
 
@@ -24,103 +58,168 @@ class AgentRunner(Protocol):
         ...
 
 
-@dataclass
-class _ToolState:
-    extend_from: int | None = None
-    extend_to: int | None = None
-    tool_failed: bool = False
-    request_from: int = 0
-    tool_times: set[int] = field(default_factory=set)
-
-
 class PydanticAiRunner:
     async def run(self, request: AnalyzeRequest) -> AsyncIterator[tuple[str, dict]]:
         cfg = load_llm_config()
         model = build_model(cfg)
-        state = _ToolState(request_from=request.from_)
+        # OmniRoute/agentrouter rejects OpenAI tool_choice="required" (pydantic-ai's
+        # default ToolOutput mode). PromptedOutput uses response_format=json_object
+        # with tool_choice=auto, which works through the gateway.
+        # No @agent.tool_plain tools: OmniRoute 2026-09-19 rejects custom-tool variant
+        # (get_klines → type=custom → agentrouter 400). Requests must send tools:[].
         agent: Agent[None, AnalyzeResult] = Agent(
             model,
-            output_type=AnalyzeResult,
+            output_type=PromptedOutput(AnalyzeResult),
             instructions=INSTRUCTIONS,
         )
 
-        @agent.tool_plain
-        async def get_klines(
-            symbol: str,
-            interval: str,
-            limit: int = 500,
-            startTime: int | None = None,
-            endTime: int | None = None,
-        ) -> list[dict[str, Any]]:
-            try:
-                candles = await fetch_klines(
-                    symbol,
-                    interval,
-                    limit=limit,
-                    start_time=startTime,
-                    end_time=endTime,
-                    timeout_s=cfg.timeout_s,
-                )
-            except Exception:
-                state.tool_failed = True
-                return []
-            if candles:
-                for c in candles:
-                    state.tool_times.add(c.time)
-                min_t = min(c.time for c in candles)
-                max_t = max(c.time for c in candles)
-                if min_t < state.request_from:
-                    state.extend_from = (
-                        min_t if state.extend_from is None else min(state.extend_from, min_t)
-                    )
-                    state.extend_to = (
-                        max_t if state.extend_to is None else max(state.extend_to, max_t)
-                    )
-            return [c.model_dump() for c in candles]
+        # @agent.tool_plain get_klines removed — see OmniRoute 2026-09-19 custom-tool reject.
 
         prompt = _build_user_prompt(request)
+        # Emit immediately so the SSE connection is not idle for the whole LLM call
+        # (Next/ngrok/proxies often abort silent streams around ~30s).
+        yield "text", {
+            "delta": (
+                f"Đang phân tích {request.symbol} {request.interval} "
+                f"({len(request.closedCandles)} nến đã đóng)…\n\n"
+            )
+        }
         try:
             result = await agent.run(prompt)
         except ModelHTTPError as exc:
-            if exc.status_code in (401, 403):
-                yield "error", {"message": "Copilot failed: provider unauthorized"}
-            elif exc.status_code == 429:
-                yield "error", {"message": "Copilot failed: provider rate-limited"}
-            else:
-                yield "error", {"message": "Copilot failed"}
+            yield "error", {"message": _model_http_error_message(exc)}
             yield "done", {}
             return
         except Exception:
-            yield "error", {"message": "Copilot failed"}
+            yield "error", {"message": PROVIDER_GENERIC_FAILURE_MSG}
             yield "done", {}
             return
 
-        if state.tool_failed:
-            yield "text", {"delta": "Extra history skipped"}
+        yield "text", {"delta": "Mô hình đã xong. Đang dựng lớp phủ…"}
 
         output = result.output
         if output.summary:
-            yield "text", {"delta": output.summary}
+            yield "text", {"delta": "\n\n" + output.summary}
 
-        allowed_times = {c.time for c in request.closedCandles} | state.tool_times
-        valid_shapes, dropped_ids = filter_preview_shapes(output.shapes, allowed_times)
+        allowed_times = {c.time for c in request.closedCandles}
+        valid_shapes, dropped_ids = filter_preview_shapes(output.shapes, allowed_times, symbol=request.symbol, interval=request.interval)
 
         if dropped_ids:
-            yield "text", {"delta": f"Dropped invalid shapes: {', '.join(dropped_ids)}"}
+            yield "text", {"delta": f"\n\nĐã bỏ qua {len(dropped_ids)} hình không hợp lệ (sai schema hoặc thời gian ngoài tập nến)."}
 
         yield "shapes", {"shapes": valid_shapes}
+        if valid_shapes:
+            names = ", ".join(getattr(s, "name", "?") for s in valid_shapes[:5])
+            more = f" (+{len(valid_shapes) - 5} nữa)" if len(valid_shapes) > 5 else ""
+            yield "text", {"delta": f"\n\nLớp phủ sẵn sàng: {len(valid_shapes)} — {names}{more}."}
 
-        if state.extend_from is not None and state.extend_to is not None:
-            yield "extendRange", {"from": state.extend_from, "to": state.extend_to}
+        if output.markers:
+            valid_markers, dropped_marker_ids = filter_agent_markers(output.markers, allowed_times)
+            if dropped_marker_ids:
+                yield "text", {"delta": f"\n\nĐã bỏ qua {len(dropped_marker_ids)} marker không hợp lệ."}
+            yield "markers", {"markers": valid_markers}
 
         yield "done", {}
 
 
+
+PROVIDER_UNAUTHORIZED_MSG = "Copilot thất bại: nhà cung cấp không được ủy quyền"
+PROVIDER_CREDITS_EXHAUSTED_MSG = "Copilot thất bại: hết credits nhà cung cấp"
+PROVIDER_RATE_LIMITED_MSG = "Copilot thất bại: nhà cung cấp bị giới hạn tốc độ"
+PROVIDER_GENERIC_FAILURE_MSG = "Copilot thất bại"
+
+_CREDITS_EXHAUSTED_MARKERS = (
+    "credits exhausted",
+    "credit exhausted",
+    "budget pool quota exhausted",
+    "quota exhausted",
+    "budget exhausted",
+    "out of credits",
+)
+
+
+def _model_http_error_message(exc: ModelHTTPError) -> str:
+    detail = _provider_error_detail(exc)
+    if exc.status_code in (401, 403):
+        msg = PROVIDER_UNAUTHORIZED_MSG
+        if detail:
+            msg = f"{msg} ({detail})"
+        return msg
+    if _is_provider_credits_exhausted(exc, detail):
+        return PROVIDER_CREDITS_EXHAUSTED_MSG
+    if exc.status_code == 429:
+        return PROVIDER_RATE_LIMITED_MSG
+    if detail:
+        return f"{PROVIDER_GENERIC_FAILURE_MSG} ({detail})"
+    return PROVIDER_GENERIC_FAILURE_MSG
+
+
+def _is_provider_credits_exhausted(exc: ModelHTTPError, detail: str) -> bool:
+    if exc.status_code == 402:
+        return True
+    text = _provider_error_text(exc, detail)
+    return any(marker in text for marker in _CREDITS_EXHAUSTED_MARKERS)
+
+
+def _provider_error_text(exc: ModelHTTPError, detail: str) -> str:
+    parts: list[str] = []
+    if detail:
+        parts.append(detail)
+    try:
+        body = getattr(exc, "body", None)
+        if isinstance(body, dict):
+            err = body.get("error")
+            if isinstance(err, dict):
+                for key in ("message", "code", "type"):
+                    value = err.get(key)
+                    if value:
+                        parts.append(str(value))
+            for key in ("message", "detail"):
+                value = body.get(key)
+                if value:
+                    parts.append(str(value))
+        elif isinstance(body, str) and body.strip():
+            parts.append(body)
+    except Exception:
+        pass
+    return " ".join(parts).lower()
+
+
+def _provider_error_detail(exc: ModelHTTPError) -> str:
+    """Best-effort short detail from provider HTTP errors (never raises)."""
+    try:
+        body = getattr(exc, "body", None)
+        if isinstance(body, dict):
+            err = body.get("error")
+            if isinstance(err, dict):
+                msg = err.get("message") or err.get("code")
+                if msg:
+                    return str(msg)[:240]
+            if body.get("message"):
+                return str(body["message"])[:240]
+        if isinstance(body, str) and body.strip():
+            return body.strip()[:240]
+    except Exception:
+        pass
+    try:
+        msg = getattr(exc, "message", None) or str(exc)
+        return str(msg)[:240]
+    except Exception:
+        return ""
+
+
 def _build_user_prompt(request: AnalyzeRequest) -> str:
+    # Keep window annotations in English to reduce agentrouter content-block risk
+    # (observed 2026-09-19: stacking VI headers + VI quick-actions tripped HTTP 400).
+    # Chat SSE progress/errors are Vietnamese; summary language is Vietnamese by default.
     payload = request.model_dump(by_alias=True)
+    n = len(request.closedCandles)
     return (
-        f"Symbol={request.symbol} interval={request.interval} "
-        f"from={request.from_} to={request.to}\n"
+        f"Symbol={request.symbol} interval={request.interval}\n"
+        f"PRIMARY ANALYSIS WINDOW: from={request.from_} to={request.to} "
+        f"({n} closed candles). Analyze this window. "
+        f"All shape point.time values MUST be times from this closedCandles set. "
+        f"Prefer the most recent bars in the window when the user does not name another range.\n"
         f"User prompt: {request.prompt}\n"
         f"Request JSON: {payload}"
     )

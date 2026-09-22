@@ -25,6 +25,7 @@ export function TerminalShell() {
   const client = useMemo(() => {
     const c = createCopilotClient({
       getClosedTimes: () => closedTimesRef.current,
+      getCoordApi: () => coordApiRef.current,
     });
     clientRef.current = c;
     return c;
