@@ -116,6 +116,27 @@ describe("use-copilot / createCopilotClient", () => {
     vi.restoreAllMocks();
   });
 
+  it("uses NEXT_PUBLIC_COPILOT_URL when set", async () => {
+    const prev = process.env.NEXT_PUBLIC_COPILOT_URL;
+    process.env.NEXT_PUBLIC_COPILOT_URL = "https://copilot.example.onrender.com/";
+    try {
+      const fetchMock = vi.fn(async () =>
+        streamResponse([sseChunk("done", {})]),
+      );
+      const client = createCopilotClient({
+        fetchImpl: fetchMock as unknown as typeof fetch,
+        getClosedTimes: () => new Set([c0.time, c1.time, c2.time]),
+      });
+      await client.analyze("hi");
+      expect(fetchMock.mock.calls[0]?.[0]).toBe(
+        "https://copilot.example.onrender.com/v1/copilot/analyze",
+      );
+    } finally {
+      if (prev === undefined) delete process.env.NEXT_PUBLIC_COPILOT_URL;
+      else process.env.NEXT_PUBLIC_COPILOT_URL = prev;
+    }
+  });
+
   it("exposes exact preset prompt strings", () => {
     expect(TRIANGLES_PROMPT).toBe(
       "Tìm tam giác cân trong cửa sổ nến đã đóng này. Return PatternShape polyline(s). Reply and summarize in Vietnamese; output all text in Vietnamese.",

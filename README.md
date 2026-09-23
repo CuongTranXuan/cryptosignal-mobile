@@ -43,7 +43,7 @@ uvicorn cryptosignal_copilot.app:app --app-dir src --reload --port 8000
 ```bash
 cd apps/web
 pnpm install
-cp .env.example .env.local   # optional; default URL is fine
+cp .env.example .env.local   # optional; leave NEXT_PUBLIC_COPILOT_URL empty for local rewrite
 pnpm dev
 ```
 
@@ -51,13 +51,16 @@ Open `http://127.0.0.1:3000` — not `preview/terminal.html`.
 
 Web alone can show the live chart. Copilot actions fail visibly until `apps/copilot` is up with a valid LLM env.
 
+**Production (Vercel):** see [`DEPLOY.md`](DEPLOY.md).
+
 ## Environment
 
 ### Web (`apps/web/.env.example`)
 
-| Variable | Example |
-|---|---|
-| `NEXT_PUBLIC_COPILOT_URL` | `http://127.0.0.1:8000` |
+| Variable | Local | Production (Vercel) |
+|---|---|---|
+| `NEXT_PUBLIC_COPILOT_URL` | Empty → same-origin `/v1/copilot` (Next rewrite) | `https://<render-service>.onrender.com` |
+| `COPILOT_UPSTREAM_URL` | `http://127.0.0.1:8000` (rewrite target) | Not used when public URL is set |
 
 ### Copilot (`apps/copilot/.env.example`)
 

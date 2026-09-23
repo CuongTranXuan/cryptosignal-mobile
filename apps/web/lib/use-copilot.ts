@@ -65,8 +65,8 @@ function resolveBaseUrl(explicit?: string): string {
   const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process
     ?.env;
   const fromEnv = env?.NEXT_PUBLIC_COPILOT_URL;
-  // Empty env var means same-origin; only fall back when unset.
-  if (fromEnv === undefined || fromEnv === null) {
+  // Unset or empty → same-origin (Next dev rewrite or local stack).
+  if (fromEnv === undefined || fromEnv === null || fromEnv.trim() === "") {
     return DEFAULT_BASE;
   }
   return fromEnv.replace(/\/$/, "");
