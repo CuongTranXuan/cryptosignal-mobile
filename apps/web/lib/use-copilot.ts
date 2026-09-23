@@ -44,6 +44,8 @@ export { AUTO_DRAW_PROMPT, HEAD_SHOULDERS_PROMPT, TRIANGLES_PROMPT } from "./cop
 /** Empty = same-origin (Next rewrite proxies to the local FastAPI copilot). */
 const DEFAULT_BASE = "";
 
+/** Render/Vercel: set NEXT_PUBLIC_COPILOT_URL to HTTPS origin only (no /v1). Paths: /v1/copilot/health, /v1/copilot/analyze. */
+
 export type CopilotClientDeps = {
   fetchImpl?: typeof fetch;
   fetchKlines?: FetchKlines;

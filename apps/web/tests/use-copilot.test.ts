@@ -116,6 +116,28 @@ describe("use-copilot / createCopilotClient", () => {
     vi.restoreAllMocks();
   });
 
+  it("pollHealth hits /v1/copilot/health on public base URL", async () => {
+    const prev = process.env.NEXT_PUBLIC_COPILOT_URL;
+    process.env.NEXT_PUBLIC_COPILOT_URL = "https://copilot.example.onrender.com";
+    try {
+      const fetchMock = vi.fn(async () =>
+        new Response(JSON.stringify({ ok: true, style: "openai", model: "m", baseHost: "x" }), {
+          status: 200,
+        }),
+      );
+      const client = createCopilotClient({
+        fetchImpl: fetchMock as unknown as typeof fetch,
+      });
+      await client.pollHealth();
+      expect(fetchMock.mock.calls[0]?.[0]).toBe(
+        "https://copilot.example.onrender.com/v1/copilot/health",
+      );
+    } finally {
+      if (prev === undefined) delete process.env.NEXT_PUBLIC_COPILOT_URL;
+      else process.env.NEXT_PUBLIC_COPILOT_URL = prev;
+    }
+  });
+
   it("uses NEXT_PUBLIC_COPILOT_URL when set", async () => {
     const prev = process.env.NEXT_PUBLIC_COPILOT_URL;
     process.env.NEXT_PUBLIC_COPILOT_URL = "https://copilot.example.onrender.com/";
