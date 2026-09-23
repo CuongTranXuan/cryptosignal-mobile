@@ -51,7 +51,7 @@ Optional tunnel: run copilot + web with `scripts/dev-stack.sh`; ngrok on port 30
 
 ### CORS (Render — copilot owner)
 
-The copilot must allow the Vercel frontend origin in `COPILOT_CORS_ORIGINS` on Render (e.g. `https://your-app.vercel.app`). Without this, browser `fetch` and SSE to Render fail with CORS errors. Chart/market data still works (Binance is called directly from the browser).
+The copilot must allow the Vercel frontend origin in Render env `CORS_ORIGINS` (preferred; legacy `COPILOT_CORS_ORIGINS` still works), e.g. `https://your-app.vercel.app`. See `apps/copilot/DEPLOY.md`. Without this, browser `fetch` and SSE to Render fail with CORS errors. Chart/market data still works (Binance is called directly from the browser).
 
 ### SSE / timeouts
 
