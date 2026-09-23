@@ -26,8 +26,17 @@ No `vercel.json` is required for the default App Router deploy.
 
 | Variable | Required on Vercel | Example | Notes |
 |---|---|---|---|
-| `NEXT_PUBLIC_COPILOT_URL` | **Yes** (prod) | `https://your-service.onrender.com` | HTTPS origin only; no path suffix. Client calls `{origin}/v1/copilot/*` including SSE `POST …/analyze`. |
+| `NEXT_PUBLIC_COPILOT_URL` | **Yes** (prod) | `https://<render-service>.onrender.com` | **Origin only** — no trailing slash, **no `/v1` suffix**. Client builds `{origin}/v1/copilot/*`. |
 | `COPILOT_UPSTREAM_URL` | No | — | Ignored when `NEXT_PUBLIC_COPILOT_URL` is set; rewrites are disabled in that case. |
+
+**Copilot HTTP (browser → Render, no Next rewrite in prod)**
+
+| Method | Path (appended to `NEXT_PUBLIC_COPILOT_URL`) |
+|---|---|
+| `GET` | `/v1/copilot/health` |
+| `POST` | `/v1/copilot/analyze` (SSE, `Accept: text/event-stream`) |
+
+Public Render hostname is TBD; use the placeholder above until the service URL is fixed.
 
 **Do not** set `LLM_*` or any provider keys on Vercel — keys stay on Render (`apps/copilot`).
 

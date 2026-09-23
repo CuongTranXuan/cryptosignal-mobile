@@ -59,7 +59,7 @@ Web alone can show the live chart. Copilot actions fail visibly until `apps/copi
 
 | Variable | Local | Production (Vercel) |
 |---|---|---|
-| `NEXT_PUBLIC_COPILOT_URL` | Empty → same-origin `/v1/copilot` (Next rewrite) | `https://<render-service>.onrender.com` |
+| `NEXT_PUBLIC_COPILOT_URL` | Empty → same-origin `/v1/copilot/*` (Next rewrite) | `https://<render-service>.onrender.com` (origin only; client adds `/v1/copilot/health` and `/v1/copilot/analyze`) |
 | `COPILOT_UPSTREAM_URL` | `http://127.0.0.1:8000` (rewrite target) | Not used when public URL is set |
 
 ### Copilot (`apps/copilot/.env.example`)
