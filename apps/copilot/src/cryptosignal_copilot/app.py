@@ -12,6 +12,7 @@ from pydantic import ValidationError
 
 from cryptosignal_copilot.agent import AgentRunner, PydanticAiRunner
 from cryptosignal_copilot.config import LlmConfigError, health_payload, load_llm_config, validate_llm_env_on_startup
+from cryptosignal_copilot.rate_limit import SlidingWindowRateLimiter, client_ip
 from cryptosignal_copilot.schema import AnalyzeRequest
 
 
@@ -19,17 +20,29 @@ def sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
+def _cors_settings() -> tuple[list[str], bool]:
+    """Allowlist from CORS_ORIGINS (preferred) or legacy COPILOT_CORS_ORIGINS.
+
+    Unset → localhost defaults for local/dev.
+    Explicit empty string → no origins (fail closed; set Vercel URL in prod).
+    "*" → allow all, credentials off.
+    """
+    raw = os.environ.get("CORS_ORIGINS")
+    if raw is None:
+        raw = os.environ.get(
+            "COPILOT_CORS_ORIGINS",
+            "http://localhost:3000,http://127.0.0.1:3000",
+        )
+    if raw.strip() == "*":
+        return ["*"], False
+    origins = [o.strip() for o in raw.split(",") if o.strip()]
+    return origins, True
+
+
 def create_app(runner: AgentRunner | None = None) -> FastAPI:
     use_runner: AgentRunner = runner if runner is not None else PydanticAiRunner()
     app = FastAPI()
-    # Same-origin via Next rewrite is preferred. Extra origins (comma-separated) or "*" for ngrok.
-    raw = os.environ.get("COPILOT_CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000")
-    if raw.strip() == "*":
-        cors_origins = ["*"]
-        cors_credentials = False
-    else:
-        cors_origins = [o.strip() for o in raw.split(",") if o.strip()]
-        cors_credentials = True
+    cors_origins, cors_credentials = _cors_settings()
     app.add_middleware(
         CORSMiddleware,
         allow_origins=cors_origins,
@@ -37,6 +50,8 @@ def create_app(runner: AgentRunner | None = None) -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    rate_limiter = SlidingWindowRateLimiter()
 
     state_lock = asyncio.Lock()
     latest_request: dict[str, AnalyzeRequest | None] = {"value": None}
@@ -54,6 +69,14 @@ def create_app(runner: AgentRunner | None = None) -> FastAPI:
 
     @app.post("/v1/copilot/analyze")
     async def analyze(request: Request):
+        ip = client_ip(dict(request.headers), request.client.host if request.client else None)
+        if not rate_limiter.allow(ip):
+            return JSONResponse(
+                {"error": "rate limit exceeded"},
+                status_code=429,
+                headers={"Retry-After": "60"},
+            )
+
         try:
             load_llm_config()
         except LlmConfigError:
@@ -107,7 +130,7 @@ def create_app(runner: AgentRunner | None = None) -> FastAPI:
                             try:
                                 kind, name, payload = await asyncio.wait_for(queue.get(), timeout=12.0)
                             except asyncio.TimeoutError:
-                                # SSE comment keepalive — keeps Next/ngrok from killing idle streams
+                                # SSE comment keepalive — keeps proxies from killing idle streams
                                 yield ": keepalive\n\n"
                                 continue
                             if kind == "end":

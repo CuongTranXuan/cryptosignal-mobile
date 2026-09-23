@@ -197,3 +197,33 @@ def test_filter_preview_shapes_drops_points_outside_closed_times():
     valid, dropped = filter_preview_shapes([on_window, off_window], {1, 2})
     assert [s["id"] for s in valid] == ["ok"]
     assert dropped == ["off"]
+
+
+@pytest.mark.asyncio
+async def test_analyze_rate_limit_429(monkeypatch):
+    _llm_env(monkeypatch)
+    monkeypatch.setenv("RATE_LIMIT_PER_MINUTE", "2")
+    app = create_app(runner=FakeRunner())
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        assert (await client.post("/v1/copilot/analyze", json=ANALYZE)).status_code == 200
+        assert (await client.post("/v1/copilot/analyze", json=ANALYZE)).status_code == 200
+        limited = await client.post("/v1/copilot/analyze", json=ANALYZE)
+    assert limited.status_code == 429
+    assert limited.json()["error"] == "rate limit exceeded"
+
+
+@pytest.mark.asyncio
+async def test_cors_origins_from_env(monkeypatch):
+    _llm_env(monkeypatch)
+    monkeypatch.setenv("CORS_ORIGINS", "https://app.example.com")
+    app = create_app(runner=FakeRunner())
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        res = await client.options(
+            "/v1/copilot/health",
+            headers={
+                "Origin": "https://app.example.com",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+    assert res.status_code == 200
+    assert res.headers.get("access-control-allow-origin") == "https://app.example.com"
