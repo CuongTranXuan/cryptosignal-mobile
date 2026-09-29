@@ -20,6 +20,7 @@ import {
   PatternShapeSchema,
   type AgentMarker,
   type Candle,
+  type Interval,
   type PatternShape,
 } from "./pattern-shape";
 import {
@@ -27,6 +28,7 @@ import {
   selectAnalysisCandles,
   timesInsideVisibleRange,
 } from "./analysis-window";
+import { filterShapesWithProjection } from "./shape-projection";
 import { useAiStore } from "./stores/ai-store";
 import { useChartStore } from "./stores/chart-store";
 import { useMarkerStore } from "./stores/marker-store";
@@ -100,19 +102,14 @@ function resolveClosedTimes(
   return new Set(closedCandlesFromChart(candles, undefined).map((c) => c.time));
 }
 
-/** Keep shapes whose every point.time is in the allowed closed candle set. */
+/** Closed-candle times plus one forward agent endpoint on the projection grid (see shape-projection). */
 export function filterShapesToClosedTimes(
   shapes: PatternShape[],
   allowedTimes: Set<number>,
+  closedCandles: Candle[],
+  interval: Interval,
 ): { valid: PatternShape[]; droppedIds: string[] } {
-  const valid: PatternShape[] = [];
-  const droppedIds: string[] = [];
-  for (const shape of shapes) {
-    const ok = shape.points.every((p) => allowedTimes.has(p.time));
-    if (ok) valid.push(shape);
-    else droppedIds.push(shape.id);
-  }
-  return { valid, droppedIds };
+  return filterShapesWithProjection(shapes, allowedTimes, closedCandles, interval);
 }
 
 /** Keep markers whose time is in the allowed closed candle set. */
@@ -225,10 +222,13 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
             droppedIds.push(id);
           }
         }
+        const closedSlice = closedCandlesFromChart(chart.candles, deps.getClosedTimes?.());
         const allowedTimes = resolveClosedTimes(chart.candles, deps.getClosedTimes?.());
         const { valid, droppedIds: outOfWindow } = filterShapesToClosedTimes(
           zodValid,
           allowedTimes,
+          closedSlice,
+          chart.interval,
         );
         droppedIds.push(...outOfWindow);
         useShapeStore.getState().setPreview(valid);

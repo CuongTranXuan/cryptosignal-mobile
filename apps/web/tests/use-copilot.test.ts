@@ -519,6 +519,30 @@ describe("use-copilot / createCopilotClient", () => {
     expect(times).toContain(c2.time);
   });
 
+  it("keeps agent trendline with one forward endpoint on the projection grid", async () => {
+    const forwardRay = {
+      ...validShape("forward-ray"),
+      kind: "trendline" as const,
+      points: [
+        { time: c1.time, price: 1 },
+        { time: c2.time + 3600, price: 2 },
+      ],
+    };
+
+    const fetchMock = vi.fn(async () =>
+      streamResponse([sseChunk("shapes", { shapes: [forwardRay] }), sseChunk("done", {})]),
+    );
+
+    const client = createCopilotClient({
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      getClosedTimes: () => new Set([c0.time, c1.time, c2.time]),
+    });
+
+    await client.analyze("project trend");
+
+    expect(useShapeStore.getState().committed().map((s) => s.id)).toEqual(["forward-ray"]);
+  });
+
   it("drops shapes with points outside closed candle times", async () => {
     const outOfWindow = {
       ...validShape("off-window"),
