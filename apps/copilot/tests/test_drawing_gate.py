@@ -1,7 +1,9 @@
 """Geometry gate: forward k caps, triangle apex+3, and in-play rejects."""
 
 from cryptosignal_copilot.drawing_gate import (
+    IMPULSE_ATR_MULT,
     DrawingWindow,
+    _wilder_atr,
     effective_project_bars,
     forward_past_apex,
     line_intersection,
@@ -573,6 +575,66 @@ def test_cap_keeps_triangle_pair_together(monkeypatch):
     assert len(valid) == 6
     assert len(dropped) == 1
     assert dropped[0].startswith("h")
+
+
+def test_right_edge_wick_extreme_rejects_mid_body(monkeypatch):
+    monkeypatch.delenv("COPILOT_PROJECT_BARS", raising=False)
+    # Last bar has no K bars to its right. It is still the low of the bars that exist.
+    rows = make_candles(wicks={20: (90.0, 120.0), 39: (80.0, 140.0)})
+    assert 39 >= N - 3
+    wick = trendline("wick", "Impulse leg", (ts(20), 90.0), (ts(39), 80.0))
+    kept, reason = review_shape(wick, make_window(rows))
+    assert reason is None, reason
+    assert kept is not None
+
+    mid = (80.0 + 140.0) / 2
+    body = trendline("body", "Impulse leg", (ts(20), 90.0), (ts(39), mid))
+    _, reason = review_shape(body, make_window(rows))
+    assert reason == "non-wick"
+
+    # Index 38's low is not the edge extreme (39 is lower), so its wick is not a swing.
+    not_extreme = trendline("inner", "Impulse leg", (ts(20), 90.0), (ts(38), 110.0))
+    _, reason = review_shape(not_extreme, make_window(rows))
+    assert reason == "not-swing"
+
+
+def test_shallow_pattern_height_is_impulse_but_compressing_touch_is_not(monkeypatch):
+    monkeypatch.delenv("COPILOT_PROJECT_BARS", raising=False)
+    shallow_rows = make_candles(
+        wicks={10: (99.0, 110.0), 18: (100.0, 111.0), 26: (98.5, 110.0), 34: (100.0, 111.5)},
+        low=100.0,
+        high=110.0,
+    )
+    atr = _wilder_atr(shallow_rows, 14)
+    assert atr is not None
+    shallow_height = 111.5 - 98.5
+    assert shallow_height < IMPULSE_ATR_MULT * atr
+    lower = trendline("lower", "Triangle lower", (ts(10), 99.0), (ts(26), 98.5))
+    _, reason = review_shape(lower, make_window(shallow_rows))
+    assert reason == "impulse"
+
+    # Deep first low, then a second low tucked under a nearby high.
+    # Neighbor lows around the second touch sit just above it so it stays a fractal.
+    tall_rows = make_candles(
+        wicks={
+            10: (50.0, 110.0),
+            18: (100.0, 160.0),
+            **{index: (158.0, 166.0) for index in (23, 24, 25, 27, 28, 29)},
+            26: (155.0, 165.0),
+            34: (150.0, 162.0),
+        }
+    )
+    atr = _wilder_atr(tall_rows, 14)
+    assert atr is not None
+    pattern_height = 162.0 - 50.0
+    consecutive = 162.0 - 155.0
+    assert pattern_height >= IMPULSE_ATR_MULT * atr
+    assert consecutive < IMPULSE_ATR_MULT * atr
+    deep = trendline("lower", "Triangle lower", (ts(10), 50.0), (ts(26), 155.0))
+    high = trendline("upper", "Triangle upper", (ts(18), 160.0), (ts(34), 162.0))
+    valid, dropped = _filter([deep, high], tall_rows)
+    assert dropped == []
+    assert {shape["id"] for shape in valid} == {"lower", "upper"}
 
 
 def test_right_edge_swing_and_nearby_bar_survive(monkeypatch):

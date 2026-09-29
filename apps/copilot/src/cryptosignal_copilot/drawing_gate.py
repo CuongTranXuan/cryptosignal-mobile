@@ -572,29 +572,38 @@ def _line_hits(points: list[Any], ctx: _GateContext, side: SwingSide) -> list[Sw
     return hits
 
 
-def _line_has_impulse(hits: list[Swing], ctx: _GateContext) -> bool:
-    """True when the rail participates in a >= 1.5 ATR swing.
+def _pattern_height(hits: list[Swing], ctx: _GateContext) -> float:
+    """High-to-low of this rail and the opposite swings inside its time span.
 
-    Later triangle touches are often smaller than 1.5 ATR versus the previous
-    opposite bar. Requiring that of every touch dropped real compressing rails.
-    One touch on the line must clear the impulse, or the window has no opposite
-    swing to measure against.
+    That is the impulse A→B / triangle height. Consecutive touch gaps are not
+    the measure.
+    """
+    if not hits:
+        return 0.0
+    start = min(hit.time for hit in hits)
+    end = max(hit.time for hit in hits)
+    prices = [hit.price for hit in hits]
+    for swing in ctx.swings:
+        if start <= swing.time <= end:
+            prices.append(swing.price)
+    return max(prices) - min(prices)
+
+
+def _line_has_impulse(hits: list[Swing], ctx: _GateContext) -> bool:
+    """1.5×ATR(14) applies to whole pattern height, not each touch pair.
+
+    A shallow second touch on a compressing triangle stays when the structure
+    from the deepest low to the highest high is still >= 1.5×ATR. A same-side
+    rail with no opposite swing in span is not an A→B impulse by itself.
     """
     if not hits or ctx.atr is None or ctx.atr <= 0:
         return True
-    opposite_exists = any(any(other.side != hit.side for other in ctx.swings) for hit in hits)
-    if not opposite_exists:
+    start = min(hit.time for hit in hits)
+    end = max(hit.time for hit in hits)
+    has_opposite = any(swing.side != hits[0].side and start <= swing.time <= end for swing in ctx.swings)
+    if not has_opposite:
         return True
-    need = IMPULSE_ATR_MULT * ctx.atr
-    for hit in hits:
-        best = 0.0
-        for other in ctx.swings:
-            if other.side == hit.side:
-                continue
-            best = max(best, abs(hit.price - other.price))
-        if best >= need:
-            return True
-    return False
+    return _pattern_height(hits, ctx) + 1e-9 >= IMPULSE_ATR_MULT * ctx.atr
 
 
 def _segment_near_vertical(points: list[Any], ctx: _GateContext) -> bool:
@@ -654,10 +663,12 @@ def _fractal_swings(candles: list[CandleLike], interval: IntervalName) -> list[S
 
 
 def _provisional_edge_swings(candles: list[CandleLike], radius: int) -> list[Swing]:
-    """Right-edge extreme that does not yet have K confirmed bars to its right.
+    """Right-edge wick extreme when K bars do not yet exist on the open side.
 
-    Structure still in play often ends on that unfinished pivot. Only one high
-    and one low are added, and only when they beat the K bars on their left.
+    Full fractal confirmation is skipped only on the unfinished side. The point
+    must still be the high or the low of the bars that do exist (this candle's
+    wick versus the other edge bars and the left neighborhood). A mid-body
+    price never becomes a swing; `_anchor_swing` rejects it as non-wick.
     """
     count = len(candles)
     if count < radius + 1:
