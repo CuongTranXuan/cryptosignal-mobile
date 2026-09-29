@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { PatternShape } from "../lib/pattern-shape";
 import {
   filterShapesWithProjection,
+  intervalBarSeconds,
   isOnProjectionGrid,
   maxProjectedTime,
   shapePointTimesAllowed,
@@ -123,6 +124,33 @@ describe("shape-projection", () => {
     ).toBe(false);
   });
 
+  it("intervalBarSeconds matches server interval table", () => {
+    expect(intervalBarSeconds("1m")).toBe(60);
+    expect(intervalBarSeconds("15m")).toBe(900);
+    expect(intervalBarSeconds("1h")).toBe(3600);
+    expect(intervalBarSeconds("4h")).toBe(14400);
+    expect(intervalBarSeconds("1d")).toBe(86400);
+  });
+
+  it("filterShapesWithProjection uses interval bar length when candle gaps differ from median", () => {
+    const irregularLastClosed = 10_000;
+    const irregularAllowed = new Set([0, 7200, irregularLastClosed]);
+    const irregularCandles = [candle(0), candle(7200), candle(irregularLastClosed)];
+    const forwardOnGrid = irregularLastClosed + intervalBarSeconds("1h");
+    const ray = baseShape({
+      id: "ray-irregular",
+      points: [{ time: 7200, price: 1 }, { time: forwardOnGrid, price: 2 }],
+    });
+    const { valid, droppedIds } = filterShapesWithProjection(
+      [ray],
+      irregularAllowed,
+      irregularCandles,
+      "1h",
+    );
+    expect(valid.map((s) => s.id)).toEqual(["ray-irregular"]);
+    expect(droppedIds).toEqual([]);
+  });
+
   it("filterShapesWithProjection keeps in-history and valid rays", () => {
     const hist = baseShape({ id: "hist", points: [{ time: 1000, price: 1 }, { time: 4600, price: 2 }] });
     const ray = baseShape({
@@ -143,6 +171,6 @@ describe("shape-projection", () => {
   it("extrapolates x for times after the last candle", () => {
     const candles = [candle(0), candle(3600), candle(7200)];
     const raw = (t: number) => (t <= 7200 ? t / 10 : null);
-    expect(timeToCoordinateWithProjection(10800, raw, candles)).toBe(720 + 360);
+    expect(timeToCoordinateWithProjection(10800, raw, candles, "1h")).toBe(720 + 360);
   });
 });

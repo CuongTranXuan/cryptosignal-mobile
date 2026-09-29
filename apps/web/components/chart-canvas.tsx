@@ -71,6 +71,8 @@ export function ChartCanvas({ coordApiRef }: ChartCanvasProps) {
   const interval = useChartStore((s) => s.interval);
   const candlesRef = useRef(candles);
   candlesRef.current = candles;
+  const intervalRef = useRef(interval);
+  intervalRef.current = interval;
   const tickerPercent = useChartStore((s) => s.tickerPercent);
   const connection = useChartStore((s) => s.connection);
   const symbol = useChartStore((s) => s.symbol);
@@ -143,7 +145,12 @@ export function ChartCanvas({ coordApiRef }: ChartCanvasProps) {
       };
       coordApiRef.current = {
         timeToCoordinate: (time) =>
-          timeToCoordinateWithProjection(time, rawTimeToCoordinate, candlesRef.current),
+          timeToCoordinateWithProjection(
+            time,
+            rawTimeToCoordinate,
+            candlesRef.current,
+            intervalRef.current,
+          ),
         priceToCoordinate: (price) => {
           const v = s.priceToCoordinate(price);
           return v == null ? null : Number(v);

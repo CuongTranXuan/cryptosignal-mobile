@@ -1,7 +1,26 @@
-import { estimateBarSeconds } from "./analysis-window";
 import type { Candle, Interval, PatternShape } from "./pattern-shape";
 
 export const HARD_MAX_PROJECTION_BARS = 48;
+
+/** Fixed bar length for the chart interval (matches server drawing_gate.bar_seconds). */
+export function intervalBarSeconds(interval: Interval): number {
+  switch (interval) {
+    case "1m":
+      return 60;
+    case "15m":
+      return 900;
+    case "1h":
+      return 3600;
+    case "4h":
+      return 14400;
+    case "1d":
+      return 86400;
+    default: {
+      const unreachable: never = interval;
+      return unreachable;
+    }
+  }
+}
 
 export function maxProjectionBarsForInterval(interval: Interval): number {
   switch (interval) {
@@ -93,14 +112,14 @@ export function shapePointTimesAllowed(
 export function filterShapesWithProjection(
   shapes: PatternShape[],
   allowedTimes: Set<number>,
-  closedCandles: Candle[],
+  _closedCandles: Candle[],
   interval: Interval,
 ): { valid: PatternShape[]; droppedIds: string[] } {
   const lastClosed = lastClosedFromAllowedTimes(allowedTimes);
   if (lastClosed == null) {
     return { valid: [], droppedIds: shapes.map((s) => s.id) };
   }
-  const barSec = estimateBarSeconds(closedCandles);
+  const barSec = intervalBarSeconds(interval);
   const valid: PatternShape[] = [];
   const droppedIds: string[] = [];
   for (const shape of shapes) {
@@ -123,6 +142,7 @@ export function timeToCoordinateWithProjection(
   time: number,
   rawTimeToCoordinate: TimeToCoordFn,
   candles: Candle[],
+  interval: Interval,
 ): number | null {
   const direct = rawTimeToCoordinate(time);
   if (direct != null) return direct;
@@ -135,13 +155,12 @@ export function timeToCoordinateWithProjection(
   const lastX = rawTimeToCoordinate(lastTime);
   if (lastX == null) return null;
 
-  const prevTime =
-    lastIdx > 0 ? candles[lastIdx - 1]!.time : lastTime - estimateBarSeconds(candles);
+  const barSec = intervalBarSeconds(interval);
+  if (barSec <= 0) return null;
+
+  const prevTime = lastIdx > 0 ? candles[lastIdx - 1]!.time : lastTime - barSec;
   const prevX = rawTimeToCoordinate(prevTime);
   if (prevX == null) return null;
-
-  const barSec = prevTime < lastTime ? lastTime - prevTime : estimateBarSeconds(candles);
-  if (barSec <= 0) return null;
 
   const barWidthPx = lastX - prevX;
   if (barWidthPx === 0) return null;
