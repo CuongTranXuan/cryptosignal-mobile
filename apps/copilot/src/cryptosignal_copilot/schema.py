@@ -173,6 +173,9 @@ def _schema_reason(exc: Exception) -> str:
         loc = [str(part) for part in err.get("loc", ()) if not isinstance(part, int)]
         field = loc[0] if loc else ""
         msg = str(err.get("msg", ""))
+        if "needs 2 points" in msg.lower():
+            logger.info("schema reject points count msg=%s", msg[:240])
+            return "schema:points:count"
         if not field and "point" in msg.lower():
             field = "points"
         if not field:
@@ -181,6 +184,8 @@ def _schema_reason(exc: Exception) -> str:
         return f"schema:{field}"
     text = str(exc)
     logger.info("schema reject msg=%s", text[:240])
+    if "needs 2 points" in text.lower():
+        return "schema:points:count"
     if "point" in text.lower():
         return "schema:points"
     return "schema:shape"
@@ -247,6 +252,58 @@ def _coerce_points(raw: dict[str, Any]) -> list[dict[str, Any]]:
     return fixed
 
 
+def _collapse_trendline_points(
+    points: list[dict[str, Any]],
+    closed_times: set[int] | None,
+) -> list[dict[str, Any]]:
+    """Reduce a trendline to the two defining swings, plus a reprojected forward end.
+
+    Closed-candle points are the wick anchors. The pair with the largest time
+    span defines the rail; a middle touch is confirmation only and is dropped.
+    A point after lastClosed keeps its time but takes its price from that slope,
+    so a later touch cannot tilt the rail.
+    """
+    if len(points) <= 2 or not closed_times:
+        return points
+    last_closed = max(closed_times)
+    closed = sorted((point for point in points if int(point["time"]) in closed_times), key=lambda point: int(point["time"]))
+    forward = [point for point in points if int(point["time"]) > last_closed]
+    if len(closed) < 2:
+        logger.info(
+            "trendline collapse skipped raw=%s closed_anchors=%s",
+            len(points),
+            len(closed),
+        )
+        return closed
+    start = closed[0]
+    end = closed[-1]
+    if int(start["time"]) == int(end["time"]):
+        logger.info("trendline collapse degenerate raw=%s", len(points))
+        return [start]
+    if not forward:
+        logger.info(
+            "trendline collapse raw=%s kept swings %s %s",
+            len(points),
+            start["time"],
+            end["time"],
+        )
+        return [start, end]
+    future = max(forward, key=lambda point: int(point["time"]))
+    span = int(end["time"]) - int(start["time"])
+    price = float(start["price"]) + (float(end["price"]) - float(start["price"])) * (
+        int(future["time"]) - int(start["time"])
+    ) / span
+    logger.info(
+        "trendline collapse raw=%s swings=%s,%s forward=%s reprojected_price=%s",
+        len(points),
+        start["time"],
+        end["time"],
+        future["time"],
+        price,
+    )
+    return [start, {"time": int(future["time"]), "price": price}]
+
+
 def _coerce_kind(raw_kind: Any, point_count: int) -> str | None:
     if not isinstance(raw_kind, str) or not raw_kind.strip():
         return None
@@ -279,7 +336,13 @@ def _coerce_confidence(value: Any) -> float:
     return number
 
 
-def coerce_agent_shape(raw: dict[str, Any], *, symbol: str, interval: str) -> dict[str, Any]:
+def coerce_agent_shape(
+    raw: dict[str, Any],
+    *,
+    symbol: str,
+    interval: str,
+    closed_times: set[int] | None = None,
+) -> dict[str, Any]:
     """Map common LLM sloppy overlays into PatternShape fields.
 
     Unknown keys are dropped so `extra=forbid` does not reject an otherwise
@@ -301,6 +364,9 @@ def coerce_agent_shape(raw: dict[str, Any], *, symbol: str, interval: str) -> di
     kind = _coerce_kind(data.get("kind"), len(points))
     if kind == "polyline" and len(points) == 2:
         kind = "trendline"
+    if kind == "trendline" and len(points) > 2:
+        logger.info("trendline raw point count=%s id=%s", len(points), data.get("id"))
+        points = _collapse_trendline_points(points, closed_times)
     if kind == "zone" and len(points) >= 2 and (data.get("priceLow") is None or data.get("priceHigh") is None):
         prices = [point["price"] for point in points]
         data["priceLow"] = min(prices)
@@ -402,6 +468,11 @@ def filter_preview_details(
     """
     staged: list[dict[str, Any]] = []
     dropped: list[Drop] = []
+    closed_times: set[int] | None = None
+    if window is not None and window.candles:
+        closed_times = {int(candle.time) for candle in window.candles}
+    elif allowed_times:
+        closed_times = set(allowed_times)
     for raw in raw_shapes:
         if hasattr(raw, "model_dump"):
             data = raw.model_dump()
@@ -415,6 +486,7 @@ def filter_preview_details(
             data,
             symbol=symbol or str(data.get("symbol") or ""),
             interval=interval or str(data.get("interval") or ""),
+            closed_times=closed_times,
         )
         data["status"] = "preview"
         try:

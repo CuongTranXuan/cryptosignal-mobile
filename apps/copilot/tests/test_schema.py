@@ -135,7 +135,60 @@ def test_schema_reason_names_the_field():
         symbol="BTCUSDT",
         interval="15m",
     )
-    assert dropped == [("one-point", "schema:points"), ("bad-kind", "schema:kind")]
+    assert dropped == [("one-point", "schema:points:count"), ("bad-kind", "schema:kind")]
+
+
+def test_trendline_third_touch_collapses_and_reprojects_forward():
+    """3 points (two swings + tilted future) become the swing line extended, not earliest+latest raw prices."""
+    from cryptosignal_copilot.schema import PatternShape, coerce_agent_shape
+
+    t1, t2, t_future = 1_000, 2_000, 4_000
+    shape = coerce_agent_shape(
+        {
+            "id": "btc-15m-tri-lower",
+            "kind": "trendline",
+            "name": "Ascending triangle lower",
+            "points": [
+                {"time": t2, "price": 110},
+                {"time": 1500, "price": 50},
+                {"time": t1, "price": 100},
+                {"time": t_future, "price": 999},
+            ],
+        },
+        symbol="BTCUSDT",
+        interval="15m",
+        closed_times={t1, 1500, t2},
+    )
+    assert shape["kind"] == "trendline"
+    assert shape["points"] == [
+        {"time": t1, "price": 100.0},
+        {"time": t_future, "price": 130.0},
+    ]
+    PatternShape.model_validate({**shape, "symbol": "BTCUSDT", "interval": "15m"})
+
+
+def test_trendline_without_forward_keeps_two_defining_swings():
+    from cryptosignal_copilot.schema import coerce_agent_shape
+
+    shape = coerce_agent_shape(
+        {
+            "id": "rail",
+            "kind": "trendline",
+            "name": "Triangle lower",
+            "points": [
+                {"time": 1000, "price": 100},
+                {"time": 1500, "price": 999},
+                {"time": 2000, "price": 110},
+            ],
+        },
+        symbol="BTCUSDT",
+        interval="15m",
+        closed_times={1000, 1500, 2000},
+    )
+    assert shape["points"] == [
+        {"time": 1000, "price": 100.0},
+        {"time": 2000, "price": 110.0},
+    ]
 
 
 def test_smoke_ascending_triangle_rails_are_not_schema_dropped():
@@ -170,7 +223,9 @@ def test_smoke_ascending_triangle_rails_are_not_schema_dropped():
             "confidence": "0.72",
             "points": [
                 {"time": float(ts(10)), "price": 100},
-                {"t": ts(forward) + 0.2, "p": on_line(forward, 10, 100.0, 30, 102.0)},
+                {"time": ts(20), "price": 50},
+                {"time": ts(30), "price": 102},
+                {"t": ts(forward) + 0.2, "p": 999},
             ],
         },
         {
@@ -181,7 +236,9 @@ def test_smoke_ascending_triangle_rails_are_not_schema_dropped():
             "source": "model",
             "points": [
                 [ts(10), 140],
-                {"timestamp": (ts(forward)) * 1000, "value": on_line(forward, 10, 140.0, 30, 138.0)},
+                {"time": ts(22), "price": 1},
+                {"time": ts(30), "price": 138},
+                {"timestamp": (ts(forward)) * 1000, "value": 1},
             ],
         },
     ]
@@ -201,7 +258,11 @@ def test_smoke_ascending_triangle_rails_are_not_schema_dropped():
         "tri-asc-lower-btcusdt-15m",
         "tri-asc-upper-btcusdt-15m",
     }
-    for shape in valid:
-        assert shape["kind"] == "trendline"
-        assert len(shape["points"]) == 2
-        assert max(point["time"] for point in shape["points"]) == ts(forward)
+    by_id = {shape["id"]: shape for shape in valid}
+    lower_pts = by_id["tri-asc-lower-btcusdt-15m"]["points"]
+    upper_pts = by_id["tri-asc-upper-btcusdt-15m"]["points"]
+    assert [point["time"] for point in lower_pts] == [ts(10), ts(forward)]
+    assert lower_pts[0]["price"] == 100
+    assert lower_pts[1]["price"] == on_line(forward, 10, 100.0, 30, 102.0)
+    assert [point["time"] for point in upper_pts] == [ts(10), ts(forward)]
+    assert upper_pts[1]["price"] == on_line(forward, 10, 140.0, 30, 138.0)
