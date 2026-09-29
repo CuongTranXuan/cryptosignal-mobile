@@ -13,6 +13,7 @@ FastAPI SSE agent. No database. Browser must call this host cross-origin when th
 | `LLM_TIMEOUT_S` | recommended | default `60` in code; use `180`+ for long analyzes |
 | `CORS_ORIGINS` | **yes in prod** | comma-separated frontend origins, e.g. `https://your-app.vercel.app` |
 | `RATE_LIMIT_PER_MINUTE` | optional | default `10` per client IP on `POST /v1/copilot/analyze` |
+| `COPILOT_PROJECT_BARS` | optional | overrides the forward-projection k table; hard max `48`. Unset uses 1m=30, 15m/1h=24, 4h=18, 1d=12 |
 
 Legacy alias: `COPILOT_CORS_ORIGINS` still works if `CORS_ORIGINS` is unset. Unset both → localhost only. Explicit empty `CORS_ORIGINS=` → no browser origins (fail closed).
 
@@ -30,6 +31,16 @@ Legacy alias: `COPILOT_CORS_ORIGINS` still works if `CORS_ORIGINS` is unset. Uns
 - Auto-deploy: branch `feat/lwc-v1-volume-markers` (or `main` once merged)
 
 Start command is in the Dockerfile (`uvicorn` on `$PORT`). Do not override unless you keep `--host 0.0.0.0 --port $PORT`.
+
+## Actionable drawings
+
+**BLUF:** Analyze keeps only in-play `trendline`, `polyline`, and `zone` shapes, and may emit one forward endpoint past the last closed candle so the overlay can paint it.
+
+* **Grid:** `lastClosedCandleTime + k×barSeconds`, one forward endpoint per agent shape. k comes from the interval table above unless `COPILOT_PROJECT_BARS` is set (still capped at 48).
+* **Triangle apex:** upper/lower trendline pairs are intersected in time/price. A forward endpoint later than apex + 3 bars is dropped. No `apexTime` field is added.
+* **Also dropped (shape skipped, analyze continues):** confidence below 0.55, last touch in the oldest 35% of the window, trendline span under 8 bars (triangle names under 15, polylines under 12), single-touch diagonals, near-vertical rays, anchors that are not fractal wick highs/lows.
+* **Not claimed:** entries, stops, or that a level will hold. Fib has no kind — horizontal `Fib 0.382` / `Fib 0.5` / `Fib 0.618` trendlines plus a `Fib pocket 0.5–0.618` zone.
+* **Follow-up:** wick-snap tolerance and the near-vertical slope cutoff are code constants (`WICK_ATR_FRACTION`, `NEAR_VERTICAL_SLOPE`), not env-tunable yet. A channel return with only one touch is still rejected by the single-touch rule.
 
 ## SSE / free-tier caveats
 

@@ -1,6 +1,9 @@
+from dataclasses import replace
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+
+from cryptosignal_copilot.drawing_gate import DrawingWindow, apply_preview_gate
 
 INTERVALS = ("1m", "15m", "1h", "4h", "1d")
 Interval = Literal["1m", "15m", "1h", "4h", "1d"]
@@ -207,9 +210,16 @@ def filter_preview_shapes(
     *,
     symbol: str | None = None,
     interval: str | None = None,
+    window: DrawingWindow | None = None,
 ) -> tuple[list[dict[str, Any]], list[str]]:
-    """Force preview status, keep valid shapes on closed candle times, return dropped ids."""
-    valid: list[dict[str, Any]] = []
+    """Force preview status and return dropped ids.
+
+    Without `window`, every point must sit on `allowed_times` when that set is given.
+    With `window`, one forward agent endpoint may extend past the last closed candle
+    inside the interval k cap. Triangle rails are dropped when that endpoint is later
+    than the upper/lower intersection plus 3 bars. Invalid shapes are skipped.
+    """
+    staged: list[dict[str, Any]] = []
     dropped_ids: list[str] = []
     for raw in raw_shapes:
         if hasattr(raw, "model_dump"):
@@ -227,12 +237,18 @@ def filter_preview_shapes(
         except (ValidationError, ValueError):
             dropped_ids.append(str(data.get("id", "?")))
             continue
-        if allowed_times is not None:
-            if any(p.time not in allowed_times for p in validated.points):
+        dumped = _dump_omit_unset_agent_id(validated)
+        if window is None and allowed_times is not None:
+            if any(point.time not in allowed_times for point in validated.points):
                 dropped_ids.append(validated.id)
                 continue
-        valid.append(_dump_omit_unset_agent_id(validated))
-    return valid, dropped_ids
+        staged.append(dumped)
+    if window is None:
+        return staged, dropped_ids
+    if allowed_times is not None and window.allowed_times is None:
+        window = replace(window, allowed_times=set(allowed_times))
+    gated, gate_dropped = apply_preview_gate(staged, window)
+    return gated, dropped_ids + gate_dropped
 
 
 def filter_agent_markers(

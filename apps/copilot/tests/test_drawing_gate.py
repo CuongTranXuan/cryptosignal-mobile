@@ -1,0 +1,436 @@
+"""Geometry gate: forward k caps, triangle apex+3, and in-play rejects."""
+
+from cryptosignal_copilot.drawing_gate import (
+    DrawingWindow,
+    effective_project_bars,
+    forward_past_apex,
+    line_intersection,
+    review_shape,
+)
+from cryptosignal_copilot.schema import Candle, filter_preview_shapes
+
+T0 = 1_700_000_000
+BAR = 3600
+N = 40
+
+
+def ts(index: int) -> int:
+    return T0 + index * BAR
+
+
+def make_candles(
+    n: int = N,
+    wicks: dict[int, tuple[float, float]] | None = None,
+    *,
+    low: float = 110.0,
+    high: float = 120.0,
+) -> list[Candle]:
+    overrides = wicks or {}
+    rows: list[Candle] = []
+    for index in range(n):
+        lo, hi = overrides.get(index, (low, high))
+        mid = (lo + hi) / 2
+        rows.append(Candle(time=ts(index), open=mid, high=hi, low=lo, close=mid, volume=1.0))
+    return rows
+
+
+def make_window(rows: list[Candle], *, start: int | None = None) -> DrawingWindow:
+    return DrawingWindow(
+        candles=rows,
+        interval="1h",
+        window_start=start,
+        allowed_times={row.time for row in rows},
+    )
+
+
+def trendline(
+    shape_id: str,
+    name: str,
+    p1: tuple[int, float],
+    p2: tuple[int, float],
+    *,
+    confidence: float = 0.6,
+    source: str = "agent",
+) -> dict:
+    return {
+        "id": shape_id,
+        "symbol": "BTCUSDT",
+        "interval": "1h",
+        "kind": "trendline",
+        "name": name,
+        "status": "preview",
+        "source": source,
+        "confidence": confidence,
+        "points": [
+            {"time": p1[0], "price": p1[1]},
+            {"time": p2[0], "price": p2[1]},
+        ],
+        "priceLow": None,
+        "priceHigh": None,
+    }
+
+
+def on_line(index: int, i1: int, p1: float, i2: int, p2: float) -> float:
+    return p1 + (p2 - p1) * (index - i1) / (i2 - i1)
+
+
+def _filter(shapes: list[dict], rows: list[Candle], *, start: int | None = None):
+    return filter_preview_shapes(
+        shapes,
+        {row.time for row in rows},
+        symbol="BTCUSDT",
+        interval="1h",
+        window=make_window(rows, start=start),
+    )
+
+
+def test_project_bars_table(monkeypatch):
+    monkeypatch.delenv("COPILOT_PROJECT_BARS", raising=False)
+    assert effective_project_bars("1m") == 30
+    assert effective_project_bars("15m") == 24
+    assert effective_project_bars("1h") == 24
+    assert effective_project_bars("4h") == 18
+    assert effective_project_bars("1d") == 12
+
+
+def test_project_bars_override_and_hard_max(monkeypatch):
+    monkeypatch.setenv("COPILOT_PROJECT_BARS", "10")
+    assert effective_project_bars("1m") == 10
+    monkeypatch.setenv("COPILOT_PROJECT_BARS", "100")
+    assert effective_project_bars("1d") == 48
+    monkeypatch.setenv("COPILOT_PROJECT_BARS", "nope")
+    assert effective_project_bars("1h") == 24
+
+
+def test_forward_past_apex_boundary():
+    apex = 1_000_000.0
+    assert forward_past_apex(apex + 3 * BAR, apex, BAR) is False
+    assert forward_past_apex(apex + 4 * BAR, apex, BAR) is True
+
+
+def test_line_intersection_apex_and_parallel():
+    apex = line_intersection((ts(10), 80.0), (ts(25), 100.0), (ts(12), 160.0), (ts(27), 140.0))
+    assert apex is not None
+    assert abs(apex[0] - ts(41)) < 1e-6
+    assert line_intersection((0.0, 0.0), (10.0, 1.0), (0.0, 5.0), (10.0, 6.0)) is None
+
+
+def test_future_endpoint_within_k_kept_and_beyond_k_rejected(monkeypatch):
+    monkeypatch.delenv("COPILOT_PROJECT_BARS", raising=False)
+    rows = make_candles(wicks={20: (90.0, 120.0), 32: (96.0, 120.0)})
+    window = make_window(rows)
+
+    def ray(index: int, shape_id: str) -> dict:
+        return trendline(
+            shape_id,
+            "Impulse leg",
+            (ts(20), 90.0),
+            (ts(index), on_line(index, 20, 90.0, 32, 96.0)),
+        )
+
+    kept, reason = review_shape(ray(39 + 24, "in-k"), window)
+    assert reason is None, reason
+    assert kept is not None
+
+    kept, reason = review_shape(ray(39 + 25, "past-k"), window)
+    assert kept is None
+    assert reason == "beyond-k"
+
+    valid, dropped = _filter([ray(39 + 24, "in-k"), ray(39 + 25, "past-k")], rows)
+    assert [shape["id"] for shape in valid] == ["in-k"]
+    assert dropped == ["past-k"]
+
+
+def test_k_cap_binds_when_apex_is_farther(monkeypatch):
+    monkeypatch.delenv("COPILOT_PROJECT_BARS", raising=False)
+    rows = make_candles(
+        wicks={
+            10: (100.0, 140.0),
+            30: (102.0, 138.0),
+        }
+    )
+    forward = 39 + 25
+    lower = trendline(
+        "far-lower",
+        "Triangle lower",
+        (ts(10), 100.0),
+        (ts(forward), on_line(forward, 10, 100.0, 30, 102.0)),
+    )
+    upper = trendline(
+        "far-upper",
+        "Triangle upper",
+        (ts(10), 140.0),
+        (ts(forward), on_line(forward, 10, 140.0, 30, 138.0)),
+    )
+    window = make_window(rows)
+    _, lower_reason = review_shape(lower, window)
+    _, upper_reason = review_shape(upper, window)
+    assert lower_reason == "beyond-k"
+    assert upper_reason == "beyond-k"
+    apex = line_intersection(
+        (ts(10), 100.0),
+        (ts(30), 102.0),
+        (ts(10), 140.0),
+        (ts(30), 138.0),
+    )
+    assert apex is not None
+    assert ts(forward) < apex[0] + 3 * BAR
+
+
+def test_triangle_apex_plus_3_allowed_plus_4_rejected(monkeypatch):
+    monkeypatch.delenv("COPILOT_PROJECT_BARS", raising=False)
+    rows = make_candles(
+        wicks={
+            10: (80.0, 120.0),
+            12: (110.0, 160.0),
+            25: (100.0, 120.0),
+            27: (110.0, 140.0),
+        }
+    )
+
+    def pair(forward_index: int, suffix: str) -> list[dict]:
+        return [
+            trendline(
+                f"lower-{suffix}",
+                "Triangle lower",
+                (ts(10), 80.0),
+                (ts(forward_index), on_line(forward_index, 10, 80.0, 25, 100.0)),
+            ),
+            trendline(
+                f"upper-{suffix}",
+                "Triangle upper",
+                (ts(12), 160.0),
+                (ts(forward_index), on_line(forward_index, 12, 160.0, 27, 140.0)),
+            ),
+        ]
+
+    apex = line_intersection((ts(10), 80.0), (ts(25), 100.0), (ts(12), 160.0), (ts(27), 140.0))
+    assert apex is not None
+    assert forward_past_apex(ts(44), apex[0], BAR) is False
+    assert forward_past_apex(ts(45), apex[0], BAR) is True
+    assert (ts(45) - ts(39)) / BAR <= 24
+
+    window = make_window(rows)
+    for shape in pair(44, "ok"):
+        kept, reason = review_shape(shape, window)
+        assert reason is None, reason
+        assert kept is not None
+
+    valid, dropped = _filter(pair(44, "ok"), rows)
+    assert dropped == []
+    assert {shape["id"] for shape in valid} == {"lower-ok", "upper-ok"}
+
+    valid, dropped = _filter(pair(45, "late"), rows)
+    assert valid == []
+    assert set(dropped) == {"lower-late", "upper-late"}
+
+
+def test_parallel_channel_is_not_apex_rejected(monkeypatch):
+    monkeypatch.delenv("COPILOT_PROJECT_BARS", raising=False)
+    rows = make_candles(
+        wicks={
+            20: (100.0, 130.0),
+            32: (106.0, 136.0),
+        }
+    )
+    forward = 44
+    shapes = [
+        trendline(
+            "base",
+            "Channel lower",
+            (ts(20), 100.0),
+            (ts(forward), on_line(forward, 20, 100.0, 32, 106.0)),
+        ),
+        trendline(
+            "return",
+            "Channel upper",
+            (ts(20), 130.0),
+            (ts(forward), on_line(forward, 20, 130.0, 32, 136.0)),
+        ),
+    ]
+    valid, dropped = _filter(shapes, rows)
+    assert dropped == []
+    assert {shape["id"] for shape in valid} == {"base", "return"}
+
+
+def test_ancient_short_span_confidence_and_before_window(monkeypatch):
+    monkeypatch.delenv("COPILOT_PROJECT_BARS", raising=False)
+    ancient_rows = make_candles(wicks={4: (90.0, 120.0), 12: (96.0, 120.0)})
+    ancient = trendline("old", "Swing base", (ts(4), 90.0), (ts(12), 96.0))
+    _, reason = review_shape(ancient, make_window(ancient_rows))
+    assert reason == "ancient"
+
+    short_rows = make_candles(wicks={10: (90.0, 120.0), 16: (94.0, 120.0)})
+    short = trendline("short", "Swing base", (ts(10), 90.0), (ts(16), 94.0))
+    _, reason = review_shape(short, make_window(short_rows))
+    assert reason == "short-span"
+
+    flat = make_candles()
+    low_conf = trendline("low", "Fib 0.5", (ts(20), 115.0), (ts(32), 115.0), confidence=0.5)
+    _, reason = review_shape(low_conf, make_window(flat))
+    assert reason == "confidence"
+
+    rows = make_candles(wicks={20: (90.0, 120.0), 32: (96.0, 120.0)})
+    early = trendline(
+        "early",
+        "Impulse leg",
+        (ts(20), 90.0),
+        (ts(32), 96.0),
+    )
+    _, reason = review_shape(early, make_window(rows, start=ts(30)))
+    assert reason == "before-window"
+
+
+def test_single_touch_diagonal_rejected(monkeypatch):
+    monkeypatch.delenv("COPILOT_PROJECT_BARS", raising=False)
+    rows = make_candles(wicks={20: (90.0, 120.0)})
+    shape = trendline(
+        "one",
+        "Impulse leg",
+        (ts(20), 90.0),
+        (ts(44), 150.0),
+    )
+    _, reason = review_shape(shape, make_window(rows))
+    assert reason == "single-touch"
+
+
+def test_near_vertical_rejected(monkeypatch):
+    monkeypatch.delenv("COPILOT_PROJECT_BARS", raising=False)
+    rows = make_candles(wicks={24: (100.0, 130.0), 32: (110.0, 400.0)})
+    steep = trendline("steep", "Spike", (ts(24), 130.0), (ts(32), 400.0))
+    _, reason = review_shape(steep, make_window(rows))
+    assert reason == "near-vertical"
+
+
+def test_third_touch_clamps_confidence(monkeypatch):
+    monkeypatch.delenv("COPILOT_PROJECT_BARS", raising=False)
+    rows = make_candles(wicks={20: (90.0, 120.0), 32: (96.0, 120.0)})
+    shape = trendline(
+        "two",
+        "Impulse leg",
+        (ts(20), 90.0),
+        (ts(32), 96.0),
+        confidence=0.9,
+    )
+    kept, reason = review_shape(shape, make_window(rows))
+    assert reason is None, reason
+    assert kept is not None
+    assert kept["confidence"] == 0.7
+
+
+def test_fib_level_must_be_horizontal_and_zone_pocket_kept(monkeypatch):
+    monkeypatch.delenv("COPILOT_PROJECT_BARS", raising=False)
+    rows = make_candles()
+    level = trendline("lvl", "Fib 0.618", (ts(20), 115.0), (ts(32), 115.0))
+    sloped = trendline("slope", "Fib 0.618", (ts(20), 100.0), (ts(32), 130.0))
+    zone = {
+        "id": "pocket",
+        "symbol": "BTCUSDT",
+        "interval": "1h",
+        "kind": "zone",
+        "name": "Fib pocket 0.5–0.618",
+        "status": "preview",
+        "source": "agent",
+        "confidence": 0.66,
+        "points": [
+            {"time": ts(20), "price": 100.0},
+            {"time": ts(32), "price": 110.0},
+        ],
+        "priceLow": 100.0,
+        "priceHigh": 110.0,
+    }
+    valid, dropped = _filter([level, sloped, zone], rows)
+    assert [shape["id"] for shape in valid] == ["lvl", "pocket"]
+    assert dropped == ["slope"]
+
+
+def test_cap_six_shapes(monkeypatch):
+    monkeypatch.delenv("COPILOT_PROJECT_BARS", raising=False)
+    rows = make_candles()
+    shapes = [
+        trendline(f"h{index}", f"Level {index}", (ts(20), 100.0 + index), (ts(32), 100.0 + index))
+        for index in range(7)
+    ]
+    valid, dropped = _filter(shapes, rows)
+    assert [shape["id"] for shape in valid] == [f"h{index}" for index in range(6)]
+    assert dropped == ["h6"]
+
+
+def test_off_grid_and_human_future_rejected(monkeypatch):
+    monkeypatch.delenv("COPILOT_PROJECT_BARS", raising=False)
+    rows = make_candles(wicks={20: (90.0, 120.0), 32: (96.0, 120.0)})
+    window = make_window(rows)
+    off_grid = trendline(
+        "grid",
+        "Impulse leg",
+        (ts(20), 90.0),
+        (ts(39) + BAR + 30, on_line(40, 20, 90.0, 32, 96.0)),
+    )
+    _, reason = review_shape(off_grid, window)
+    assert reason == "off-grid"
+
+    human = trendline(
+        "human",
+        "Impulse leg",
+        (ts(20), 90.0),
+        (ts(39 + 2), on_line(41, 20, 90.0, 32, 96.0)),
+        source="human",
+    )
+    _, reason = review_shape(human, window)
+    assert reason == "human-future"
+
+
+def test_short_polyline_rejected(monkeypatch):
+    monkeypatch.delenv("COPILOT_PROJECT_BARS", raising=False)
+    rows = make_candles(wicks={20: (90.0, 120.0), 26: (94.0, 120.0), 31: (92.0, 120.0)})
+    shape = {
+        "id": "poly",
+        "symbol": "BTCUSDT",
+        "interval": "1h",
+        "kind": "polyline",
+        "name": "Head and shoulders",
+        "status": "preview",
+        "source": "agent",
+        "confidence": 0.6,
+        "points": [
+            {"time": ts(20), "price": 90.0},
+            {"time": ts(26), "price": 94.0},
+            {"time": ts(31), "price": 92.0},
+        ],
+        "priceLow": None,
+        "priceHigh": None,
+    }
+    _, reason = review_shape(shape, make_window(rows))
+    assert reason == "short-span"
+
+
+def test_gate_skips_bad_shapes_without_raising():
+    rows = make_candles()
+    valid, dropped = filter_preview_shapes(
+        ["bad", None, {"id": "broken", "kind": "trendline", "points": []}],
+        window=make_window(rows),
+        symbol="BTCUSDT",
+        interval="1h",
+    )
+    assert valid == []
+    assert dropped
+
+
+def test_env_override_tightens_k(monkeypatch):
+    monkeypatch.setenv("COPILOT_PROJECT_BARS", "2")
+    rows = make_candles(wicks={20: (90.0, 120.0), 32: (96.0, 120.0)})
+    allowed = trendline(
+        "k2",
+        "Impulse leg",
+        (ts(20), 90.0),
+        (ts(41), on_line(41, 20, 90.0, 32, 96.0)),
+    )
+    rejected = trendline(
+        "k5",
+        "Impulse leg",
+        (ts(20), 90.0),
+        (ts(44), on_line(44, 20, 90.0, 32, 96.0)),
+    )
+    valid, dropped = _filter([allowed, rejected], rows)
+    assert [shape["id"] for shape in valid] == ["k2"]
+    assert dropped == ["k5"]

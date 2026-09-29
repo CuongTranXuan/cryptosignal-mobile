@@ -22,7 +22,27 @@ def test_instructions_default_vietnamese_summary():
     assert "closedCandles" in INSTRUCTIONS
 
 
-def test_build_user_prompt_english_window_annotation():
+def test_instructions_encode_actionable_drawing_rules():
+    assert "K=2" in INSTRUCTIONS and "K=3" in INSTRUCTIONS
+    assert "1.5xATR(14)" in INSTRUCTIONS
+    assert "oldest 35%" in INSTRUCTIONS
+    assert ">= 8 bars" in INSTRUCTIONS
+    assert ">= 15 bars" in INSTRUCTIONS
+    assert ">= 12 bars" in INSTRUCTIONS
+    assert "0.55" in INSTRUCTIONS
+    assert "0.7" in INSTRUCTIONS
+    assert "at most 6" in INSTRUCTIONS
+    assert "Fib 0.382" in INSTRUCTIONS
+    assert "Fib pocket 0.5–0.618" in INSTRUCTIONS
+    assert "upper" in INSTRUCTIONS and "lower" in INSTRUCTIONS
+    assert "3*barSeconds" in INSTRUCTIONS
+    assert "0.25xATR(14)" in INSTRUCTIONS
+    assert "Do not claim entries, stops, or that a level will hold." in INSTRUCTIONS
+    assert "get_klines" not in INSTRUCTIONS
+
+
+def test_build_user_prompt_english_window_annotation(monkeypatch):
+    monkeypatch.delenv("COPILOT_PROJECT_BARS", raising=False)
     req = AnalyzeRequest.model_validate(
         {
             "symbol": "BTCUSDT",
@@ -47,3 +67,9 @@ def test_build_user_prompt_english_window_annotation():
     assert "nến đã đóng" not in prompt
     assert "Prompt người dùng" not in prompt
     assert "get_klines" not in prompt
+    assert "PROJECTION GRID" in prompt
+    assert "lastClosedCandleTime=100" in prompt
+    assert "barSeconds=3600" in prompt
+    assert "maxProjectBars=24" in prompt
+    assert "3*barSeconds" in prompt
+    assert "apexTime" in prompt
