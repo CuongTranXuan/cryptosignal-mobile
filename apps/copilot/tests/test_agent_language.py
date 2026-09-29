@@ -28,6 +28,9 @@ def test_instructions_encode_actionable_drawing_rules():
     assert "oldest 35%" in INSTRUCTIONS
     assert ">= 8 bars" in INSTRUCTIONS
     assert ">= 15 bars" in INSTRUCTIONS
+    assert "min-span" in INSTRUCTIONS
+    assert "flat top" in INSTRUCTIONS
+    assert "longer mate does not" in INSTRUCTIONS
     assert ">= 12 bars" in INSTRUCTIONS
     assert "0.55" in INSTRUCTIONS
     assert "0.7" in INSTRUCTIONS

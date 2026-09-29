@@ -410,7 +410,8 @@ def _review_horizontal(
     ctx: _GateContext,
 ) -> tuple[dict[str, Any] | None, str | None]:
     times = [int(point["time"]) for point in points]
-    if _span_bars(times, ctx.bar_seconds) + 1e-9 < TRENDLINE_MIN_BARS:
+    need = _required_span(str(data.get("kind")), str(data.get("name", "")))
+    if _span_bars(times, ctx.bar_seconds) + 1e-9 < need:
         return None, "min-span"
     touch = _last_historical_time(points, ctx.last_closed)
     if touch is None:

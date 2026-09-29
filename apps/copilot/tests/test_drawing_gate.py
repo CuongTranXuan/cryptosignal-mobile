@@ -255,6 +255,47 @@ def test_parallel_channel_is_not_apex_rejected(monkeypatch):
     assert {shape["id"] for shape in valid} == {"base", "return"}
 
 
+def test_per_rail_min_span_not_waived_by_a_longer_mate(monkeypatch):
+    """A short flat top stays min-span. Its longer lower rail then drops as unpaired."""
+    monkeypatch.delenv("COPILOT_PROJECT_BARS", raising=False)
+    rows = make_candles(
+        wicks={
+            8: (80.0, 120.0),
+            18: (110.0, 150.0),
+            30: (100.0, 120.0),
+            32: (110.0, 148.0),
+        }
+    )
+    upper = trendline("upper", "Ascending triangle upper", (ts(18), 150.0), (ts(32), 148.0))
+    lower = trendline("lower", "Ascending triangle lower", (ts(8), 80.0), (ts(30), 100.0))
+    _, upper_reason = review_shape(upper, make_window(rows))
+    assert upper_reason == "min-span"
+    _, lower_reason = review_shape(lower, make_window(rows))
+    assert lower_reason is None, lower_reason
+
+    from cryptosignal_copilot.schema import filter_preview_details
+
+    valid, dropped = filter_preview_details(
+        [upper, lower],
+        {row.time for row in rows},
+        symbol="BTCUSDT",
+        interval="1h",
+        window=make_window(rows),
+    )
+    assert valid == []
+    assert ("upper", "min-span") in dropped
+    assert ("lower", "unpaired-triangle") in dropped
+
+    flat_top = trendline("flat", "Ascending triangle upper", (ts(18), 140.0), (ts(32), 140.0))
+    _, flat_reason = review_shape(flat_top, make_window(rows))
+    assert flat_reason == "min-span"
+
+    eight = trendline("wide-enough", "Impulse leg", (ts(22), 90.0), (ts(30), 96.0))
+    rows_eight = make_candles(wicks={22: (90.0, 120.0), 30: (96.0, 120.0)})
+    _, eight_reason = review_shape(eight, make_window(rows_eight))
+    assert eight_reason != "min-span"
+
+
 def test_ancient_short_span_confidence_and_before_window(monkeypatch):
     monkeypatch.delenv("COPILOT_PROJECT_BARS", raising=False)
     ancient_rows = make_candles(wicks={4: (90.0, 120.0), 12: (96.0, 120.0)})
