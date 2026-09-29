@@ -3,7 +3,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-from cryptosignal_copilot.drawing_gate import DrawingWindow, apply_preview_gate
+from cryptosignal_copilot.drawing_gate import DrawingWindow, Drop, apply_preview_gate
 
 INTERVALS = ("1m", "15m", "1h", "4h", "1d")
 Interval = Literal["1m", "15m", "1h", "4h", "1d"]
@@ -212,22 +212,41 @@ def filter_preview_shapes(
     interval: str | None = None,
     window: DrawingWindow | None = None,
 ) -> tuple[list[dict[str, Any]], list[str]]:
-    """Force preview status and return dropped ids.
+    """Force preview status and return dropped ids. See `filter_preview_details` for reason codes."""
+    valid, detailed = filter_preview_details(
+        raw_shapes,
+        allowed_times,
+        symbol=symbol,
+        interval=interval,
+        window=window,
+    )
+    return valid, [shape_id for shape_id, _reason in detailed]
+
+
+def filter_preview_details(
+    raw_shapes: list[Any],
+    allowed_times: set[int] | None = None,
+    *,
+    symbol: str | None = None,
+    interval: str | None = None,
+    window: DrawingWindow | None = None,
+) -> tuple[list[dict[str, Any]], list[Drop]]:
+    """Force preview status and return `(id, reason)` skips.
 
     Without `window`, every point must sit on `allowed_times` when that set is given.
     With `window`, one forward agent endpoint may extend past the last closed candle
-    inside the interval k cap. Triangle rails are dropped when that endpoint is later
-    than the upper/lower intersection plus 3 bars. Invalid shapes are skipped.
+    inside the interval k cap. Converging rails are dropped when that endpoint is later
+    than their intersection plus 3 bars. Invalid shapes are skipped.
     """
     staged: list[dict[str, Any]] = []
-    dropped_ids: list[str] = []
+    dropped: list[Drop] = []
     for raw in raw_shapes:
         if hasattr(raw, "model_dump"):
             data = raw.model_dump()
         elif isinstance(raw, dict):
             data = dict(raw)
         else:
-            dropped_ids.append("?")
+            dropped.append(("?", "schema"))
             continue
         if symbol and interval:
             data = coerce_agent_shape(data, symbol=symbol, interval=interval)
@@ -235,20 +254,20 @@ def filter_preview_shapes(
         try:
             validated = PatternShape.model_validate(data)
         except (ValidationError, ValueError):
-            dropped_ids.append(str(data.get("id", "?")))
+            dropped.append((str(data.get("id", "?")), "schema"))
             continue
         dumped = _dump_omit_unset_agent_id(validated)
         if window is None and allowed_times is not None:
             if any(point.time not in allowed_times for point in validated.points):
-                dropped_ids.append(validated.id)
+                dropped.append((validated.id, "off-candle"))
                 continue
         staged.append(dumped)
     if window is None:
-        return staged, dropped_ids
+        return staged, dropped
     if allowed_times is not None and window.allowed_times is None:
         window = replace(window, allowed_times=set(allowed_times))
     gated, gate_dropped = apply_preview_gate(staged, window)
-    return gated, dropped_ids + gate_dropped
+    return gated, dropped + gate_dropped
 
 
 def filter_agent_markers(

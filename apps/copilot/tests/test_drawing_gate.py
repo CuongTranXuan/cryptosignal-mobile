@@ -7,7 +7,7 @@ from cryptosignal_copilot.drawing_gate import (
     line_intersection,
     review_shape,
 )
-from cryptosignal_copilot.schema import Candle, filter_preview_shapes
+from cryptosignal_copilot.schema import Candle, filter_preview_details, filter_preview_shapes
 
 T0 = 1_700_000_000
 BAR = 3600
@@ -263,12 +263,12 @@ def test_ancient_short_span_confidence_and_before_window(monkeypatch):
     short_rows = make_candles(wicks={10: (90.0, 120.0), 16: (94.0, 120.0)})
     short = trendline("short", "Swing base", (ts(10), 90.0), (ts(16), 94.0))
     _, reason = review_shape(short, make_window(short_rows))
-    assert reason == "short-span"
+    assert reason == "min-span"
 
     flat = make_candles()
     low_conf = trendline("low", "Fib 0.5", (ts(20), 115.0), (ts(32), 115.0), confidence=0.5)
     _, reason = review_shape(low_conf, make_window(flat))
-    assert reason == "confidence"
+    assert reason == "low-conf"
 
     rows = make_candles(wicks={20: (90.0, 120.0), 32: (96.0, 120.0)})
     early = trendline(
@@ -401,7 +401,7 @@ def test_short_polyline_rejected(monkeypatch):
         "priceHigh": None,
     }
     _, reason = review_shape(shape, make_window(rows))
-    assert reason == "short-span"
+    assert reason == "min-span"
 
 
 def test_gate_skips_bad_shapes_without_raising():
@@ -434,3 +434,184 @@ def test_env_override_tightens_k(monkeypatch):
     valid, dropped = _filter([allowed, rejected], rows)
     assert [shape["id"] for shape in valid] == ["k2"]
     assert dropped == ["k5"]
+
+
+def test_polyline_named_triangle_rejected(monkeypatch):
+    monkeypatch.delenv("COPILOT_PROJECT_BARS", raising=False)
+    rows = make_candles(wicks={16: (90.0, 120.0), 24: (100.0, 120.0), 34: (94.0, 120.0)})
+    shape = {
+        "id": "poly-tri",
+        "symbol": "BTCUSDT",
+        "interval": "1h",
+        "kind": "polyline",
+        "name": "Symmetrical triangle",
+        "status": "preview",
+        "source": "agent",
+        "confidence": 0.8,
+        "points": [
+            {"time": ts(16), "price": 90.0},
+            {"time": ts(24), "price": 100.0},
+            {"time": ts(34), "price": 94.0},
+        ],
+        "priceLow": None,
+        "priceHigh": None,
+    }
+    _, reason = review_shape(shape, make_window(rows))
+    assert reason == "triangle-polyline"
+
+
+def test_unpaired_triangle_rail_rejected(monkeypatch):
+    monkeypatch.delenv("COPILOT_PROJECT_BARS", raising=False)
+    rows = make_candles(wicks={16: (90.0, 120.0), 32: (96.0, 120.0)})
+    shape = trendline("only", "Triangle lower", (ts(16), 90.0), (ts(32), 96.0))
+    valid, dropped = _filter([shape], rows)
+    assert valid == []
+    assert dropped == ["only"]
+    _valid, detailed = filter_preview_details(
+        [shape],
+        {row.time for row in rows},
+        symbol="BTCUSDT",
+        interval="1h",
+        window=make_window(rows),
+    )
+    assert detailed == [("only", "unpaired-triangle")]
+
+
+def test_fib_extension_requires_c_pivot(monkeypatch):
+    monkeypatch.delenv("COPILOT_PROJECT_BARS", raising=False)
+    rows = make_candles(
+        wicks={
+            8: (80.0, 120.0),
+            18: (100.0, 120.0),
+            22: (110.0, 150.0),
+            30: (110.0, 140.0),
+        }
+    )
+    impulse = trendline("ab", "Impulse AB", (ts(8), 80.0), (ts(18), 100.0))
+    extension = trendline("ext", "Fib 1.618", (ts(20), 115.0), (ts(34), 115.0))
+    valid, dropped = _filter([impulse, extension], rows)
+    assert [shape["id"] for shape in valid] == ["ab"]
+    assert dropped == ["ext"]
+
+    pivot = trendline("c-leg", "Pivot C", (ts(22), 150.0), (ts(30), 140.0))
+    valid, dropped = _filter([impulse, pivot, extension], rows)
+    assert dropped == []
+    assert {shape["id"] for shape in valid} == {"ab", "c-leg", "ext"}
+
+
+def test_misnamed_converging_rails_still_get_apex_cap(monkeypatch):
+    monkeypatch.delenv("COPILOT_PROJECT_BARS", raising=False)
+    rows = make_candles(
+        wicks={
+            10: (80.0, 120.0),
+            12: (110.0, 160.0),
+            25: (100.0, 120.0),
+            27: (110.0, 140.0),
+        }
+    )
+
+    def pair(forward_index: int) -> list[dict]:
+        return [
+            trendline(
+                "a",
+                "Rail A",
+                (ts(10), 80.0),
+                (ts(forward_index), on_line(forward_index, 10, 80.0, 25, 100.0)),
+            ),
+            trendline(
+                "b",
+                "Rail B",
+                (ts(12), 160.0),
+                (ts(forward_index), on_line(forward_index, 12, 160.0, 27, 140.0)),
+            ),
+        ]
+
+    valid, dropped = _filter(pair(44), rows)
+    assert dropped == []
+    assert {shape["id"] for shape in valid} == {"a", "b"}
+    for shape in valid:
+        assert max(point["time"] for point in shape["points"]) == ts(44)
+
+    valid, dropped = _filter(pair(45), rows)
+    assert valid == []
+    assert set(dropped) == {"a", "b"}
+
+
+def test_cap_keeps_triangle_pair_together(monkeypatch):
+    monkeypatch.delenv("COPILOT_PROJECT_BARS", raising=False)
+    rows = make_candles(
+        wicks={
+            10: (80.0, 120.0),
+            12: (110.0, 160.0),
+            25: (100.0, 120.0),
+            27: (110.0, 140.0),
+        }
+    )
+    rails = [
+        trendline(
+            "lower",
+            "Triangle lower",
+            (ts(10), 80.0),
+            (ts(44), on_line(44, 10, 80.0, 25, 100.0)),
+            confidence=0.6,
+        ),
+        trendline(
+            "upper",
+            "Triangle upper",
+            (ts(12), 160.0),
+            (ts(44), on_line(44, 12, 160.0, 27, 140.0)),
+            confidence=0.61,
+        ),
+    ]
+    extras = [
+        trendline(f"h{index}", f"Level {index}", (ts(20), 100.0 + index), (ts(32), 100.0 + index), confidence=0.95)
+        for index in range(5)
+    ]
+    valid, dropped = _filter(extras + rails, rows)
+    ids = {shape["id"] for shape in valid}
+    assert "lower" in ids and "upper" in ids
+    assert len(valid) == 6
+    assert len(dropped) == 1
+    assert dropped[0].startswith("h")
+
+
+def test_right_edge_swing_and_nearby_bar_survive(monkeypatch):
+    monkeypatch.delenv("COPILOT_PROJECT_BARS", raising=False)
+    rows = make_candles(wicks={20: (90.0, 120.0), 37: (96.0, 120.0)})
+    edge = trendline("edge", "Impulse leg", (ts(20), 90.0), (ts(37), 96.0))
+    kept, reason = review_shape(edge, make_window(rows))
+    assert reason is None, reason
+    assert kept is not None
+
+    snapped = trendline("snap", "Impulse leg", (ts(21), 90.0), (ts(37), 96.0))
+    kept, reason = review_shape(snapped, make_window(rows))
+    assert reason is None, reason
+
+
+def test_mid_body_anchor_is_non_wick(monkeypatch):
+    monkeypatch.delenv("COPILOT_PROJECT_BARS", raising=False)
+    rows = make_candles(wicks={20: (90.0, 120.0), 32: (96.0, 120.0)})
+    body = trendline("body", "Impulse leg", (ts(20), 105.0), (ts(32), 108.0))
+    _, reason = review_shape(body, make_window(rows))
+    assert reason == "non-wick"
+
+
+def test_compressing_second_touch_is_not_impulse_rejected(monkeypatch):
+    monkeypatch.delenv("COPILOT_PROJECT_BARS", raising=False)
+    # Background 130/145. Second low (125) is much closer to the highs than the
+    # first low (80), which used to fail a per-touch 1.5 ATR check.
+    rows = make_candles(
+        wicks={
+            10: (80.0, 145.0),
+            16: (130.0, 180.0),
+            25: (125.0, 145.0),
+            31: (130.0, 170.0),
+        },
+        low=130.0,
+        high=145.0,
+    )
+    lower = trendline("lower", "Triangle lower", (ts(10), 80.0), (ts(25), 125.0))
+    upper = trendline("upper", "Triangle upper", (ts(16), 180.0), (ts(31), 170.0))
+    valid, dropped = _filter([lower, upper], rows)
+    assert dropped == []
+    assert {shape["id"] for shape in valid} == {"lower", "upper"}

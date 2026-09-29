@@ -38,7 +38,8 @@ Start command is in the Dockerfile (`uvicorn` on `$PORT`). Do not override unles
 
 * **Grid:** `lastClosedCandleTime + k×barSeconds`, one forward endpoint per agent shape. k comes from the interval table above unless `COPILOT_PROJECT_BARS` is set (still capped at 48).
 * **Triangle apex:** upper/lower trendline pairs are intersected in time/price. A forward endpoint later than apex + 3 bars is dropped. No `apexTime` field is added.
-* **Also dropped (shape skipped, analyze continues):** confidence below 0.55, last touch in the oldest 35% of the window, trendline span under 8 bars (triangle names under 15, polylines under 12), single-touch diagonals, near-vertical rays, anchors that are not fractal wick highs/lows.
+* **Also dropped (shape skipped, analyze continues):** confidence below 0.55, last touch in the oldest 35% of the window, trendline span under 8 bars (triangle names under 15, polylines under 12), single-touch diagonals, near-vertical rays, mid-body anchors, triangle polylines, an unpaired triangle rail, Fib 1.272/1.618 without pivot C.
+* **Skip codes:** the SSE text line and `shapes.dropped` list `{id, reason}`. Codes include `non-wick`, `not-swing`, `single-touch`, `min-span`, `ancient`, `low-conf`, `near-vertical`, `beyond-k`, `apex+3`, `triangle-polyline`, `unpaired-triangle`, `triangle-structure`, `fib-no-C`. A converging pair is capped as one unit.
 * **Not claimed:** entries, stops, or that a level will hold. Fib has no kind — horizontal `Fib 0.382` / `Fib 0.5` / `Fib 0.618` trendlines plus a `Fib pocket 0.5–0.618` zone.
 * **Follow-up:** wick-snap tolerance and the near-vertical slope cutoff are code constants (`WICK_ATR_FRACTION`, `NEAR_VERTICAL_SLOPE`), not env-tunable yet. A channel return with only one touch is still rejected by the single-touch rule.
 

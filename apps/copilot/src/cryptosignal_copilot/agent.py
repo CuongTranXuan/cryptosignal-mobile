@@ -7,13 +7,18 @@ from pydantic_ai.output import PromptedOutput
 from pydantic_ai.exceptions import ModelHTTPError
 
 from cryptosignal_copilot.config import load_llm_config
-from cryptosignal_copilot.drawing_gate import DrawingWindow, bar_seconds, effective_project_bars
+from cryptosignal_copilot.drawing_gate import (
+    DrawingWindow,
+    bar_seconds,
+    effective_project_bars,
+    format_drop_note,
+)
 from cryptosignal_copilot.model_factory import build_model
 from cryptosignal_copilot.schema import (
     AnalyzeRequest,
     AnalyzeResult,
     filter_agent_markers,
-    filter_preview_shapes,
+    filter_preview_details,
 )
 
 # LANGUAGE: require Vietnamese for `summary` and chat-facing text the user sees.
@@ -66,6 +71,13 @@ INSTRUCTIONS = (
     "Emit at most 6 shapes. Minimum confidence is 0.55. "
     "Reject single-touch lines, near-vertical slopes, completed ancient patterns, "
     "and anchors that are not wick highs or lows. "
+    "Historical points must use the fractal candle's unix time and that candle's wick "
+    "high or low — a mid-body price is dropped as non-wick. "
+    "The active swing may be the extreme of the unfinished right-edge bars. "
+    "Emit both triangle rails in the same response; a polyline whose name says triangle "
+    "is dropped, and a single triangle rail is dropped as unpaired. "
+    "Do not emit Fib 1.272 or Fib 1.618 unless the same response includes pivot C "
+    "as a wick point after impulse B. "
     "You may describe invalidation as a close beyond the line by more than 0.25xATR(14). "
     "When you state confidence, name the swing high/low times and prices used. "
     "Do not claim entries, stops, or that a level will hold. "
@@ -144,7 +156,7 @@ class PydanticAiRunner:
             window_start=request.from_,
             allowed_times=allowed_times,
         )
-        valid_shapes, dropped_ids = filter_preview_shapes(
+        valid_shapes, dropped = filter_preview_details(
             output.shapes,
             allowed_times,
             symbol=request.symbol,
@@ -152,15 +164,13 @@ class PydanticAiRunner:
             window=window,
         )
 
-        if dropped_ids:
-            yield "text", {
-                "delta": (
-                    f"\n\nĐã bỏ qua {len(dropped_ids)} hình không hợp lệ "
-                    "(sai schema, ngoài lưới chiếu, hoặc không còn hiệu lực)."
-                )
-            }
+        if dropped:
+            yield "text", {"delta": format_drop_note(dropped)}
 
-        yield "shapes", {"shapes": valid_shapes}
+        yield "shapes", {
+            "shapes": valid_shapes,
+            "dropped": [{"id": shape_id, "reason": reason} for shape_id, reason in dropped],
+        }
         if valid_shapes:
             names = ", ".join(str(s.get("name", "?")) for s in valid_shapes[:5])
             more = f" (+{len(valid_shapes) - 5} nữa)" if len(valid_shapes) > 5 else ""
