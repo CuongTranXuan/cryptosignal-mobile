@@ -13,6 +13,10 @@ import {
   HEAD_SHOULDERS_PROMPT,
   TRIANGLES_PROMPT,
 } from "../lib/copilot-strings";
+import { createCopilotApi } from "../lib/copilot-api";
+import { clearCopilotModelsCache, loadCopilotModels } from "../lib/copilot-models-cache";
+import { SESSIONS_STORAGE_KEY } from "../lib/copilot-sessions-v1";
+import { useCopilotSessionStore } from "../lib/stores/copilot-session-store";
 import { createCopilotClient } from "../lib/use-copilot";
 
 const c0: Candle = {
@@ -89,7 +93,19 @@ function streamResponse(chunks: string[], status = 200): Response {
   });
 }
 
-function resetStores() {
+async function resetStores() {
+  localStorage.removeItem(SESSIONS_STORAGE_KEY);
+  clearCopilotModelsCache();
+  await loadCopilotModels(createCopilotApi({ forceMock: true }));
+  useCopilotSessionStore.setState({
+    modelId: "agentrouter/deepseek-v4-flash",
+    candleCount: 100,
+    reasoningEffort: "low",
+    customCandleCount: null,
+    lastAnalyzeMeta: null,
+    chartFrom: 0,
+    chartTo: 0,
+  });
   useChartStore.setState({
     symbol: "BTCUSDT",
     interval: "1h",
@@ -111,8 +127,8 @@ function resetStores() {
 }
 
 describe("use-copilot / createCopilotClient", () => {
-  beforeEach(() => {
-    resetStores();
+  beforeEach(async () => {
+    await resetStores();
     vi.restoreAllMocks();
   });
 
@@ -129,9 +145,8 @@ describe("use-copilot / createCopilotClient", () => {
         fetchImpl: fetchMock as unknown as typeof fetch,
       });
       await client.pollHealth();
-      expect(fetchMock.mock.calls[0]?.[0]).toBe(
-        "https://copilot.example.onrender.com/v1/copilot/health",
-      );
+      const calls = fetchMock.mock.calls as unknown as [string][];
+      expect(calls[0]?.[0]).toBe("https://copilot.example.onrender.com/v1/copilot/health");
     } finally {
       if (prev === undefined) delete process.env.NEXT_PUBLIC_COPILOT_URL;
       else process.env.NEXT_PUBLIC_COPILOT_URL = prev;
@@ -150,9 +165,8 @@ describe("use-copilot / createCopilotClient", () => {
         getClosedTimes: () => new Set([c0.time, c1.time, c2.time]),
       });
       await client.analyze("hi");
-      expect(fetchMock.mock.calls[0]?.[0]).toBe(
-        "https://copilot.example.onrender.com/v1/copilot/analyze",
-      );
+      const calls = fetchMock.mock.calls as unknown as [string][];
+      expect(calls[0]?.[0]).toBe("https://copilot.example.onrender.com/v1/copilot/analyze");
     } finally {
       if (prev === undefined) delete process.env.NEXT_PUBLIC_COPILOT_URL;
       else process.env.NEXT_PUBLIC_COPILOT_URL = prev;
@@ -169,6 +183,43 @@ describe("use-copilot / createCopilotClient", () => {
     expect(AUTO_DRAW_PROMPT).toBe(
       "Tự vẽ: cập nhật mẫu hình cho nến đóng mới nhất. Update patterns for the latest closed candle. Reply and summarize in Vietnamese; output all text in Vietnamese.",
     );
+  });
+
+  it("sends reasoning_effort when session store has a supported effort", async () => {
+    useCopilotSessionStore.setState({ reasoningEffort: "low" });
+    const fetchMock = vi.fn(async () => streamResponse([sseChunk("done", {})]));
+    const client = createCopilotClient({
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      getClosedTimes: () => new Set([c0.time, c1.time, c2.time]),
+    });
+    await client.analyze("hi");
+    const body = JSON.parse(
+      String((fetchMock.mock.calls as unknown as [string, RequestInit][])[0]![1].body),
+    );
+    expect(body.reasoning_effort).toBe("low");
+    expect(body.candle_count).toBe(3);
+  });
+
+  it("applies SSE meta candle_count_used to session store", async () => {
+    const fetchMock = vi.fn(async () =>
+      streamResponse([
+        sseChunk("meta", {
+          model: "agentrouter/deepseek-v4-flash",
+          candle_count_requested: 300,
+          candle_count_used: 200,
+          clamped: true,
+        }),
+        sseChunk("text", { delta: "ok" }),
+        sseChunk("done", {}),
+      ]),
+    );
+    const client = createCopilotClient({
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      getClosedTimes: () => new Set([c0.time, c1.time, c2.time]),
+    });
+    await client.analyze("hi");
+    expect(useCopilotSessionStore.getState().lastAnalyzeMeta?.candle_count_used).toBe(200);
+    expect(useCopilotSessionStore.getState().candleCount).toBe(200);
   });
 
   it("streams text+shapes into agent message and setPreview", async () => {
@@ -292,7 +343,7 @@ describe("use-copilot / createCopilotClient", () => {
       [429, COPILOT_ERROR_RATE_LIMITED],
       [503, COPILOT_ERROR],
     ] as const) {
-      resetStores();
+      await resetStores();
       const fetchMock = vi.fn(async () => new Response(JSON.stringify({ error: "x" }), { status }));
       const client = createCopilotClient({
         fetchImpl: fetchMock as unknown as typeof fetch,

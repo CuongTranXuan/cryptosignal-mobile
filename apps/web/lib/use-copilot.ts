@@ -1,18 +1,20 @@
 import { mergeCandles } from "./binance";
+import { mapCopilotHttpError, mapCopilotSseErrorPayload } from "./copilot-errors";
+import { AnalyzeMetaEventSchema } from "./copilot-schema";
+import { findCachedModel } from "./copilot-models-cache";
+import { reasoningEffortForAnalyze } from "./copilot-reasoning";
+import { resolveCopilotBaseUrl } from "./copilot-api";
 import {
   AUTO_DRAW_PROMPT,
   COPILOT_ERROR,
-  COPILOT_ERROR_CREDITS_EXHAUSTED,
-  COPILOT_ERROR_RATE_LIMITED,
-  COPILOT_ERROR_UNAUTHORIZED,
   copilotDrewShapes,
   copilotPlacedMarkers,
   copilotShapeSummaryLine,
   copilotSkippedMarkers,
   copilotSkippedShapes,
   COPILOT_SCROLLED_TO_OVERLAYS,
-  mapCopilotSseError,
 } from "./copilot-strings";
+import { useCopilotSessionStore } from "./stores/copilot-session-store";
 import { fetchKlines as defaultFetchKlines, type FetchKlines } from "./market-client";
 import { coerceAgentMarker, coerceAgentShape } from "./normalize-agent-shape";
 import {
@@ -43,9 +45,6 @@ export {
 
 export { AUTO_DRAW_PROMPT, HEAD_SHOULDERS_PROMPT, TRIANGLES_PROMPT } from "./copilot-strings";
 
-/** Empty = same-origin (Next rewrite proxies to the local FastAPI copilot). */
-const DEFAULT_BASE = "";
-
 /** Render/Vercel: set NEXT_PUBLIC_COPILOT_URL to HTTPS origin only (no /v1). Paths: /v1/copilot/health, /v1/copilot/analyze. */
 
 export type CopilotClientDeps = {
@@ -64,23 +63,13 @@ export type CopilotClient = {
   dispose: () => void;
 };
 
-function resolveBaseUrl(explicit?: string): string {
-  if (explicit !== undefined) return explicit.replace(/\/$/, "");
-  const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process
-    ?.env;
-  const fromEnv = env?.NEXT_PUBLIC_COPILOT_URL;
-  // Unset or empty → same-origin (Next dev rewrite or local stack).
-  if (fromEnv === undefined || fromEnv === null || fromEnv.trim() === "") {
-    return DEFAULT_BASE;
+async function mapHttpErrorResponse(res: Response): Promise<string> {
+  try {
+    const body = (await res.json()) as import("./copilot-api").ApiErrorBody;
+    return mapCopilotHttpError(res.status, body);
+  } catch {
+    return mapCopilotHttpError(res.status, {});
   }
-  return fromEnv.replace(/\/$/, "");
-}
-
-function mapHttpError(status: number): string {
-  if (status === 401 || status === 403) return COPILOT_ERROR_UNAUTHORIZED;
-  if (status === 402) return COPILOT_ERROR_CREDITS_EXHAUSTED;
-  if (status === 429) return COPILOT_ERROR_RATE_LIMITED;
-  return COPILOT_ERROR;
 }
 
 function closedCandlesFromChart(
@@ -160,7 +149,7 @@ function noteDroppedMarkers(ids: string[]): void {
 export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient {
   const fetchImpl = deps.fetchImpl ?? fetch;
   const fetchKlines = deps.fetchKlines ?? defaultFetchKlines;
-  const baseUrl = resolveBaseUrl(deps.baseUrl);
+  const baseUrl = resolveCopilotBaseUrl(deps.baseUrl);
 
   let queuedPrompt: string | null = null;
   let analyzing = false;
@@ -182,8 +171,9 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
       data = {};
     }
 
-    type SseEvent = "text" | "shapes" | "markers" | "extendRange" | "error" | "done";
+    type SseEvent = "meta" | "text" | "shapes" | "markers" | "extendRange" | "error" | "done";
     const isSseEvent = (value: string): value is SseEvent =>
+      value === "meta" ||
       value === "text" ||
       value === "shapes" ||
       value === "markers" ||
@@ -194,6 +184,31 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
     if (!isSseEvent(event)) return "ok";
 
     switch (event) {
+      case "meta": {
+        const parsed = AnalyzeMetaEventSchema.safeParse(data);
+        if (parsed.success) {
+          useCopilotSessionStore.getState().setLastAnalyzeMeta(parsed.data);
+          const messages = useAiStore.getState().messages.slice();
+          for (let i = messages.length - 1; i >= 0; i--) {
+            const msg = messages[i];
+            if (msg?.role === "agent") {
+              const model = findCachedModel(parsed.data.model);
+              messages[i] = {
+                ...msg,
+                modelId: parsed.data.model,
+                modelLabel: model?.label ?? parsed.data.model,
+                analyzeMeta: {
+                  candle_count_used: parsed.data.candle_count_used,
+                  clamped: parsed.data.clamped,
+                },
+              };
+              useAiStore.setState({ messages });
+              break;
+            }
+          }
+        }
+        return "ok";
+      }
       case "text": {
         const delta = typeof data.delta === "string" ? data.delta : "";
         if (delta) useAiStore.getState().appendText(delta);
@@ -300,19 +315,18 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
         return "ok";
       }
       case "error": {
-        const message =
-          typeof data.message === "string" && data.message.trim()
-            ? mapCopilotSseError(data.message)
-            : COPILOT_ERROR;
-        useAiStore.getState().fail(message);
+        useAiStore.getState().fail(mapCopilotSseErrorPayload(data));
+        useCopilotSessionStore.getState().persistActiveSession();
         return "error";
       }
       case "done": {
         if (isSuperseded(data)) {
           useAiStore.getState().finish();
+          useCopilotSessionStore.getState().persistActiveSession();
           return "superseded";
         }
         useAiStore.getState().finish();
+        useCopilotSessionStore.getState().persistActiveSession();
         return "ok";
       }
       default: {
@@ -370,16 +384,29 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
     const allClosed = closedCandlesFromChart(chart.candles, closedTimes);
     if (allClosed.length === 0) return;
 
+    const sessionState = useCopilotSessionStore.getState();
+    const candleCount = sessionState.getRequestedCandleCount(allClosed.length);
     const visibleRange = deps.getCoordApi?.()?.getVisibleTimeRange?.() ?? null;
-    const window = selectAnalysisCandles(allClosed, { visibleRange, prompt });
+    const window = selectAnalysisCandles(allClosed, {
+      visibleRange,
+      prompt,
+      candleCount,
+    });
     if (window.candles.length === 0) return;
+
+    const modelId = sessionState.modelId;
+    const model = findCachedModel(modelId);
 
     analyzing = true;
     useAiStore.getState().appendUser(prompt);
-    useAiStore.getState().startAgent();
+    useAiStore.getState().startAgent({
+      modelId: model?.id ?? modelId ?? undefined,
+      modelLabel: model?.label ?? modelId ?? undefined,
+    });
+    useCopilotSessionStore.getState().recordAnalysisWindow(window.from, window.to);
 
     const annotatedPrompt = annotatePromptWithWindow(prompt, window);
-    const body = {
+    const body: Record<string, unknown> = {
       symbol: chart.symbol,
       interval: chart.interval,
       from: window.from,
@@ -388,7 +415,15 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
       existingShapes: useShapeStore.getState().committed(),
       existingMarkers: useMarkerStore.getState().markers,
       prompt: annotatedPrompt,
+      candle_count: candleCount,
     };
+    if (modelId) {
+      body.model = modelId;
+    }
+    const reasoningEffort = reasoningEffortForAnalyze(model, sessionState.reasoningEffort);
+    if (reasoningEffort) {
+      body.reasoning_effort = reasoningEffort;
+    }
 
     try {
       const res = await fetchImpl(`${baseUrl}/v1/copilot/analyze`, {
@@ -398,13 +433,15 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
       });
 
       if (!res.ok) {
-        useAiStore.getState().fail(mapHttpError(res.status));
+        useAiStore.getState().fail(await mapHttpErrorResponse(res));
+        useCopilotSessionStore.getState().persistActiveSession();
         return;
       }
 
       await consumeSse(res);
     } catch {
       useAiStore.getState().fail(COPILOT_ERROR);
+      useCopilotSessionStore.getState().persistActiveSession();
     } finally {
       analyzing = false;
       if (useAiStore.getState().inFlight) {

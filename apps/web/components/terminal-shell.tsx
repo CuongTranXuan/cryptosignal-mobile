@@ -5,6 +5,8 @@ import { Group, Panel, Separator } from "react-resizable-panels";
 import type { ChartCoordinateApi } from "../lib/chart-api";
 import { useAiStore } from "../lib/stores/ai-store";
 import { useBinanceMarket } from "../lib/use-binance-market";
+import { createCopilotApi } from "../lib/copilot-api";
+import { useCopilotSessionStore } from "../lib/stores/copilot-session-store";
 import { createCopilotClient, type CopilotClient } from "../lib/use-copilot";
 import { ChartCanvas } from "./chart-canvas";
 import { CopilotPanel } from "./copilot-panel";
@@ -22,6 +24,14 @@ export function TerminalShell() {
   const closedTimesRef = useRef(closedTimes);
   closedTimesRef.current = closedTimes;
 
+  const copilotApi = useMemo(
+    () =>
+      createCopilotApi({
+        forceMock: process.env.NEXT_PUBLIC_COPILOT_MOCK === "1",
+      }),
+    [],
+  );
+
   const client = useMemo(() => {
     const c = createCopilotClient({
       getClosedTimes: () => closedTimesRef.current,
@@ -30,6 +40,11 @@ export function TerminalShell() {
     clientRef.current = c;
     return c;
   }, []);
+
+  useEffect(() => {
+    useCopilotSessionStore.getState().setApi(copilotApi);
+    void useCopilotSessionStore.getState().bootstrap();
+  }, [copilotApi]);
 
   useEffect(() => {
     client.watchShapesReset();
@@ -92,7 +107,7 @@ export function TerminalShell() {
           }}
           className="min-w-0"
         >
-          <CopilotPanel client={client} />
+          <CopilotPanel client={client} api={copilotApi} />
         </Panel>
       </Group>
     </div>

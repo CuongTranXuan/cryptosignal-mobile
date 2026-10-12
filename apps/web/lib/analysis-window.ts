@@ -251,6 +251,8 @@ export function selectAnalysisCandles(
     tightPadBars?: number;
     fallbackRecentBars?: number;
     minBars?: number;
+    /** When set (and the user did not name an expanded range), analyze the last N closed candles. */
+    candleCount?: number;
   } = {},
 ): AnalysisWindow {
   if (closedCandles.length === 0) {
@@ -275,7 +277,16 @@ export function selectAnalysisCandles(
     });
   }
 
-  const tight = prompt ? promptRequestsVisibleWindow(prompt) : false;
+  const candleCount = opts.candleCount;
+  const visibleIntent = prompt ? promptRequestsVisibleWindow(prompt) : false;
+  if (candleCount != null && candleCount > 0 && !visibleIntent) {
+    const n = Math.min(Math.floor(candleCount), closedCandles.length);
+    if (n >= minBars) {
+      return windowFromCandles(closedCandles.slice(-n), "recent");
+    }
+  }
+
+  const tight = visibleIntent;
   const bars = tight ? tightPadBars : padBars;
   const padSec = bars * barSec;
 
