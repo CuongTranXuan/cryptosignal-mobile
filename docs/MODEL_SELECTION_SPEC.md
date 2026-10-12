@@ -1,0 +1,167 @@
+# Model selection & candle budget spec (Copilot)
+
+Branch `feat/copilot-actionable-drawings` (PR #5). Scope: user picks a model from their own OpenAI-compatible provider, switches mid-session, sessions persist with chart context, candle count comes from presets instead of fixed 186 × 1h.
+
+## 1. Model discovery
+
+### 1.1 OpenAI-compatible baseline
+`GET {LLM_BASE_URL}/models` → `{"object":"list","data":[{"id","object":"model","created","owned_by"}]}` (https://platform.openai.com/docs/api-reference/models/list). No limits in the baseline.
+
+### 1.2 OmniRoute extended fields (measured, local OmniRoute `http://127.0.0.1:20128/v1/models`, 2026-10-13, 1626 models)
+| Field | Example | Notes |
+|---|---|---|
+| `id`, `object`, `created`, `owned_by` | `agentrouter/deepseek-v4-flash`, `agentrouter` | `owned_by` = upstream provider or `combo` |
+| `root`, `parent`, `permission` | `deepseek-v4-flash`, `null`, `[]` | `root` = upstream model id |
+| `name` | `deepseek-v4-flash` | display label (optional) |
+| `context_length`, `max_input_tokens` | `1000000` | optional, often missing (some only `context_length: 128000`) |
+| `max_output_tokens` | `384000` | optional |
+| `capabilities.reasoning` / `.thinking` / `.supportsThinking` | `true` | also top-level `thinking`, `supportsThinking` on some |
+| `capabilities.effort_tiers` | `["none","low","medium","high","xhigh","max"]` | present on agentrouter reasoning models → `reasoning_effort` accepted |
+| `capabilities.tool_calling`, `.vision`, `.temperature` | bool | tool_calling = structured output path we use |
+| `input_modalities`, `output_modalities`, `pricing{input,cached,output}` | | optional |
+
+Caveat: OmniRoute flags are per-route, not always true to the upstream (e.g. `dva/deepseek-v4-flash-*` say `reasoning:false`). Treat flags as hints.
+
+### 1.3 OpenRouter-style fields (https://openrouter.ai/docs/api-reference/list-available-models)
+`context_length`, `top_provider.max_completion_tokens`, `top_provider.context_length`, `supported_parameters` (contains `reasoning`, `include_reasoning`, `response_format`, `structured_outputs`, `tools`).
+
+### 1.4 Normalization & fallback chain (first non-null wins, per field)
+| Normalized | 1. provider fields | 2. built-in table (id regex on `id` or `root`) | 3. default |
+|---|---|---|---|
+| `context_window` | `context_length` → `max_input_tokens` → `top_provider.context_length` | table | **32 000** |
+| `max_output_tokens` | `max_output_tokens` → `top_provider.max_completion_tokens` | table | **4 096** |
+| `supports_reasoning` | `capabilities.reasoning\|thinking\|supportsThinking`, `thinking`, `"reasoning" in supported_parameters` | table | **true** (unknown = assume reasoning) |
+| `reasoning_efforts` | `capabilities.effort_tiers` | table | `[]` (don't send effort) |
+| `supports_json` | `capabilities.tool_calling`, `"tools"/"response_format"/"structured_outputs" in supported_parameters` | table | **true** (tool output mode already used) |
+`source` = the lowest tier used for any of the four (`provider` \| `table` \| `default`).
+
+Built-in table (single module, server-side only), starting rows:
+| pattern | ctx | max_out | reasoning | efforts |
+|---|---|---|---|---|
+| `deepseek-v4-(flash\|pro)` | 1 000 000 | 384 000 | true | none..max |
+| `deepseek-r1\|reasoner` | 128 000 | 32 000 | true | — |
+| `gpt-4o\|gpt-4\.1` | 128 000 | 16 384 | false | — |
+| `o[134]\|gpt-5` | 200 000 | 100 000 | true | low/medium/high |
+| `claude-` | 200 000 | 64 000 | true | — |
+| `gemini-2\.5` | 1 000 000 | 65 536 | true | — |
+
+## 2. Token budget & candle policy
+
+### 2.1 Measured costs (current serializer `agent._build_user_prompt`, candles embedded as Python-dict repr of `AnalyzeRequest`)
+| Item | Value | How |
+|---|---|---|
+| tokens per candle | **54** (measured) | live `agentrouter/deepseek-v4-flash` call, `usage.prompt_tokens` 3 075 @50 vs 8 475 @150 → 5 400/100 |
+| user-prompt overhead (0 candles) | ~375 (measured) | 3 075 − 50×54 |
+| system prompt | ~1 255 (tiktoken o200k estimate) | `agent.py` instructions |
+| tool/output schema + existingShapes | budget **2 400** (estimate) | |
+| `system_overhead` total | **4 000** (rounded up) | |
+Quick win: serializing candles as compact rows `[t,o,h,l,c,v]` should cut to ~25–30 tokens/candle (not measured).
+
+### 2.2 Formula
+```
+reserved_output = max_tokens_sent           # covers reasoning + JSON answer
+max_candles = floor((context_window - 4000 - history_tokens - reserved_output) / 54)
+safe_max = largest preset <= min(max_candles, analysis_window_bars, 1000 /*Binance limit*/)
+presets = [50, 100, 150, 200, 300, 500]
+```
+`history_tokens`: estimate `len(text)/3` for messages actually sent (cap at 4 000, see §4).
+
+### 2.3 max_tokens & reasoning
+| Case | `max_tokens` sent | reasoning control |
+|---|---|---|
+| reasoning model with `effort_tiers` | min(16 384, max_out) | `reasoning_effort: "low"` |
+| reasoning model, no effort control | min(16 384, max_out) | provider budget param if known (Anthropic `thinking.budget_tokens: 4096`), else none |
+| non-reasoning | min(4 096, max_out) | — |
+| unknown (defaults) | 4 096 | assume reasoning; no param |
+JSON answer itself is ≤ ~2 000 tokens (≤ 10 shapes + VI summary).
+
+Retry rule: on empty text / `UnexpectedModelBehavior` / finish_reason=`length` with no tool call → retry **once** with `candle_count = previous preset below (≥50)`, `reasoning_effort` one tier lower (`low`→`none`) if supported, `max_tokens` unchanged. Second failure → `empty_model_output` error.
+
+### 2.4 deepseek-v4-flash (agentrouter) concrete
+- ctx 1 000 000 / max_out 384 000 (provider). Context is never the bind; output is.
+- Root cause of the bug: 8 192 default output fully used by thinking at 299 candles.
+- Recommend: `max_tokens = 16 384`, `reasoning_effort = "low"`, default **200** candles, safe max **500** (500×54 ≈ 27k input; latency, not context, is the limit). Retry: 300→200 / `none`.
+- Same model via defaults path (unknown metadata, 32k/4k): (32 000−4 000−4 000−4 096)/54 = 368 → preset **300**.
+
+## 3. API contract (all paths stay under `/v1/copilot/*`; existing fields unchanged)
+
+### 3.1 `GET /v1/copilot/models`
+Server calls `{LLM_BASE_URL}/models`, normalizes, caches 10 min.
+```json
+{
+  "default_model": "agentrouter/deepseek-v4-flash",
+  "fetched_at": 1791843996,
+  "models": [{
+    "id": "agentrouter/deepseek-v4-flash",
+    "label": "deepseek-v4-flash",
+    "provider": "agentrouter",
+    "context_window": 1000000,
+    "max_output_tokens": 384000,
+    "supports_reasoning": true,
+    "reasoning_efforts": ["none","low","medium","high","xhigh","max"],
+    "supports_json": true,
+    "source": "provider",
+    "request_max_tokens": 16384,
+    "recommended_candles": 200,
+    "recommended_max_candles": 500,
+    "presets": [50,100,150,200,300,500]
+  }]
+}
+```
+Filter: hide `combo`/`auto/*` only if config says so (open question). Optional `?q=` search; 1600+ entries → client needs a searchable picker.
+
+### 3.2 `POST /v1/copilot/analyze` (additions, both optional)
+| Field | Type | Rule |
+|---|---|---|
+| `model` | string | must be in discovered list; absent → `LLM_MODEL` |
+| `candle_count` | int | clamp to `[1, recommended_max_candles]`; server keeps the **last N** of `closedCandles` (server-side trim) |
+Response/SSE adds a `meta` event first: `{"model":"…","candle_count_requested":299,"candle_count_used":200,"clamped":true,"max_tokens":16384,"reasoning_effort":"low"}`; also `retried:true` if §2.3 retry ran.
+`AnalyzeRequest` keeps `extra="forbid"` → add the two fields explicitly.
+
+Error codes (SSE `error` event `{code, message(VI), detail}`; HTTP 4xx before stream):
+| code | HTTP | when |
+|---|---|---|
+| `unknown_model` | 400 | `model` not in list |
+| `over_budget` | 422 | even 50 candles + history don't fit |
+| `empty_model_output` | 502 (SSE) | empty after retry |
+| `provider_error` | 502 | existing provider HTTP errors |
+| `models_unavailable` | 503 | `/models` fetch failed and no cache |
+
+### 3.3 Session schema (client `localStorage`, key `copilot.sessions.v1`; server stays stateless, no DB)
+```ts
+type CopilotSession = {
+  id: string; title: string; created_at: number; updated_at: number; // unix s
+  model_id: string;                       // current
+  chart: { symbol: string; interval: string; from: number; to: number; candle_count: number };
+  messages: { id: string; role: "user"|"assistant"; content: string;
+              model_id: string | null; shapes: PatternShape[]; created_at: number;
+              meta?: { candle_count_used: number; clamped: boolean } }[];
+};
+```
+Limits: keep 50 sessions, 200 messages each, evict LRU. Candles are NOT stored; refetch by chart context. Mid-session switch = change `model_id`; each message keeps its own.
+
+## 4. Best practices checklist (final optimization pass)
+**Clean code**
+- [ ] One typed schema source: pydantic models → generated TS types (or shared JSON schema); no hand-copied types.
+- [ ] One limits table (server `model_catalog.py`); client only reads `/models` output.
+- [ ] Normalizer is a pure function with unit tests per provider shape (OmniRoute, OpenRouter, bare OpenAI).
+**Performance**
+- [ ] Cache `/models` 10 min TTL in-process; client caches same TTL.
+- [ ] Don't resend full history: last 6 messages, text only, shapes as short summary; ≤4 000 tokens.
+- [ ] Trim candles server-side to `candle_count_used`; consider compact row serialization.
+**Caching / storage**
+- [ ] Cache normalized metadata, never raw provider dumps.
+- [ ] Sessions in localStorage only; versioned key; no candles stored.
+- [ ] No API keys or base URL secrets client-side; server proxies everything.
+**Error handling**
+- [ ] Typed `code` on every error; client maps to clear VI messages (e.g. `empty_model_output` → "Mô hình không trả lời, thử ít nến hơn hoặc mô hình khác").
+- [ ] One automatic retry with fewer candles / lower reasoning on empty output.
+- [ ] Timeouts: `/models` 10 s, analyze `LLM_TIMEOUT_S` (60 s; raise to 120 s for reasoning models).
+- [ ] No silent drops: clamps, retries, gate rejects all surfaced via `meta`/`dropped`.
+
+## 5. Open questions
+1. Hide OmniRoute `combo`/`auto/*` routes, or show them? (metadata on them is aggregated, less reliable)
+2. Allow user-chosen reasoning effort in UI, or server-fixed `low`?
+3. Should the provider (base URL/key) be user-configurable per user, or stay server env only? Spec assumes server env.
+4. Adopt compact candle serialization now (≈2× more candles) or later?
+5. Per-interval presets (e.g. 1d max 300) — needed?
