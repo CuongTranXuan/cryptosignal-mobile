@@ -2,9 +2,14 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from urllib.parse import urlparse
 
 VALID_LLM_STYLES = frozenset({"openai", "anthropic"})
+DEFAULT_MODELS_CACHE_TTL_S = 600.0
+DEFAULT_MODELS_FETCH_TIMEOUT_S = 10.0
+DEFAULT_LLM_MODEL = "agentrouter/deepseek-v4-flash"
+DEFAULT_CANDLE_COUNT = 100
 
 
 class LlmConfigError(Exception):
@@ -33,7 +38,7 @@ def load_llm_config() -> LlmConfig:
     style = os.environ.get("LLM_API_STYLE", "").strip().lower()
     base_url = os.environ.get("LLM_BASE_URL", "").strip().rstrip("/")
     api_key = os.environ.get("LLM_API_KEY", "").strip()
-    model = os.environ.get("LLM_MODEL", "").strip()
+    model = os.environ.get("LLM_MODEL", DEFAULT_LLM_MODEL).strip() or DEFAULT_LLM_MODEL
     timeout_s = float(os.environ.get("LLM_TIMEOUT_S", "60"))
     missing = [
         n
@@ -61,3 +66,46 @@ def load_llm_config() -> LlmConfig:
 def health_payload(cfg: LlmConfig) -> dict:
     host = urlparse(cfg.base_url).hostname or ""
     return {"ok": True, "style": cfg.style, "model": cfg.model, "baseHost": host}
+
+
+def load_models_cache_ttl_s() -> float:
+    raw = os.environ.get("COPILOT_MODELS_CACHE_TTL_S", "").strip()
+    if not raw:
+        return DEFAULT_MODELS_CACHE_TTL_S
+    try:
+        value = float(raw)
+    except ValueError:
+        return DEFAULT_MODELS_CACHE_TTL_S
+    return max(1.0, value)
+
+
+def load_models_fetch_timeout_s() -> float:
+    raw = os.environ.get("COPILOT_MODELS_FETCH_TIMEOUT_S", "").strip()
+    if not raw:
+        return DEFAULT_MODELS_FETCH_TIMEOUT_S
+    try:
+        value = float(raw)
+    except ValueError:
+        return DEFAULT_MODELS_FETCH_TIMEOUT_S
+    return max(1.0, value)
+
+
+def load_default_candle_count() -> int:
+    raw = os.environ.get("COPILOT_DEFAULT_CANDLE_COUNT", "").strip()
+    if not raw:
+        return DEFAULT_CANDLE_COUNT
+    try:
+        value = int(raw)
+    except ValueError:
+        return DEFAULT_CANDLE_COUNT
+    return max(1, value)
+
+
+def load_sessions_db_path() -> Path:
+    raw = os.environ.get("COPILOT_SESSIONS_DB", "").strip()
+    if raw:
+        return Path(raw).expanduser()
+    data_dir = os.environ.get("COPILOT_DATA_DIR", "").strip()
+    if data_dir:
+        return Path(data_dir).expanduser() / "sessions.sqlite3"
+    return Path(os.environ.get("TMPDIR", "/tmp")) / "cryptosignal-copilot-sessions.sqlite3"

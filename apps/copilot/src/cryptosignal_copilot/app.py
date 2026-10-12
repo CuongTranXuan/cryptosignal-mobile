@@ -1,19 +1,32 @@
 from __future__ import annotations
 
-import os
 import asyncio
 import json
+import os
 from collections.abc import AsyncIterator
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import ValidationError
 
 from cryptosignal_copilot.agent import AgentRunner, PydanticAiRunner
-from cryptosignal_copilot.config import LlmConfigError, health_payload, load_llm_config, validate_llm_env_on_startup
+from cryptosignal_copilot.analyze_prep import AnalyzePrepError, prepare_analyze
+from cryptosignal_copilot.config import (
+    LlmConfigError,
+    health_payload,
+    load_llm_config,
+    validate_llm_env_on_startup,
+)
+from cryptosignal_copilot.model_catalog import ModelsCatalog, get_models_catalog
+from cryptosignal_copilot.provider_errors import error_payload
 from cryptosignal_copilot.rate_limit import SlidingWindowRateLimiter, client_ip
-from cryptosignal_copilot.schema import AnalyzeRequest
+from cryptosignal_copilot.schema import AnalyzeRequest, CreateSessionRequest, UpdateSessionRequest
+from cryptosignal_copilot.sessions_store import (
+    SessionNotFoundError,
+    SessionsStore,
+    get_sessions_store,
+)
 
 
 def sse(event: str, data: dict) -> str:
@@ -21,12 +34,6 @@ def sse(event: str, data: dict) -> str:
 
 
 def _cors_settings() -> tuple[list[str], bool]:
-    """Allowlist from CORS_ORIGINS (preferred) or legacy COPILOT_CORS_ORIGINS.
-
-    Unset → localhost defaults for local/dev.
-    Explicit empty string → no origins (fail closed; set Vercel URL in prod).
-    "*" → allow all, credentials off.
-    """
     raw = os.environ.get("CORS_ORIGINS")
     if raw is None:
         raw = os.environ.get(
@@ -39,7 +46,12 @@ def _cors_settings() -> tuple[list[str], bool]:
     return origins, True
 
 
-def create_app(runner: AgentRunner | None = None) -> FastAPI:
+def create_app(
+    runner: AgentRunner | None = None,
+    *,
+    models_catalog: ModelsCatalog | None = None,
+    sessions_store: SessionsStore | None = None,
+) -> FastAPI:
     use_runner: AgentRunner = runner if runner is not None else PydanticAiRunner()
     app = FastAPI()
     cors_origins, cors_credentials = _cors_settings()
@@ -52,6 +64,8 @@ def create_app(runner: AgentRunner | None = None) -> FastAPI:
     )
 
     rate_limiter = SlidingWindowRateLimiter()
+    catalog = models_catalog if models_catalog is not None else get_models_catalog()
+    store = sessions_store if sessions_store is not None else get_sessions_store()
 
     state_lock = asyncio.Lock()
     latest_request: dict[str, AnalyzeRequest | None] = {"value": None}
@@ -67,6 +81,86 @@ def create_app(runner: AgentRunner | None = None) -> FastAPI:
             return JSONResponse({"error": "LLM config missing"}, status_code=503)
         return health_payload(cfg)
 
+    @app.get("/v1/copilot/models")
+    async def list_models(q: str | None = Query(default=None)):
+        try:
+            cfg = load_llm_config()
+        except LlmConfigError:
+            return JSONResponse(
+                error_payload("models_unavailable", "Cấu hình LLM chưa sẵn sàng"),
+                status_code=503,
+            )
+        try:
+            snapshot = await catalog.get_snapshot(cfg)
+        except Exception:
+            stale = catalog.stale_snapshot()
+            if stale is not None:
+                snapshot = stale
+            else:
+                return JSONResponse(
+                    error_payload("models_unavailable", "Không lấy được danh sách mô hình"),
+                    status_code=503,
+                )
+        models = list(snapshot.models)
+        if q:
+            needle = q.strip().lower()
+            if needle:
+                models = [
+                    m
+                    for m in models
+                    if needle in m.id.lower() or needle in m.label.lower()
+                ]
+        body = snapshot.to_api_dict()
+        body["models"] = [m.to_api_dict() for m in models]
+        return body
+
+    @app.get("/v1/copilot/sessions")
+    async def list_sessions():
+        summaries = await asyncio.to_thread(store.list_sessions)
+        return {"sessions": [s.model_dump() for s in summaries]}
+
+    @app.post("/v1/copilot/sessions")
+    async def create_session(body: CreateSessionRequest):
+        record = await asyncio.to_thread(
+            store.create_session,
+            title=body.title,
+            model_id=body.model_id,
+            chart=body.chart,
+            messages=body.messages,
+        )
+        return record.model_dump(by_alias=True)
+
+    @app.get("/v1/copilot/sessions/{session_id}")
+    async def get_session(session_id: str):
+        try:
+            record = await asyncio.to_thread(store.get_session, session_id)
+        except SessionNotFoundError:
+            return JSONResponse({"error": "session not found"}, status_code=404)
+        return record.model_dump(by_alias=True)
+
+    @app.patch("/v1/copilot/sessions/{session_id}")
+    async def patch_session(session_id: str, body: UpdateSessionRequest):
+        try:
+            record = await asyncio.to_thread(
+                store.update_session,
+                session_id,
+                title=body.title,
+                model_id=body.model_id,
+                chart=body.chart,
+                messages=body.messages,
+            )
+        except SessionNotFoundError:
+            return JSONResponse({"error": "session not found"}, status_code=404)
+        return record.model_dump(by_alias=True)
+
+    @app.delete("/v1/copilot/sessions/{session_id}")
+    async def delete_session(session_id: str):
+        try:
+            await asyncio.to_thread(store.delete_session, session_id)
+        except SessionNotFoundError:
+            return JSONResponse({"error": "session not found"}, status_code=404)
+        return {"ok": True}
+
     @app.post("/v1/copilot/analyze")
     async def analyze(request: Request):
         ip = client_ip(dict(request.headers), request.client.host if request.client else None)
@@ -78,7 +172,7 @@ def create_app(runner: AgentRunner | None = None) -> FastAPI:
             )
 
         try:
-            load_llm_config()
+            cfg = load_llm_config()
         except LlmConfigError:
             return JSONResponse({"error": "LLM config missing"}, status_code=503)
 
@@ -113,24 +207,37 @@ def create_app(runner: AgentRunner | None = None) -> FastAPI:
                             break
                         latest_request["value"] = None
 
+                    try:
+                        run_plan = await prepare_analyze(catalog, cfg, current)
+                    except AnalyzePrepError as exc:
+                        yield sse("error", error_payload(exc.code, exc.message, exc.detail))
+                        yield sse("done", {})
+                        continue
+
+                    yield sse("meta", run_plan.meta)
+
                     queue: asyncio.Queue[tuple[str, str | None, dict | BaseException | None]] = asyncio.Queue()
 
-                    async def _produce(req: AnalyzeRequest = current) -> None:
+                    async def _produce(
+                        run_plan=run_plan,
+                        q: asyncio.Queue[
+                            tuple[str, str | None, dict | BaseException | None]
+                        ] = queue,
+                    ) -> None:
                         try:
-                            async for event_name, data in use_runner.run(req):
-                                await queue.put(("event", event_name, data))
-                        except BaseException as exc:  # noqa: BLE001 — forward to consumer
-                            await queue.put(("error", None, exc))
+                            async for event_name, data in use_runner.run(run_plan):
+                                await q.put(("event", event_name, data))
+                        except BaseException as exc:  # noqa: BLE001
+                            await q.put(("error", None, exc))
                         finally:
-                            await queue.put(("end", None, None))
+                            await q.put(("end", None, None))
 
                     task = asyncio.create_task(_produce())
                     try:
                         while True:
                             try:
                                 kind, name, payload = await asyncio.wait_for(queue.get(), timeout=12.0)
-                            except asyncio.TimeoutError:
-                                # SSE comment keepalive — keeps proxies from killing idle streams
+                            except TimeoutError:
                                 yield ": keepalive\n\n"
                                 continue
                             if kind == "end":

@@ -1,10 +1,10 @@
 from .schema import (
+    INTERVALS,
     AgentMarker,
     AnalyzeRequest,
     AnalyzeResult,
     Candle,
     ExtendRange,
-    INTERVALS,
     Interval,
     PatternShape,
     PatternShapeModel,

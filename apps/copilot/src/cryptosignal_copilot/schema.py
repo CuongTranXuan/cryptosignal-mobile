@@ -112,6 +112,82 @@ class AnalyzeRequest(BaseModel):
     existingShapes: list[PatternShape]
     existingMarkers: list[AgentMarker] = Field(default_factory=list)
     prompt: str
+    model: str | None = None
+    candle_count: int | None = Field(default=None, ge=1)
+    reasoning_effort: str | None = None
+
+
+class SessionMessageMeta(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    candle_count_used: int | None = None
+    clamped: bool | None = None
+
+
+class SessionChartContext(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    symbol: str
+    interval: Interval
+    from_: int = Field(alias="from")
+    to: int
+    candle_count: int = Field(ge=1)
+
+
+class SessionMessage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    role: Literal["user", "assistant"]
+    content: str
+    model_id: str | None = None
+    shapes: list[PatternShape] = Field(default_factory=list)
+    created_at: int
+    meta: SessionMessageMeta | None = None
+
+
+class CopilotSession(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    title: str
+    created_at: int
+    updated_at: int
+    model_id: str
+    chart: SessionChartContext
+    messages: list[SessionMessage] = Field(default_factory=list)
+
+
+class SessionSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    title: str
+    created_at: int
+    updated_at: int
+    model_id: str
+    symbol: str
+    interval: str
+    candle_count: int
+    message_count: int
+
+
+class CreateSessionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = "New chat"
+    model_id: str
+    chart: SessionChartContext
+    messages: list[SessionMessage] = Field(default_factory=list)
+
+
+class UpdateSessionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str | None = None
+    model_id: str | None = None
+    chart: SessionChartContext | None = None
+    messages: list[SessionMessage] | None = None
 
 
 class AnalyzeResult(BaseModel):

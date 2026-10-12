@@ -1,11 +1,15 @@
 from __future__ import annotations
 
-from typing import AsyncIterator, Protocol
+import json
+import logging
+from collections.abc import AsyncIterator
+from typing import Protocol
 
 from pydantic_ai import Agent
+from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError, UnexpectedModelBehavior
 from pydantic_ai.output import PromptedOutput
-from pydantic_ai.exceptions import ModelHTTPError
 
+from cryptosignal_copilot.analyze_prep import AnalyzePlan, retry_plan
 from cryptosignal_copilot.config import load_llm_config
 from cryptosignal_copilot.drawing_gate import (
     DrawingWindow,
@@ -14,6 +18,13 @@ from cryptosignal_copilot.drawing_gate import (
     format_drop_note,
 )
 from cryptosignal_copilot.model_factory import build_model
+from cryptosignal_copilot.provider_errors import (
+    EMPTY_MODEL_OUTPUT_MSG,
+    error_payload,
+    model_api_error_payload,
+    model_http_error_payload,
+    unexpected_model_behavior_payload,
+)
 from cryptosignal_copilot.schema import (
     AnalyzeRequest,
     AnalyzeResult,
@@ -108,16 +119,19 @@ INSTRUCTIONS = (
     "OHLC or historical times — use only the OHLC in the provided closedCandles."
 )
 
+logger = logging.getLogger(__name__)
+
 
 class AgentRunner(Protocol):
-    def run(self, request: AnalyzeRequest) -> AsyncIterator[tuple[str, dict]]:
+    def run(self, plan: AnalyzePlan) -> AsyncIterator[tuple[str, dict]]:
         ...
 
 
 class PydanticAiRunner:
-    async def run(self, request: AnalyzeRequest) -> AsyncIterator[tuple[str, dict]]:
+    async def run(self, plan: AnalyzePlan) -> AsyncIterator[tuple[str, dict]]:
         cfg = load_llm_config()
-        model = build_model(cfg)
+        request = plan.request
+        model = build_model(cfg, plan.model_id)
         # OmniRoute/agentrouter rejects OpenAI tool_choice="required" (pydantic-ai's
         # default ToolOutput mode). PromptedOutput uses response_format=json_object
         # with tool_choice=auto, which works through the gateway.
@@ -132,22 +146,47 @@ class PydanticAiRunner:
         # @agent.tool_plain get_klines removed — see OmniRoute 2026-09-19 custom-tool reject.
 
         prompt = _build_user_prompt(request)
-        # Emit immediately so the SSE connection is not idle for the whole LLM call
-        # (Next/ngrok/proxies often abort silent streams around ~30s).
         yield "text", {
             "delta": (
                 f"Đang phân tích {request.symbol} {request.interval} "
                 f"({len(request.closedCandles)} nến đã đóng)…\n\n"
             )
         }
-        try:
-            result = await agent.run(prompt)
-        except ModelHTTPError as exc:
-            yield "error", {"message": _model_http_error_message(exc)}
-            yield "done", {}
-            return
-        except Exception:
-            yield "error", {"message": PROVIDER_GENERIC_FAILURE_MSG}
+
+        current_plan = plan
+        result = None
+        for attempt in range(2):
+            try:
+                result = await agent.run(prompt, model_settings=current_plan.model_settings)
+                break
+            except UnexpectedModelBehavior as exc:
+                if attempt == 0:
+                    next_plan = retry_plan(current_plan)
+                    if next_plan is not None:
+                        current_plan = next_plan
+                        request = current_plan.request
+                        prompt = _build_user_prompt(request)
+                        yield "meta", current_plan.meta
+                        continue
+                yield "error", unexpected_model_behavior_payload(exc)
+                yield "done", {}
+                return
+            except ModelAPIError as exc:
+                yield "error", model_api_error_payload(exc)
+                yield "done", {}
+                return
+            except ModelHTTPError as exc:
+                yield "error", model_http_error_payload(exc)
+                yield "done", {}
+                return
+            except Exception:
+                logger.exception("copilot agent run failed")
+                yield "error", error_payload("provider_error", EMPTY_MODEL_OUTPUT_MSG)
+                yield "done", {}
+                return
+
+        if result is None:
+            yield "error", error_payload("empty_model_output", EMPTY_MODEL_OUTPUT_MSG)
             yield "done", {}
             return
 
@@ -193,92 +232,6 @@ class PydanticAiRunner:
         yield "done", {}
 
 
-
-PROVIDER_UNAUTHORIZED_MSG = "Copilot thất bại: nhà cung cấp không được ủy quyền"
-PROVIDER_CREDITS_EXHAUSTED_MSG = "Copilot thất bại: hết credits nhà cung cấp"
-PROVIDER_RATE_LIMITED_MSG = "Copilot thất bại: nhà cung cấp bị giới hạn tốc độ"
-PROVIDER_GENERIC_FAILURE_MSG = "Copilot thất bại"
-
-_CREDITS_EXHAUSTED_MARKERS = (
-    "credits exhausted",
-    "credit exhausted",
-    "budget pool quota exhausted",
-    "quota exhausted",
-    "budget exhausted",
-    "out of credits",
-)
-
-
-def _model_http_error_message(exc: ModelHTTPError) -> str:
-    detail = _provider_error_detail(exc)
-    if exc.status_code in (401, 403):
-        msg = PROVIDER_UNAUTHORIZED_MSG
-        if detail:
-            msg = f"{msg} ({detail})"
-        return msg
-    if _is_provider_credits_exhausted(exc, detail):
-        return PROVIDER_CREDITS_EXHAUSTED_MSG
-    if exc.status_code == 429:
-        return PROVIDER_RATE_LIMITED_MSG
-    if detail:
-        return f"{PROVIDER_GENERIC_FAILURE_MSG} ({detail})"
-    return PROVIDER_GENERIC_FAILURE_MSG
-
-
-def _is_provider_credits_exhausted(exc: ModelHTTPError, detail: str) -> bool:
-    if exc.status_code == 402:
-        return True
-    text = _provider_error_text(exc, detail)
-    return any(marker in text for marker in _CREDITS_EXHAUSTED_MARKERS)
-
-
-def _provider_error_text(exc: ModelHTTPError, detail: str) -> str:
-    parts: list[str] = []
-    if detail:
-        parts.append(detail)
-    try:
-        body = getattr(exc, "body", None)
-        if isinstance(body, dict):
-            err = body.get("error")
-            if isinstance(err, dict):
-                for key in ("message", "code", "type"):
-                    value = err.get(key)
-                    if value:
-                        parts.append(str(value))
-            for key in ("message", "detail"):
-                value = body.get(key)
-                if value:
-                    parts.append(str(value))
-        elif isinstance(body, str) and body.strip():
-            parts.append(body)
-    except Exception:
-        pass
-    return " ".join(parts).lower()
-
-
-def _provider_error_detail(exc: ModelHTTPError) -> str:
-    """Best-effort short detail from provider HTTP errors (never raises)."""
-    try:
-        body = getattr(exc, "body", None)
-        if isinstance(body, dict):
-            err = body.get("error")
-            if isinstance(err, dict):
-                msg = err.get("message") or err.get("code")
-                if msg:
-                    return str(msg)[:240]
-            if body.get("message"):
-                return str(body["message"])[:240]
-        if isinstance(body, str) and body.strip():
-            return body.strip()[:240]
-    except Exception:
-        pass
-    try:
-        msg = getattr(exc, "message", None) or str(exc)
-        return str(msg)[:240]
-    except Exception:
-        return ""
-
-
 def _projection_note(request: AnalyzeRequest) -> str:
     # English on purpose: Vietnamese window scaffolding has tripped agentrouter content-block.
     if not request.closedCandles:
@@ -305,11 +258,29 @@ def _projection_note(request: AnalyzeRequest) -> str:
     )
 
 
-def _build_user_prompt(request: AnalyzeRequest) -> str:
-    # Keep window annotations in English to reduce agentrouter content-block risk
-    # (observed 2026-09-19: stacking VI headers + VI quick-actions tripped HTTP 400).
-    # Chat SSE progress/errors are Vietnamese; summary language is Vietnamese by default.
+def compact_candle_rows(request: AnalyzeRequest) -> list[list[float]]:
+    return [
+        [c.time, c.open, c.high, c.low, c.close, c.volume]
+        for c in request.closedCandles
+    ]
+
+
+def request_payload_for_prompt(request: AnalyzeRequest) -> dict:
     payload = request.model_dump(by_alias=True)
+    payload["closedCandles"] = compact_candle_rows(request)
+    return payload
+
+
+def estimate_prompt_candle_chars(request: AnalyzeRequest, *, compact: bool) -> int:
+    if compact:
+        payload = request_payload_for_prompt(request)
+    else:
+        payload = request.model_dump(by_alias=True)
+    return len(json.dumps(payload["closedCandles"], separators=(",", ":")))
+
+
+def _build_user_prompt(request: AnalyzeRequest) -> str:
+    payload = request_payload_for_prompt(request)
     n = len(request.closedCandles)
     return (
         f"Symbol={request.symbol} interval={request.interval}\n"
@@ -319,5 +290,5 @@ def _build_user_prompt(request: AnalyzeRequest) -> str:
         f"Prefer the most recent bars in the window when the user does not name another range.\n"
         f"{_projection_note(request)}\n"
         f"User prompt: {request.prompt}\n"
-        f"Request JSON: {payload}"
+        f"Request JSON: {json.dumps(payload, separators=(',', ':'))}"
     )
