@@ -41,6 +41,8 @@ export const COPILOT_ERROR_UNAUTHORIZED = "Copilot lỗi: nhà cung cấp không
 export const COPILOT_ERROR_CREDITS_EXHAUSTED = "Copilot lỗi: hết hạn mức nhà cung cấp";
 export const COPILOT_ERROR_RATE_LIMITED = "Copilot lỗi: nhà cung cấp giới hạn tần suất";
 export const COPILOT_ERROR_INVALID_MODEL = "Copilot lỗi: mô hình không hợp lệ hoặc không khả dụng";
+export const COPILOT_ERROR_INVALID_REASONING =
+  "Copilot lỗi: mức lý luận không được hỗ trợ cho mô hình này";
 export const COPILOT_ERROR_CANDLE_COUNT =
   "Copilot lỗi: số nến vượt giới hạn an toàn của mô hình đã chọn";
 export const COPILOT_ERROR_CONTEXT_LENGTH = "Copilot lỗi: cửa sổ ngữ cảnh quá dài cho mô hình này";

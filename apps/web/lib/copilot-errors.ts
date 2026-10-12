@@ -8,6 +8,7 @@ import {
   COPILOT_ERROR_OVER_BUDGET,
   COPILOT_ERROR_CREDITS_EXHAUSTED,
   COPILOT_ERROR_INVALID_MODEL,
+  COPILOT_ERROR_INVALID_REASONING,
   COPILOT_ERROR_RATE_LIMITED,
   COPILOT_ERROR_UNAUTHORIZED,
   mapCopilotSseError,
@@ -28,6 +29,8 @@ export function mapCopilotErrorCode(code: string, messageVi: string): string {
       return COPILOT_ERROR_EMPTY_OUTPUT;
     case "models_unavailable":
       return COPILOT_ERROR_MODELS_UNAVAILABLE;
+    case "invalid_reasoning_effort":
+      return COPILOT_ERROR_INVALID_REASONING;
     case "provider_error":
       return messageVi.trim() ? mapCopilotSseError(messageVi) : COPILOT_ERROR;
     default:
