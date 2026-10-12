@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from "react";
 import type { CopilotApiClient } from "../../lib/copilot-api";
 import type { CopilotModelRecord, ModelsListResponse } from "../../lib/copilot-schema";
-import { loadCopilotModels } from "../../lib/copilot-models-cache";
+import { getCachedModelsResponse, loadCopilotModels } from "../../lib/copilot-models-cache";
 
 type ModelsSnapshot = {
   response: ModelsListResponse | null;
@@ -33,6 +33,13 @@ export function ensureCopilotModelsLoaded(api: CopilotApiClient): void {
   if (boundApi !== api) {
     boundApi = api;
     started = false;
+  }
+  const cached = getCachedModelsResponse();
+  if (cached) {
+    snapshot = { response: cached, loading: false, error: null };
+    started = true;
+    emit();
+    return;
   }
   if (started) return;
   started = true;
