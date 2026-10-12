@@ -164,6 +164,7 @@ class PydanticAiRunner:
                 model,
                 output_type=output_type,
                 instructions=INSTRUCTIONS,
+                retries={"output": output_retries_for_model(current_plan.model)},
             )
             run_settings = strip_thinking_when_routed(
                 current_plan.model,
@@ -171,11 +172,7 @@ class PydanticAiRunner:
                 dict(current_plan.model_settings),
             )
             try:
-                result = await agent.run(
-                    prompt,
-                    model_settings=run_settings,
-                    output_retries=output_retries_for_model(current_plan.model),
-                )
+                result = await agent.run(prompt, model_settings=run_settings)
                 break
             except UnexpectedModelBehavior as exc:
                 if attempt == 0:
@@ -207,7 +204,14 @@ class PydanticAiRunner:
                 return
             except Exception:
                 logger.exception("copilot agent run failed")
-                yield "error", error_payload("provider_error", EMPTY_MODEL_OUTPUT_MSG)
+                yield (
+                    "error",
+                    error_payload(
+                        "internal_error",
+                        "Lỗi nội bộ máy chủ Copilot",
+                        "unexpected agent failure",
+                    ),
+                )
                 yield "done", {}
                 return
 

@@ -1,0 +1,53 @@
+import json
+
+import pytest
+from pydantic_ai import Agent
+from pydantic_ai.models.test import TestModel
+
+from cryptosignal_copilot.agent import INSTRUCTIONS
+from cryptosignal_copilot.agent_output import build_agent_output_type, output_retries_for_model
+from cryptosignal_copilot.model_catalog import normalize_model_row
+from cryptosignal_copilot.run_settings import build_run_model_settings
+from cryptosignal_copilot.schema import AnalyzeResult
+
+_VALID_JSON = json.dumps({"summary": "Phân tích ngắn", "shapes": [], "markers": []})
+
+
+async def _run_with_test_model(catalog_model, custom_output_text: str) -> AnalyzeResult:
+    test_model = TestModel(call_tools=[], custom_output_text=custom_output_text)
+    settings, _ = build_run_model_settings(catalog_model)
+    agent = Agent(
+        test_model,
+        output_type=build_agent_output_type(catalog_model),
+        instructions=INSTRUCTIONS,
+        retries={"output": output_retries_for_model(catalog_model)},
+    )
+    result = await agent.run("analyze", model_settings=settings)
+    assert isinstance(result.output, AnalyzeResult)
+    return result.output
+
+
+@pytest.mark.asyncio
+async def test_agent_run_prompted_output_with_test_model():
+    model = normalize_model_row(
+        {
+            "id": "agentrouter/deepseek-v4-flash",
+            "owned_by": "agentrouter",
+            "context_length": 1_000_000,
+            "max_output_tokens": 384_000,
+            "capabilities": {
+                "reasoning": True,
+                "effort_tiers": ["none", "low"],
+            },
+        }
+    )
+    output = await _run_with_test_model(model, _VALID_JSON)
+    assert output.summary == "Phân tích ngắn"
+
+
+@pytest.mark.asyncio
+async def test_agent_run_text_json_fence_with_test_model():
+    model = normalize_model_row({"id": "cursor/composer-2.5", "owned_by": "cursor"})
+    fenced = f"```json\n{_VALID_JSON}\n```"
+    output = await _run_with_test_model(model, fenced)
+    assert output.summary == "Phân tích ngắn"
