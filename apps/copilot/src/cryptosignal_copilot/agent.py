@@ -18,6 +18,7 @@ from cryptosignal_copilot.drawing_gate import (
     format_drop_note,
 )
 from cryptosignal_copilot.model_factory import build_model
+from cryptosignal_copilot.model_negative_cache import get_model_negative_cache
 from cryptosignal_copilot.model_routes import resolve_provider_model_id, strip_thinking_when_routed
 from cryptosignal_copilot.provider_errors import (
     EMPTY_MODEL_OUTPUT_MSG,
@@ -124,8 +125,7 @@ logger = logging.getLogger(__name__)
 
 
 class AgentRunner(Protocol):
-    def run(self, plan: AnalyzePlan) -> AsyncIterator[tuple[str, dict]]:
-        ...
+    def run(self, plan: AnalyzePlan) -> AsyncIterator[tuple[str, dict]]: ...
 
 
 class PydanticAiRunner:
@@ -139,12 +139,15 @@ class PydanticAiRunner:
         # (get_klines → type=custom → agentrouter 400). Requests must send tools:[].
 
         prompt = _build_user_prompt(request)
-        yield "text", {
-            "delta": (
-                f"Đang phân tích {request.symbol} {request.interval} "
-                f"({len(request.closedCandles)} nến đã đóng)…\n\n"
-            )
-        }
+        yield (
+            "text",
+            {
+                "delta": (
+                    f"Đang phân tích {request.symbol} {request.interval} "
+                    f"({len(request.closedCandles)} nến đã đóng)…\n\n"
+                )
+            },
+        )
 
         current_plan = plan
         result = None
@@ -184,6 +187,11 @@ class PydanticAiRunner:
                 yield "done", {}
                 return
             except ModelHTTPError as exc:
+                status = getattr(exc, "status_code", None)
+                if status in {402, 502}:
+                    cache = get_model_negative_cache()
+                    cache.mark(provider_model_id)
+                    cache.mark(current_plan.model.id)
                 yield "error", model_http_error_payload(exc)
                 yield "done", {}
                 return
@@ -222,10 +230,13 @@ class PydanticAiRunner:
         if dropped:
             yield "text", {"delta": format_drop_note(dropped)}
 
-        yield "shapes", {
-            "shapes": valid_shapes,
-            "dropped": [{"id": shape_id, "reason": reason} for shape_id, reason in dropped],
-        }
+        yield (
+            "shapes",
+            {
+                "shapes": valid_shapes,
+                "dropped": [{"id": shape_id, "reason": reason} for shape_id, reason in dropped],
+            },
+        )
         if valid_shapes:
             names = ", ".join(str(s.get("name", "?")) for s in valid_shapes[:5])
             more = f" (+{len(valid_shapes) - 5} nữa)" if len(valid_shapes) > 5 else ""
@@ -234,7 +245,10 @@ class PydanticAiRunner:
         if output.markers:
             valid_markers, dropped_marker_ids = filter_agent_markers(output.markers, allowed_times)
             if dropped_marker_ids:
-                yield "text", {"delta": f"\n\nĐã bỏ qua {len(dropped_marker_ids)} marker không hợp lệ."}
+                yield (
+                    "text",
+                    {"delta": f"\n\nĐã bỏ qua {len(dropped_marker_ids)} marker không hợp lệ."},
+                )
             yield "markers", {"markers": valid_markers}
 
         yield "done", {}
@@ -267,10 +281,7 @@ def _projection_note(request: AnalyzeRequest) -> str:
 
 
 def compact_candle_rows(request: AnalyzeRequest) -> list[list[float]]:
-    return [
-        [c.time, c.open, c.high, c.low, c.close, c.volume]
-        for c in request.closedCandles
-    ]
+    return [[c.time, c.open, c.high, c.low, c.close, c.volume] for c in request.closedCandles]
 
 
 def request_payload_for_prompt(request: AnalyzeRequest) -> dict:

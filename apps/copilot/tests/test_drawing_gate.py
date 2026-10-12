@@ -607,7 +607,13 @@ def test_cap_keeps_triangle_pair_together(monkeypatch):
         ),
     ]
     extras = [
-        trendline(f"h{index}", f"Level {index}", (ts(20), 100.0 + index), (ts(32), 100.0 + index), confidence=0.95)
+        trendline(
+            f"h{index}",
+            f"Level {index}",
+            (ts(20), 100.0 + index),
+            (ts(32), 100.0 + index),
+            confidence=0.95,
+        )
         for index in range(5)
     ]
     valid, dropped = _filter(extras + rails, rows)

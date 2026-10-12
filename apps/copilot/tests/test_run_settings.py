@@ -2,7 +2,7 @@ from cryptosignal_copilot.model_catalog import normalize_model_row
 from cryptosignal_copilot.run_settings import build_run_model_settings, lower_reasoning_effort
 
 
-def test_deepseek_v4_flash_uses_low_effort_and_16k_cap():
+def test_deepseek_v4_flash_uses_low_effort_and_32k_cap():
     model = normalize_model_row(
         {
             "id": "agentrouter/deepseek-v4-flash",
@@ -14,7 +14,7 @@ def test_deepseek_v4_flash_uses_low_effort_and_16k_cap():
         }
     )
     settings, effort = build_run_model_settings(model)
-    assert settings["max_tokens"] == 16_384
+    assert settings["max_tokens"] == 32_768
     assert effort == "low"
     assert settings["thinking"] == "low"
 

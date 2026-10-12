@@ -19,7 +19,7 @@ def test_normalize_omniroute_deepseek_flash():
         },
     }
     model = normalize_model_row(row)
-    assert model.request_max_tokens == 16_384
+    assert model.request_max_tokens == 32_768
     assert model.recommended_candles == 100
     assert model.recommended_max_candles == 500
     assert model.supports_reasoning is True
@@ -60,6 +60,8 @@ async def test_models_endpoint_and_cache_single_fetch(llm_env, test_app):
     assert body["default_model"] == "agentrouter/deepseek-v4-flash"
     ids = {m["id"] for m in body["models"]}
     assert "agentrouter/deepseek-v4-flash" in ids
-    assert len(ids) == 4
+    from cryptosignal_copilot.model_visibility import load_visibility_allowlist
+
+    assert ids == set(load_visibility_allowlist())
     assert second.status_code == 200
     assert calls == 1

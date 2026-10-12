@@ -20,5 +20,8 @@ def test_agent_module_does_not_register_get_klines_tool():
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             for child in ast.walk(node):
-                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)) and child.name == "get_klines":
+                if (
+                    isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
+                    and child.name == "get_klines"
+                ):
                     raise AssertionError("get_klines function still defined")

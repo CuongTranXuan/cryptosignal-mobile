@@ -39,7 +39,11 @@ class AnalyzePlan:
 
 
 def trim_request_candles(request: AnalyzeRequest, count: int) -> AnalyzeRequest:
-    candles = request.closedCandles[-count:] if count < len(request.closedCandles) else request.closedCandles
+    candles = (
+        request.closedCandles[-count:]
+        if count < len(request.closedCandles)
+        else request.closedCandles
+    )
     if not candles:
         return request.model_copy(update={"closedCandles": candles})
     from_time = min(c.time for c in candles)

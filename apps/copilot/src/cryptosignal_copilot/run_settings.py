@@ -15,12 +15,16 @@ def build_run_model_settings(
     """Map spec §2.3 to pydantic-ai `ModelSettings` (unified `thinking` field)."""
     max_tokens = model.request_max_tokens
     effort = reasoning_effort
+    routes = dict(model.effort_routes)
 
-    if not model.supports_reasoning:
+    if not model.supports_reasoning or not model.reasoning_efforts:
         return {"max_tokens": min(4_096, model.max_output_tokens)}, None
 
     if effort is None:
         effort = "low" if model.reasoning_efforts else None
+
+    if effort and effort in routes:
+        return {"max_tokens": max_tokens}, effort
 
     settings: ModelSettings = {"max_tokens": max_tokens}
     if effort is None:
@@ -28,6 +32,8 @@ def build_run_model_settings(
         return settings, None
 
     if effort == "none":
+        if "none" in routes:
+            return {"max_tokens": max_tokens}, "none"
         settings["thinking"] = False
         return settings, "none"
 

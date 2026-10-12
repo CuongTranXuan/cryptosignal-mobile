@@ -19,6 +19,12 @@ from cryptosignal_copilot.config import (
     load_models_fetch_timeout_s,
 )
 from cryptosignal_copilot.model_availability import filter_available_models
+from cryptosignal_copilot.model_negative_cache import get_model_negative_cache
+from cryptosignal_copilot.model_visibility import (
+    is_cursor_auto_router,
+    is_cursor_provider_model,
+    normalize_upstream_model_id,
+)
 
 SourceTier = Literal["provider", "table", "default"]
 FetchModelsFn = Callable[[LlmConfig], Awaitable[list[dict[str, Any]]]]
@@ -26,7 +32,13 @@ FetchModelsFn = Callable[[LlmConfig], Awaitable[list[dict[str, Any]]]]
 _TIER_RANK = {"provider": 0, "table": 1, "default": 2}
 
 _TABLE: list[tuple[re.Pattern[str], int, int, bool, list[str] | None]] = [
-    (re.compile(r"deepseek-v4-(flash|pro)", re.I), 1_000_000, 384_000, True, ["none", "low", "medium", "high", "xhigh", "max"]),
+    (
+        re.compile(r"deepseek-v4-(flash|pro)", re.I),
+        1_000_000,
+        384_000,
+        True,
+        ["none", "low", "medium", "high", "xhigh", "max"],
+    ),
     (re.compile(r"deepseek-r1|deepseek-reasoner", re.I), 128_000, 32_000, True, None),
     (re.compile(r"gpt-4o|gpt-4\.1", re.I), 128_000, 16_384, False, None),
     (re.compile(r"o[134]|gpt-5", re.I), 200_000, 100_000, True, ["low", "medium", "high"]),
@@ -36,7 +48,10 @@ _TABLE: list[tuple[re.Pattern[str], int, int, bool, list[str] | None]] = [
 
 _DEFAULT_CONTEXT = 32_000
 _DEFAULT_MAX_OUT = 4_096
+_CURSOR_CONTEXT = 128_000
+_CURSOR_MAX_OUT = 8_192
 _REASONING_CAP = 16_384
+_DEEPSEEK_FLASH_REASONING_CAP = 32_768
 _NON_REASONING_CAP = 4_096
 
 
@@ -86,7 +101,12 @@ class _FieldSources:
 
     def worst(self) -> SourceTier:
         return max(
-            (self.context_window, self.max_output_tokens, self.supports_reasoning, self.reasoning_efforts),
+            (
+                self.context_window,
+                self.max_output_tokens,
+                self.supports_reasoning,
+                self.reasoning_efforts,
+            ),
             key=lambda tier: _TIER_RANK[tier],
         )
 
@@ -170,27 +190,46 @@ def _is_advanced_route(model_id: str, owned_by: str) -> bool:
     lower = model_id.lower()
     if owned_by == "combo":
         return True
+    if is_cursor_auto_router(model_id):
+        return True
+    if "/no-think/" in lower:
+        return True
     if lower.startswith("auto/") or "/auto/" in lower:
         return True
     return False
 
 
-def _request_max_tokens(supports_reasoning: bool, max_output_tokens: int) -> int:
+def _request_max_tokens(
+    supports_reasoning: bool,
+    max_output_tokens: int,
+    *,
+    model_id: str,
+    effort_routes: tuple[tuple[str, str], ...],
+) -> int:
     cap = _REASONING_CAP if supports_reasoning else _NON_REASONING_CAP
+    if supports_reasoning and re.search(r"deepseek-v4-flash", model_id, re.I):
+        cap = _DEEPSEEK_FLASH_REASONING_CAP
+    elif supports_reasoning and effort_routes:
+        cap = max(cap, 24_576)
     return min(cap, max_output_tokens)
 
 
-def normalize_model_row(raw: dict[str, Any], *, window_bars: int = BINANCE_CANDLE_LIMIT) -> NormalizedModel:
+def normalize_model_row(
+    raw: dict[str, Any], *, window_bars: int = BINANCE_CANDLE_LIMIT
+) -> NormalizedModel:
     raw = dict(raw)
     effort_routes_raw = raw.pop("_effort_routes", None)
     effort_routes: tuple[tuple[str, str], ...] = ()
     if isinstance(effort_routes_raw, dict):
         effort_routes = tuple(sorted((str(k), str(v)) for k, v in effort_routes_raw.items()))
 
-    model_id = str(raw.get("id") or "")
+    model_id = normalize_upstream_model_id(str(raw.get("id") or ""))
+    raw["id"] = model_id
     root = raw.get("root")
     root_str = str(root) if root else None
     owned_by = str(raw.get("owned_by") or "")
+    if model_id.startswith("cursor/"):
+        owned_by = "cursor"
     label = str(raw.get("name") or raw.get("label") or model_id.split("/")[-1])
     provider = owned_by or (model_id.split("/")[0] if "/" in model_id else "unknown")
 
@@ -244,7 +283,24 @@ def normalize_model_row(raw: dict[str, Any], *, window_bars: int = BINANCE_CANDL
     if json_support is None:
         json_support = True
 
-    request_max = _request_max_tokens(reasoning, out)
+    if is_cursor_provider_model(model_id, owned_by):
+        reasoning = False
+        efforts = []
+        sources.supports_reasoning = "provider"
+        sources.reasoning_efforts = "provider"
+        if ctx == _DEFAULT_CONTEXT:
+            ctx = _CURSOR_CONTEXT
+            sources.context_window = "default"
+        if out == _DEFAULT_MAX_OUT:
+            out = _CURSOR_MAX_OUT
+            sources.max_output_tokens = "default"
+
+    request_max = _request_max_tokens(
+        reasoning,
+        out,
+        model_id=model_id,
+        effort_routes=effort_routes,
+    )
     rec, rec_max, presets = model_candle_limits(
         ctx,
         request_max,
@@ -311,12 +367,38 @@ async def default_fetch_models(cfg: LlmConfig) -> list[dict[str, Any]]:
     return [item for item in data if isinstance(item, dict) and isinstance(item.get("id"), str)]
 
 
-def snapshot_from_rows(cfg: LlmConfig, rows: list[dict[str, Any]], *, fetched_at: float, ttl_s: float) -> ModelsSnapshot:
-    filtered = filter_available_models(rows, default_model_id=cfg.model)
+def snapshot_from_rows(
+    cfg: LlmConfig, rows: list[dict[str, Any]], *, fetched_at: float, ttl_s: float
+) -> ModelsSnapshot:
+    negative = get_model_negative_cache()
+    blocked = frozenset(
+        normalize_upstream_model_id(str(row["id"]))
+        for row in rows
+        if isinstance(row.get("id"), str)
+        and negative.is_blocked(normalize_upstream_model_id(str(row["id"])))
+    )
+    filtered = filter_available_models(
+        rows,
+        default_model_id=cfg.model,
+        blocked_ids=blocked,
+    )
     by_id: dict[str, dict[str, Any]] = {row["id"]: row for row in filtered}
-    if cfg.model and cfg.model not in by_id:
-        by_id[cfg.model] = {"id": cfg.model, "owned_by": cfg.model.split("/")[0] if "/" in cfg.model else "default"}
-    models = tuple(sorted((normalize_model_row(raw) for raw in by_id.values()), key=lambda m: m.id))
+    default_id = normalize_upstream_model_id(cfg.model)
+    if default_id and default_id not in by_id:
+        by_id[default_id] = {
+            "id": default_id,
+            "owned_by": default_id.split("/")[0] if "/" in default_id else "default",
+        }
+    models = tuple(
+        sorted(
+            (
+                m
+                for m in (normalize_model_row(raw) for raw in by_id.values())
+                if not negative.is_blocked(m.id)
+            ),
+            key=lambda m: m.id,
+        )
+    )
     return ModelsSnapshot(
         default_model=cfg.model,
         models=models,

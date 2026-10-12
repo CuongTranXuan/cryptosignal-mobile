@@ -464,7 +464,11 @@ def _review_polyline(
 ) -> tuple[dict[str, Any] | None, str | None]:
     if _TRIANGLE_RE.search(str(data.get("name", ""))):
         return None, "triangle-polyline"
-    historical = [point for point in points if isinstance(point, dict) and int(point["time"]) <= ctx.last_closed]
+    historical = [
+        point
+        for point in points
+        if isinstance(point, dict) and int(point["time"]) <= ctx.last_closed
+    ]
     if len(historical) < 2:
         return None, "no-anchor"
     for point in historical:
@@ -529,7 +533,11 @@ def _anchor_swing(point: dict[str, Any], ctx: _GateContext) -> tuple[Swing | Non
     time = int(point["time"])
     price = float(point["price"])
     candle = ctx.candle_by_time.get(time)
-    if candle is not None and _price_inside_bar(price, candle) and not _price_on_wick(price, candle, ctx.tolerance):
+    if (
+        candle is not None
+        and _price_inside_bar(price, candle)
+        and not _price_on_wick(price, candle, ctx.tolerance)
+    ):
         return None, "non-wick"
     best: Swing | None = None
     best_distance = ANCHOR_SNAP_BARS + 1.0
@@ -602,7 +610,9 @@ def _line_has_impulse(hits: list[Swing], ctx: _GateContext) -> bool:
         return True
     start = min(hit.time for hit in hits)
     end = max(hit.time for hit in hits)
-    has_opposite = any(swing.side != hits[0].side and start <= swing.time <= end for swing in ctx.swings)
+    has_opposite = any(
+        swing.side != hits[0].side and start <= swing.time <= end for swing in ctx.swings
+    )
     if not has_opposite:
         return True
     return _pattern_height(hits, ctx) + 1e-9 >= IMPULSE_ATR_MULT * ctx.atr
@@ -612,7 +622,9 @@ def _segment_near_vertical(points: list[Any], ctx: _GateContext) -> bool:
     for left, right in zip(points, points[1:]):
         if _prices_equal(float(left["price"]), float(right["price"])):
             continue
-        if _is_near_vertical(int(left["time"]), float(left["price"]), int(right["time"]), float(right["price"]), ctx):
+        if _is_near_vertical(
+            int(left["time"]), float(left["price"]), int(right["time"]), float(right["price"]), ctx
+        ):
             return True
     return False
 
@@ -654,9 +666,13 @@ def _fractal_swings(candles: list[CandleLike], interval: IntervalName) -> list[S
         low = float(candles[index].low)
         left = candles[index - radius : index]
         right = candles[index + 1 : index + radius + 1]
-        if high > max(float(candle.high) for candle in left) and high > max(float(candle.high) for candle in right):
+        if high > max(float(candle.high) for candle in left) and high > max(
+            float(candle.high) for candle in right
+        ):
             found.append(Swing(index, int(candles[index].time), high, "high"))
-        if low < min(float(candle.low) for candle in left) and low < min(float(candle.low) for candle in right):
+        if low < min(float(candle.low) for candle in left) and low < min(
+            float(candle.low) for candle in right
+        ):
             found.append(Swing(index, int(candles[index].time), low, "low"))
     found.extend(_provisional_edge_swings(candles, radius))
     highs = _thin_swings([swing for swing in found if swing.side == "high"])
@@ -768,7 +784,11 @@ def _span_bars(times: list[int], bar: int) -> float:
 
 
 def _last_historical_time(points: list[Any], last_closed: int) -> int | None:
-    times = [int(point["time"]) for point in points if isinstance(point, dict) and int(point["time"]) <= last_closed]
+    times = [
+        int(point["time"])
+        for point in points
+        if isinstance(point, dict) and int(point["time"]) <= last_closed
+    ]
     if not times:
         return None
     return max(times)
@@ -792,7 +812,11 @@ def _forward_time(shape: dict[str, Any], last_closed: int) -> float | None:
     points = shape.get("points")
     if not isinstance(points, list):
         return None
-    future = [int(point["time"]) for point in points if isinstance(point, dict) and int(point["time"]) > last_closed]
+    future = [
+        int(point["time"])
+        for point in points
+        if isinstance(point, dict) and int(point["time"]) > last_closed
+    ]
     if len(future) != 1:
         return None
     return float(future[0])
@@ -813,7 +837,10 @@ def _role(name: str) -> str:
 
 
 def _is_upper_lower_pair(left: dict[str, Any], right: dict[str, Any]) -> bool:
-    return {_role(str(left.get("name", ""))), _role(str(right.get("name", "")))} == {"upper", "lower"}
+    return {_role(str(left.get("name", ""))), _role(str(right.get("name", "")))} == {
+        "upper",
+        "lower",
+    }
 
 
 def _apply_batch_rules(
@@ -850,7 +877,11 @@ def _drop_fib_extensions_without_c(
 
 def _has_c_pivot(shapes: list[dict[str, Any]], ctx: _GateContext) -> bool:
     """True when some non-extension shape has a wick pivot strictly after impulse B."""
-    impulses = [shape for shape in _diagonal_trendlines(shapes) if not _FIB_EXT_RE.match(str(shape.get("name", "")))]
+    impulses = [
+        shape
+        for shape in _diagonal_trendlines(shapes)
+        if not _FIB_EXT_RE.match(str(shape.get("name", "")))
+    ]
     if not impulses:
         return False
     impulse = max(impulses, key=_price_span)
@@ -867,7 +898,11 @@ def _has_c_pivot(shapes: list[dict[str, Any]], ctx: _GateContext) -> bool:
         if not isinstance(points, list):
             continue
         for point in points:
-            if not isinstance(point, dict) or int(point["time"]) > ctx.last_closed or int(point["time"]) <= b_time:
+            if (
+                not isinstance(point, dict)
+                or int(point["time"]) > ctx.last_closed
+                or int(point["time"]) <= b_time
+            ):
                 continue
             swing, _reason = _anchor_swing(point, ctx)
             if swing is not None:
@@ -883,7 +918,9 @@ def _drop_invalid_triangles(
     drop_ids: dict[str, str] = {}
     for left, right in _candidate_triangle_pairs(shapes, ctx):
         # Geometric pairs that do not claim to be a triangle are apex-clamped only.
-        claimed = _claims_triangle(left) or _claims_triangle(right) or _is_upper_lower_pair(left, right)
+        claimed = (
+            _claims_triangle(left) or _claims_triangle(right) or _is_upper_lower_pair(left, right)
+        )
         if not claimed:
             continue
         reason = _triangle_structure_reason(left, right, ctx)
@@ -891,7 +928,11 @@ def _drop_invalid_triangles(
             continue
         drop_ids[_shape_id(left)] = reason
         drop_ids[_shape_id(right)] = reason
-    claimed_ids = {_shape_id(shape) for shape in shapes if _claims_triangle(shape) and shape.get("kind") == "trendline"}
+    claimed_ids = {
+        _shape_id(shape)
+        for shape in shapes
+        if _claims_triangle(shape) and shape.get("kind") == "trendline"
+    }
     paired_ids: set[str] = set()
     for left, right in _candidate_triangle_pairs(shapes, ctx):
         paired_ids.add(_shape_id(left))
@@ -904,8 +945,12 @@ def _drop_invalid_triangles(
     return kept, [(shape_id, reason) for shape_id, reason in drop_ids.items()]
 
 
-def _drop_unpaired_triangle_rails(shapes: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[Drop]]:
-    claimed = [shape for shape in shapes if shape.get("kind") == "trendline" and _claims_triangle(shape)]
+def _drop_unpaired_triangle_rails(
+    shapes: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[Drop]]:
+    claimed = [
+        shape for shape in shapes if shape.get("kind") == "trendline" and _claims_triangle(shape)
+    ]
     if len(claimed) == 1:
         shape_id = _shape_id(claimed[0])
         kept = [shape for shape in shapes if _shape_id(shape) != shape_id]
@@ -992,9 +1037,7 @@ def _convergence_apex_time(
         return None
     horizontal_member = _is_horizontal_line(left) or _is_horizontal_line(right)
     triangle_pair = (
-        _claims_triangle(left)
-        or _claims_triangle(right)
-        or _is_upper_lower_pair(left, right)
+        _claims_triangle(left) or _claims_triangle(right) or _is_upper_lower_pair(left, right)
     )
     if horizontal_member and not triangle_pair:
         return None
@@ -1026,11 +1069,17 @@ def _convergence_apex_time(
     return apex_time
 
 
-def _rail_side_hits(shape: dict[str, Any], ctx: _GateContext) -> tuple[SwingSide | None, list[Swing]]:
+def _rail_side_hits(
+    shape: dict[str, Any], ctx: _GateContext
+) -> tuple[SwingSide | None, list[Swing]]:
     points = shape.get("points")
     if not isinstance(points, list):
         return None, []
-    historical = [point for point in points if isinstance(point, dict) and int(point["time"]) <= ctx.last_closed]
+    historical = [
+        point
+        for point in points
+        if isinstance(point, dict) and int(point["time"]) <= ctx.last_closed
+    ]
     if not historical:
         return None, []
     swing, _reason = _anchor_swing(historical[0], ctx)
@@ -1150,7 +1199,9 @@ def _cap_shapes(
         size -= len(groups[group_index])
     drop_indexes = {index for group_index in drop_groups for index in groups[group_index]}
     kept = [shape for index, shape in enumerate(shapes) if index not in drop_indexes]
-    dropped = [(_shape_id(shape), "cap") for index, shape in enumerate(shapes) if index in drop_indexes]
+    dropped = [
+        (_shape_id(shape), "cap") for index, shape in enumerate(shapes) if index in drop_indexes
+    ]
     return kept, dropped
 
 

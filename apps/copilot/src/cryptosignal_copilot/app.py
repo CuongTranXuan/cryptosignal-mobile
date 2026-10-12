@@ -105,11 +105,7 @@ def create_app(
         if q:
             needle = q.strip().lower()
             if needle:
-                models = [
-                    m
-                    for m in models
-                    if needle in m.id.lower() or needle in m.label.lower()
-                ]
+                models = [m for m in models if needle in m.id.lower() or needle in m.label.lower()]
         body = snapshot.to_api_dict()
         body["models"] = [m.to_api_dict() for m in models]
         return body
@@ -182,6 +178,14 @@ def create_app(
         except ValidationError as exc:
             return JSONResponse({"detail": exc.errors()}, status_code=422)
 
+        try:
+            await prepare_analyze(catalog, cfg, analyze_req)
+        except AnalyzePrepError as exc:
+            return JSONResponse(
+                error_payload(exc.code, exc.message, exc.detail),
+                status_code=exc.status_code,
+            )
+
         async def event_stream() -> AsyncIterator[str]:
             async with state_lock:
                 latest_request["value"] = analyze_req
@@ -216,7 +220,9 @@ def create_app(
 
                     yield sse("meta", run_plan.meta)
 
-                    queue: asyncio.Queue[tuple[str, str | None, dict | BaseException | None]] = asyncio.Queue()
+                    queue: asyncio.Queue[tuple[str, str | None, dict | BaseException | None]] = (
+                        asyncio.Queue()
+                    )
 
                     async def _produce(
                         run_plan=run_plan,
@@ -236,7 +242,9 @@ def create_app(
                     try:
                         while True:
                             try:
-                                kind, name, payload = await asyncio.wait_for(queue.get(), timeout=12.0)
+                                kind, name, payload = await asyncio.wait_for(
+                                    queue.get(), timeout=12.0
+                                )
                             except TimeoutError:
                                 yield ": keepalive\n\n"
                                 continue

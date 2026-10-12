@@ -47,7 +47,11 @@ class PatternShape(BaseModel):
         if self.kind == "polyline" and len(self.points) < 3:
             raise ValueError("polyline needs >= 3 points")
         if self.kind == "zone":
-            if self.priceLow is None or self.priceHigh is None or not (self.priceLow < self.priceHigh):
+            if (
+                self.priceLow is None
+                or self.priceHigh is None
+                or not (self.priceLow < self.priceHigh)
+            ):
                 raise ValueError("zone needs priceLow < priceHigh")
         return self
 
@@ -342,7 +346,10 @@ def _collapse_trendline_points(
     if len(points) <= 2 or not closed_times:
         return points
     last_closed = max(closed_times)
-    closed = sorted((point for point in points if int(point["time"]) in closed_times), key=lambda point: int(point["time"]))
+    closed = sorted(
+        (point for point in points if int(point["time"]) in closed_times),
+        key=lambda point: int(point["time"]),
+    )
     forward = [point for point in points if int(point["time"]) > last_closed]
     if len(closed) < 2:
         logger.info(
@@ -366,9 +373,12 @@ def _collapse_trendline_points(
         return [start, end]
     future = max(forward, key=lambda point: int(point["time"]))
     span = int(end["time"]) - int(start["time"])
-    price = float(start["price"]) + (float(end["price"]) - float(start["price"])) * (
-        int(future["time"]) - int(start["time"])
-    ) / span
+    price = (
+        float(start["price"])
+        + (float(end["price"]) - float(start["price"]))
+        * (int(future["time"]) - int(start["time"]))
+        / span
+    )
     logger.info(
         "trendline collapse raw=%s swings=%s,%s forward=%s reprojected_price=%s",
         len(points),
@@ -443,7 +453,11 @@ def coerce_agent_shape(
     if kind == "trendline" and len(points) > 2:
         logger.info("trendline raw point count=%s id=%s", len(points), data.get("id"))
         points = _collapse_trendline_points(points, closed_times)
-    if kind == "zone" and len(points) >= 2 and (data.get("priceLow") is None or data.get("priceHigh") is None):
+    if (
+        kind == "zone"
+        and len(points) >= 2
+        and (data.get("priceLow") is None or data.get("priceHigh") is None)
+    ):
         prices = [point["price"] for point in points]
         data["priceLow"] = min(prices)
         data["priceHigh"] = max(prices)

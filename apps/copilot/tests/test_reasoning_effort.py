@@ -17,9 +17,7 @@ async def test_invalid_reasoning_effort_rejected(llm_env):
             "interval": "1h",
             "from": 1,
             "to": 2,
-            "closedCandles": [
-                {"time": 1, "open": 1, "high": 2, "low": 1, "close": 2, "volume": 1}
-            ],
+            "closedCandles": [{"time": 1, "open": 1, "high": 2, "low": 1, "close": 2, "volume": 1}],
             "existingShapes": [],
             "prompt": "x",
             "reasoning_effort": "not-a-tier",

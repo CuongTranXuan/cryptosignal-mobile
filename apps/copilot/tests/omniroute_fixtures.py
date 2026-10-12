@@ -4,17 +4,16 @@ from __future__ import annotations
 
 from typing import Any
 
-_WORKING_BASES = (
-    "agentrouter/claude-opus-4-8",
-    "agentrouter/claude-opus-5",
-    "agentrouter/deepseek-v4-flash",
-    "agentrouter/gpt-6-astra",
-)
+from cryptosignal_copilot.model_visibility import load_visibility_allowlist
+
+_AGENTROUTER_BASES = ("agentrouter/deepseek-v4-flash",)
 
 _EFFORT_SUFFIXES = ("-low", "-medium", "-high", "-max")
 
+_CURSOR_VISIBILITY = tuple(mid for mid in load_visibility_allowlist() if mid.startswith("cursor/"))
 
-def _base_row(model_id: str) -> dict[str, Any]:
+
+def _agentrouter_row(model_id: str) -> dict[str, Any]:
     name = model_id.split("/", 1)[-1]
     return {
         "id": model_id,
@@ -36,17 +35,37 @@ def _base_row(model_id: str) -> dict[str, Any]:
     }
 
 
+def _cursor_row(model_id: str) -> dict[str, Any]:
+    return {
+        "id": model_id,
+        "object": "model",
+        "owned_by": "cursor",
+        "root": model_id.split("/", 1)[-1],
+    }
+
+
 def omniroute_models_payload() -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
-    for base in _WORKING_BASES:
-        rows.append(_base_row(base))
+    for base in _AGENTROUTER_BASES:
+        rows.append(_agentrouter_row(base))
         short = base.split("/", 1)[-1]
-        rows.append({**_base_row(f"agentrouter/no-think/{short}"), "id": f"agentrouter/no-think/{short}"})
+        rows.append(
+            {
+                **_agentrouter_row(f"agentrouter/no-think/{short}"),
+                "id": f"agentrouter/no-think/{short}",
+            }
+        )
         for suffix in _EFFORT_SUFFIXES:
-            rows.append({**_base_row(f"{base}{suffix}"), "id": f"{base}{suffix}"})
+            rows.append({**_agentrouter_row(f"{base}{suffix}"), "id": f"{base}{suffix}"})
 
+    for cursor_id in _CURSOR_VISIBILITY:
+        rows.append(_cursor_row(cursor_id))
+        rows.append(_cursor_row(cursor_id.replace("cursor/", "cu/", 1)))
+
+    rows.append(_cursor_row("cursor/composer-2"))
+    rows.append({"id": "aihorde/flux-schnell", "owned_by": "aihorde"})
+    rows.append({"id": "cursor/veo-2", "owned_by": "cursor"})
+    rows.extend({"id": f"cursor/noise-{i}", "owned_by": "cursor"} for i in range(200))
     rows.extend({"id": f"cursor/model-{i}", "owned_by": "cursor"} for i in range(1400))
-    rows.extend({"id": f"aihorde/model-{i}", "owned_by": "aihorde"} for i in range(164))
     rows.extend({"id": f"combo/route-{i}", "owned_by": "combo"} for i in range(45))
-    # 4 bases + 1 no-think + 4 effort each = 4 * 6 = 24 agentrouter rows (matches ~26 with extras)
     return rows

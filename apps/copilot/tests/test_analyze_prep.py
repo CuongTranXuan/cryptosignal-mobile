@@ -39,8 +39,7 @@ async def test_clamp_candle_count(llm_env):
     catalog = ModelsCatalog(fetch_models=_default_test_models)
     cfg = load_llm_config()
     candles = [
-        {"time": i, "open": 1, "high": 2, "low": 1, "close": 2, "volume": 1}
-        for i in range(600)
+        {"time": i, "open": 1, "high": 2, "low": 1, "close": 2, "volume": 1} for i in range(600)
     ]
     plan = await prepare_analyze(
         catalog,

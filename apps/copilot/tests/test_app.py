@@ -76,6 +76,28 @@ async def test_analyze_sse(llm_env, test_app):
 
 
 @pytest.mark.asyncio
+async def test_analyze_invalid_reasoning_effort_400_json(llm_env, test_app):
+    app = test_app(FakeRunner())
+    bad = {**ANALYZE, "reasoning_effort": "not-a-tier"}
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        res = await client.post("/v1/copilot/analyze", json=bad)
+    assert res.status_code == 400
+    body = res.json()
+    assert body["code"] == "invalid_reasoning_effort"
+    assert "event:" not in res.text
+
+
+@pytest.mark.asyncio
+async def test_analyze_cursor_rejects_reasoning_effort(llm_env, test_app):
+    app = test_app(FakeRunner())
+    bad = {**ANALYZE, "model": "cursor/auto", "reasoning_effort": "low"}
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        res = await client.post("/v1/copilot/analyze", json=bad)
+    assert res.status_code == 400
+    assert res.json()["code"] == "invalid_reasoning_effort"
+
+
+@pytest.mark.asyncio
 async def test_analyze_validation_error_422(llm_env, test_app):
     app = test_app(FakeRunner())
     bad = {**ANALYZE, "interval": "not-an-interval"}

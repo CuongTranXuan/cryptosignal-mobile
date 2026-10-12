@@ -8,9 +8,7 @@ PROVIDER_UNAUTHORIZED_MSG = "Copilot thất bại: nhà cung cấp không đư�
 PROVIDER_CREDITS_EXHAUSTED_MSG = "Copilot thất bại: hết credits nhà cung cấp"
 PROVIDER_RATE_LIMITED_MSG = "Copilot thất bại: nhà cung cấp bị giới hạn tốc độ"
 PROVIDER_GENERIC_FAILURE_MSG = "Copilot thất bại"
-EMPTY_MODEL_OUTPUT_MSG = (
-    "Mô hình không trả lời — thử ít nến hơn hoặc chọn mô hình khác"
-)
+EMPTY_MODEL_OUTPUT_MSG = "Mô hình không trả lời — thử ít nến hơn hoặc chọn mô hình khác"
 
 _CREDITS_EXHAUSTED_MARKERS = (
     "credits exhausted",
@@ -30,7 +28,9 @@ def error_payload(code: str, message: str, detail: str = "") -> dict[str, Any]:
 
 
 def model_http_error_payload(exc: ModelHTTPError) -> dict[str, Any]:
-    return error_payload("provider_error", model_http_error_message(exc), _provider_error_detail(exc))
+    return error_payload(
+        "provider_error", model_http_error_message(exc), _provider_error_detail(exc)
+    )
 
 
 def model_api_error_payload(exc: ModelAPIError) -> dict[str, Any]:

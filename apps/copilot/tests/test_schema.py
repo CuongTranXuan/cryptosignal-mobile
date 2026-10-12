@@ -7,7 +7,9 @@ from pydantic import ValidationError
 from cryptosignal_copilot.schema import AgentMarker, PatternShape, filter_agent_markers
 
 FIXTURE = Path(__file__).resolve().parents[3] / "packages" / "schema" / "pattern-shape.fixture.json"
-MARKER_FIXTURE = Path(__file__).resolve().parents[3] / "packages" / "schema" / "agent-marker.fixture.json"
+MARKER_FIXTURE = (
+    Path(__file__).resolve().parents[3] / "packages" / "schema" / "agent-marker.fixture.json"
+)
 
 
 def test_fixture_parses():
@@ -69,6 +71,7 @@ def test_filter_agent_markers_drops_invalid_and_out_of_window():
 
 def test_coerce_llm_sloppy_polyline_into_pattern_shape():
     from cryptosignal_copilot.schema import coerce_agent_shape, filter_preview_shapes
+
     raw = {
         "type": "polyline",
         "label": "Sym triangle upper",
@@ -79,9 +82,7 @@ def test_coerce_llm_sloppy_polyline_into_pattern_shape():
             {"time": 300, "price": 3},
         ],
     }
-    valid, dropped = filter_preview_shapes(
-        [raw], {100, 200, 300}, symbol="BTCUSDT", interval="1h"
-    )
+    valid, dropped = filter_preview_shapes([raw], {100, 200, 300}, symbol="BTCUSDT", interval="1h")
     assert dropped == []
     assert len(valid) == 1
     assert valid[0]["kind"] == "polyline"
