@@ -18,7 +18,7 @@ def build_run_model_settings(
     routes = dict(model.effort_routes)
 
     if not model.supports_reasoning or not model.reasoning_efforts:
-        return {"max_tokens": min(4_096, model.max_output_tokens)}, None
+        return {"max_tokens": model.request_max_tokens}, None
 
     if effort is None:
         effort = "low" if model.reasoning_efforts else None

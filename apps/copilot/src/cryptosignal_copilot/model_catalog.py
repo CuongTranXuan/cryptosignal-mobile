@@ -27,6 +27,7 @@ from cryptosignal_copilot.model_visibility import (
 )
 
 SourceTier = Literal["provider", "table", "default"]
+StructuredOutputMode = Literal["prompted", "text_json"]
 FetchModelsFn = Callable[[LlmConfig], Awaitable[list[dict[str, Any]]]]
 
 _TIER_RANK = {"provider": 0, "table": 1, "default": 2}
@@ -72,6 +73,7 @@ class NormalizedModel:
     recommended_max_candles: int
     presets: tuple[int, ...]
     effort_routes: tuple[tuple[str, str], ...] = ()
+    structured_output_mode: StructuredOutputMode = "prompted"
 
     def to_api_dict(self) -> dict[str, Any]:
         return {
@@ -89,6 +91,7 @@ class NormalizedModel:
             "recommended_candles": self.recommended_candles,
             "recommended_max_candles": self.recommended_max_candles,
             "presets": list(self.presets),
+            "structured_output_mode": self.structured_output_mode,
         }
 
 
@@ -172,6 +175,19 @@ def _read_efforts(raw: dict[str, Any]) -> list[str] | None:
         tiers = caps.get("effort_tiers")
         if isinstance(tiers, list):
             return [str(t) for t in tiers]
+    return None
+
+
+def _read_structured_output_mode(raw: dict[str, Any]) -> StructuredOutputMode | None:
+    caps = raw.get("capabilities")
+    if isinstance(caps, dict):
+        for key in ("structured_output_mode", "copilot_structured_output"):
+            mode = caps.get(key)
+            if mode in ("prompted", "text_json"):
+                return mode
+    mode = raw.get("structured_output_mode")
+    if mode in ("prompted", "text_json"):
+        return mode
     return None
 
 
@@ -283,11 +299,14 @@ def normalize_model_row(
     if json_support is None:
         json_support = True
 
+    structured_mode = _read_structured_output_mode(raw) or "prompted"
+
     if is_cursor_provider_model(model_id, owned_by):
         reasoning = False
         efforts = []
         sources.supports_reasoning = "provider"
         sources.reasoning_efforts = "provider"
+        structured_mode = _read_structured_output_mode(raw) or "text_json"
         if ctx == _DEFAULT_CONTEXT:
             ctx = _CURSOR_CONTEXT
             sources.context_window = "default"
@@ -295,12 +314,15 @@ def normalize_model_row(
             out = _CURSOR_MAX_OUT
             sources.max_output_tokens = "default"
 
-    request_max = _request_max_tokens(
-        reasoning,
-        out,
-        model_id=model_id,
-        effort_routes=effort_routes,
-    )
+    if structured_mode == "text_json":
+        request_max = min(_CURSOR_MAX_OUT, out)
+    else:
+        request_max = _request_max_tokens(
+            reasoning,
+            out,
+            model_id=model_id,
+            effort_routes=effort_routes,
+        )
     rec, rec_max, presets = model_candle_limits(
         ctx,
         request_max,
@@ -325,6 +347,7 @@ def normalize_model_row(
         recommended_max_candles=rec_max,
         presets=tuple(presets),
         effort_routes=effort_routes,
+        structured_output_mode=structured_mode,
     )
 
 

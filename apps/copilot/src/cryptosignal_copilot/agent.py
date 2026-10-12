@@ -7,8 +7,8 @@ from typing import Protocol
 
 from pydantic_ai import Agent
 from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError, UnexpectedModelBehavior
-from pydantic_ai.output import PromptedOutput
 
+from cryptosignal_copilot.agent_output import build_agent_output_type, output_retries_for_model
 from cryptosignal_copilot.analyze_prep import AnalyzePlan, retry_plan
 from cryptosignal_copilot.config import load_llm_config
 from cryptosignal_copilot.drawing_gate import (
@@ -29,7 +29,6 @@ from cryptosignal_copilot.provider_errors import (
 )
 from cryptosignal_copilot.schema import (
     AnalyzeRequest,
-    AnalyzeResult,
     filter_agent_markers,
     filter_preview_details,
 )
@@ -138,7 +137,10 @@ class PydanticAiRunner:
         # No @agent.tool_plain tools: OmniRoute 2026-09-19 rejects custom-tool variant
         # (get_klines → type=custom → agentrouter 400). Requests must send tools:[].
 
-        prompt = _build_user_prompt(request)
+        prompt = _build_user_prompt(
+            request,
+            structured_output_mode=plan.model.structured_output_mode,
+        )
         yield (
             "text",
             {
@@ -157,9 +159,10 @@ class PydanticAiRunner:
                 current_plan.reasoning_effort,
             )
             model = build_model(cfg, provider_model_id)
+            output_type = build_agent_output_type(current_plan.model)
             agent = Agent(
                 model,
-                output_type=PromptedOutput(AnalyzeResult),
+                output_type=output_type,
                 instructions=INSTRUCTIONS,
             )
             run_settings = strip_thinking_when_routed(
@@ -168,7 +171,11 @@ class PydanticAiRunner:
                 dict(current_plan.model_settings),
             )
             try:
-                result = await agent.run(prompt, model_settings=run_settings)
+                result = await agent.run(
+                    prompt,
+                    model_settings=run_settings,
+                    output_retries=output_retries_for_model(current_plan.model),
+                )
                 break
             except UnexpectedModelBehavior as exc:
                 if attempt == 0:
@@ -176,7 +183,10 @@ class PydanticAiRunner:
                     if next_plan is not None:
                         current_plan = next_plan
                         request = current_plan.request
-                        prompt = _build_user_prompt(request)
+                        prompt = _build_user_prompt(
+                            request,
+                            structured_output_mode=current_plan.model.structured_output_mode,
+                        )
                         yield "meta", current_plan.meta
                         continue
                 yield "error", unexpected_model_behavior_payload(exc)
@@ -298,10 +308,21 @@ def estimate_prompt_candle_chars(request: AnalyzeRequest, *, compact: bool) -> i
     return len(json.dumps(payload["closedCandles"], separators=(",", ":")))
 
 
-def _build_user_prompt(request: AnalyzeRequest) -> str:
+def _build_user_prompt(
+    request: AnalyzeRequest,
+    *,
+    structured_output_mode: str = "prompted",
+) -> str:
     payload = request_payload_for_prompt(request)
     n = len(request.closedCandles)
+    json_hint = ""
+    if structured_output_mode == "text_json":
+        json_hint = (
+            "OUTPUT: Reply with one JSON object for AnalyzeResult only "
+            "(you may wrap it in ```json fences). No tool calls.\n"
+        )
     return (
+        f"{json_hint}"
         f"Symbol={request.symbol} interval={request.interval}\n"
         f"PRIMARY ANALYSIS WINDOW: from={request.from_} to={request.to} "
         f"({n} closed candles). Analyze this window. "

@@ -11,6 +11,8 @@ def test_cursor_auto_marked_advanced():
     assert model.advanced is True
     assert model.reasoning_efforts == ()
     assert model.supports_reasoning is False
+    assert model.structured_output_mode == "text_json"
+    assert model.request_max_tokens == 8_192
 
 
 def test_cursor_auto_router_detector():
