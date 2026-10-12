@@ -3,12 +3,8 @@
 import { memo, useId, useMemo } from "react";
 import type { CopilotModelRecord } from "../../lib/copilot-schema";
 import { UI_CANDLE_PRESETS, recommendedMaxCandles } from "../../lib/copilot-model-limits";
-import {
-  COPILOT_CANDLE_COUNT_LABEL,
-  COPILOT_CANDLE_CUSTOM,
-  COPILOT_EFFECTIVE_CANDLES,
-  COPILOT_EFFECTIVE_CANDLES_CLAMPED,
-} from "../../lib/copilot-strings";
+import { formatAnalyzeMetaNotice } from "../../lib/copilot-analyze-meta";
+import { COPILOT_CANDLE_COUNT_LABEL, COPILOT_CANDLE_CUSTOM } from "../../lib/copilot-strings";
 import type { AnalyzeMetaEvent } from "../../lib/copilot-schema";
 
 type CopilotCandleControlProps = {
@@ -16,29 +12,25 @@ type CopilotCandleControlProps = {
   customValue: number | null;
   selectedModel: CopilotModelRecord | null;
   lastMeta: AnalyzeMetaEvent | null;
+  clampHint: string | null;
   onPreset: (count: number) => void;
   onCustom: (count: number) => void;
   disabled?: boolean;
 };
-
-function effectiveCandlesLabel(meta: AnalyzeMetaEvent | null): string | null {
-  if (!meta) return null;
-  const template = meta.clamped ? COPILOT_EFFECTIVE_CANDLES_CLAMPED : COPILOT_EFFECTIVE_CANDLES;
-  return template.replace("{count}", String(meta.candle_count_used));
-}
 
 function CopilotCandleControlInner({
   value,
   customValue,
   selectedModel,
   lastMeta,
+  clampHint,
   onPreset,
   onCustom,
   disabled,
 }: CopilotCandleControlProps) {
   const safeMax = useMemo(() => recommendedMaxCandles(selectedModel), [selectedModel]);
   const inputId = useId();
-  const effectiveLabel = effectiveCandlesLabel(lastMeta);
+  const metaNotice = formatAnalyzeMetaNotice(lastMeta);
 
   return (
     <div className="flex min-w-0 flex-col gap-1">
@@ -48,9 +40,14 @@ function CopilotCandleControlInner({
           (tối đa {safeMax})
         </span>
       </span>
-      {effectiveLabel && (
+      {clampHint && (
+        <span className="text-[10px] text-[#f0b90b]" role="status">
+          {clampHint}
+        </span>
+      )}
+      {metaNotice && (
         <span className="text-[10px] text-[#0ecb81]" role="status">
-          {effectiveLabel}
+          {metaNotice}
         </span>
       )}
       <div className="flex flex-wrap gap-1" role="group" aria-label={COPILOT_CANDLE_COUNT_LABEL}>

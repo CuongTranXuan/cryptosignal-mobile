@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   allowedUiReasoningLevels,
+  defaultReasoningEffortForModel,
   modelShowsReasoningSelector,
   reasoningEffortForAnalyze,
   resetReasoningForModel,
@@ -29,6 +30,14 @@ const plainModel: CopilotModelRecord = {
   reasoning_efforts: [],
 };
 
+const cursorNoneOnly: CopilotModelRecord = {
+  ...reasoningModel,
+  id: "cursor/auto",
+  provider: "cursor",
+  supports_reasoning: true,
+  reasoning_efforts: ["none"],
+};
+
 describe("copilot-reasoning", () => {
   it("shows selector only when model exposes reasoning efforts", () => {
     expect(modelShowsReasoningSelector(reasoningModel)).toBe(true);
@@ -39,6 +48,12 @@ describe("copilot-reasoning", () => {
   it("omits reasoning_effort for unsupported models", () => {
     expect(reasoningEffortForAnalyze(plainModel, "low")).toBeNull();
     expect(resetReasoningForModel(plainModel, "high")).toBeNull();
+  });
+
+  it("hides selector and omits reasoning_effort when only tier is none", () => {
+    expect(modelShowsReasoningSelector(cursorNoneOnly)).toBe(false);
+    expect(reasoningEffortForAnalyze(cursorNoneOnly, "none")).toBeNull();
+    expect(defaultReasoningEffortForModel(cursorNoneOnly)).toBeNull();
   });
 
   it("persists reasoning_effort per session in localStorage", async () => {

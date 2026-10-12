@@ -1,7 +1,8 @@
 import { mergeCandles } from "./binance";
 import { mapCopilotHttpError, mapCopilotSseErrorPayload } from "./copilot-errors";
 import { AnalyzeMetaEventSchema } from "./copilot-schema";
-import { findCachedModel } from "./copilot-models-cache";
+import { modelIdForAnalyzeRequest } from "./copilot-model-defaults";
+import { findCachedModel, getDefaultModelId, getModelsList } from "./copilot-models-cache";
 import { reasoningEffortForAnalyze } from "./copilot-reasoning";
 import { resolveCopilotBaseUrl } from "./copilot-api";
 import {
@@ -394,14 +395,22 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
     });
     if (window.candles.length === 0) return;
 
-    const modelId = sessionState.modelId;
-    const model = findCachedModel(modelId);
+    const models = getModelsList();
+    const apiDefault = getDefaultModelId();
+    const analyzeModelId = modelIdForAnalyzeRequest(
+      models,
+      sessionState.modelId,
+      apiDefault,
+    );
+    const displayModelId =
+      analyzeModelId ?? sessionState.modelId ?? apiDefault ?? undefined;
+    const model = findCachedModel(analyzeModelId ?? sessionState.modelId);
 
     analyzing = true;
     useAiStore.getState().appendUser(prompt);
     useAiStore.getState().startAgent({
-      modelId: model?.id ?? modelId ?? undefined,
-      modelLabel: model?.label ?? modelId ?? undefined,
+      modelId: model?.id ?? displayModelId,
+      modelLabel: model?.label ?? displayModelId,
     });
     useCopilotSessionStore.getState().recordAnalysisWindow(window.from, window.to);
 
@@ -417,8 +426,8 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
       prompt: annotatedPrompt,
       candle_count: candleCount,
     };
-    if (modelId) {
-      body.model = modelId;
+    if (analyzeModelId) {
+      body.model = analyzeModelId;
     }
     const reasoningEffort = reasoningEffortForAnalyze(model, sessionState.reasoningEffort);
     if (reasoningEffort) {

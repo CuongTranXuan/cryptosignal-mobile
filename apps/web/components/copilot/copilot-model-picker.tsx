@@ -11,6 +11,7 @@ import {
   COPILOT_MODEL_PICKER_PLACEHOLDER,
   COPILOT_MODEL_SEARCH,
 } from "../../lib/copilot-strings";
+import { modelLabelForSession } from "../../lib/copilot-model-defaults";
 import { useCopilotModels } from "./use-copilot-models";
 
 type CopilotModelPickerProps = {
@@ -26,7 +27,7 @@ function CopilotModelPickerInner({
   onSelect,
   disabled,
 }: CopilotModelPickerProps) {
-  const { models, loading } = useCopilotModels(api);
+  const { models, loading, defaultModelId } = useCopilotModels(api);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -53,10 +54,9 @@ function CopilotModelPickerInner({
   const flat = useMemo(() => groups.flatMap((g) => g.models), [groups]);
 
   const selectedLabel = useMemo(() => {
-    if (!selectedModelId) return COPILOT_MODEL_PICKER_PLACEHOLDER;
-    const hit = models.find((m) => m.id === selectedModelId);
-    return hit ? `${hit.provider} · ${hit.label}` : selectedModelId;
-  }, [models, selectedModelId]);
+    if (!selectedModelId && models.length === 0) return COPILOT_MODEL_PICKER_PLACEHOLDER;
+    return modelLabelForSession(models, selectedModelId, defaultModelId);
+  }, [models, selectedModelId, defaultModelId]);
 
   const close = useCallback(() => {
     setOpen(false);

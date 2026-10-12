@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import type { CopilotApiClient } from "../../lib/copilot-api";
 import type { CopilotModelRecord, ModelsListResponse } from "../../lib/copilot-schema";
 import { getCachedModelsResponse, loadCopilotModels } from "../../lib/copilot-models-cache";
@@ -9,15 +9,27 @@ type ModelsSnapshot = {
   error: string | null;
 };
 
-let snapshot: ModelsSnapshot = { response: null, loading: false, error: null };
+const INITIAL_SNAPSHOT: ModelsSnapshot = { response: null, loading: false, error: null };
+
+let snapshot: ModelsSnapshot = INITIAL_SNAPSHOT;
 const listeners = new Set<() => void>();
 let boundApi: CopilotApiClient | null = null;
-let started = false;
+let inflight: Promise<ModelsListResponse> | null = null;
+
+function snapshotsEqual(a: ModelsSnapshot, b: ModelsSnapshot): boolean {
+  return a.response === b.response && a.loading === b.loading && a.error === b.error;
+}
 
 function emit(): void {
   for (const listener of listeners) {
     listener();
   }
+}
+
+function setSnapshot(next: ModelsSnapshot): void {
+  if (snapshotsEqual(snapshot, next)) return;
+  snapshot = next;
+  emit();
 }
 
 function subscribe(listener: () => void): () => void {
@@ -29,30 +41,51 @@ function getSnapshot(): ModelsSnapshot {
   return snapshot;
 }
 
-export function ensureCopilotModelsLoaded(api: CopilotApiClient): void {
+/** Hydrate external store after cache is populated elsewhere (e.g. session bootstrap). */
+export function syncModelsSnapshotFromCache(): void {
+  const cached = getCachedModelsResponse();
+  if (!cached) return;
+  setSnapshot({ response: cached, loading: false, error: null });
+}
+
+/** Test-only reset. */
+export function resetCopilotModelsStoreForTests(): void {
+  snapshot = INITIAL_SNAPSHOT;
+  listeners.clear();
+  boundApi = null;
+  inflight = null;
+}
+
+function ensureCopilotModelsLoaded(api: CopilotApiClient): void {
   if (boundApi !== api) {
     boundApi = api;
-    started = false;
+    inflight = null;
   }
+
   const cached = getCachedModelsResponse();
   if (cached) {
-    snapshot = { response: cached, loading: false, error: null };
-    started = true;
-    emit();
+    setSnapshot({ response: cached, loading: false, error: null });
     return;
   }
-  if (started) return;
-  started = true;
-  snapshot = { ...snapshot, loading: true, error: null };
-  emit();
-  void loadCopilotModels(api)
+
+  if (inflight) return;
+
+  setSnapshot({ response: snapshot.response, loading: true, error: null });
+  inflight = loadCopilotModels(api)
     .then((response) => {
-      snapshot = { response, loading: false, error: null };
-      emit();
+      setSnapshot({ response, loading: false, error: null });
+      return response;
     })
     .catch(() => {
-      snapshot = { response: snapshot.response, loading: false, error: "models_unavailable" };
-      emit();
+      setSnapshot({
+        response: snapshot.response,
+        loading: false,
+        error: "models_unavailable",
+      });
+      throw new Error("models_unavailable");
+    })
+    .finally(() => {
+      inflight = null;
     });
 }
 
@@ -62,10 +95,12 @@ export function useCopilotModels(api: CopilotApiClient | null): {
   loading: boolean;
   error: string | null;
 } {
-  const state = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
-  if (api) {
+  useEffect(() => {
+    if (!api) return;
     ensureCopilotModelsLoaded(api);
-  }
+  }, [api]);
+
+  const state = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
   return {
     models: state.response?.models ?? [],
     defaultModelId: state.response?.default_model ?? null,

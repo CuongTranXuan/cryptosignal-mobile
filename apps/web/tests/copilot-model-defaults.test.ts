@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   PREFERRED_DEFAULT_MODEL_ID,
+  modelIdForAnalyzeRequest,
   resolveDefaultModelId,
+  resolveSessionModelId,
 } from "../lib/copilot-model-defaults";
 import type { CopilotModelRecord } from "../lib/copilot-schema";
 import { DEFAULT_CANDLE_COUNT } from "../lib/copilot-model-limits";
@@ -38,6 +40,11 @@ describe("resolveDefaultModelId", () => {
     expect(resolveDefaultModelId([other], null, other.id)).toBe(other.id);
     expect(resolveDefaultModelId([other], null, "missing")).toBe(other.id);
     expect(resolveDefaultModelId([], null, null)).toBeNull();
+  });
+
+  it("resolveSessionModelId never returns empty when catalog is empty", () => {
+    expect(resolveSessionModelId([], "", null)).toBe(PREFERRED_DEFAULT_MODEL_ID);
+    expect(modelIdForAnalyzeRequest([], "", null)).toBeUndefined();
   });
 });
 

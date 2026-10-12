@@ -2,7 +2,8 @@
 
 import { useMemo, useState, type FormEvent } from "react";
 import type { CopilotApiClient } from "../lib/copilot-api";
-import { findCachedModel } from "../lib/copilot-models-cache";
+import { modelLabelForSession } from "../lib/copilot-model-defaults";
+import { findCachedModel, getDefaultModelId, getModelsList } from "../lib/copilot-models-cache";
 import {
   COPILOT_ACTION_DRAW_ON_CHART,
   COPILOT_ACTION_EDIT_COORDS,
@@ -26,6 +27,7 @@ import { useAiStore } from "../lib/stores/ai-store";
 import { useChartStore } from "../lib/stores/chart-store";
 import { useCopilotSessionStore } from "../lib/stores/copilot-session-store";
 import { useShapeStore } from "../lib/stores/shape-store";
+import { CopilotAnalyzeProgress } from "./copilot/copilot-analyze-progress";
 import { CopilotCandleControl } from "./copilot/copilot-candle-control";
 import { CopilotModelPicker } from "./copilot/copilot-model-picker";
 import { CopilotReasoningControl } from "./copilot/copilot-reasoning-control";
@@ -50,6 +52,7 @@ export function CopilotPanel({ client, api }: CopilotPanelProps) {
   const candleCount = useCopilotSessionStore((s) => s.candleCount);
   const customCandleCount = useCopilotSessionStore((s) => s.customCandleCount);
   const lastAnalyzeMeta = useCopilotSessionStore((s) => s.lastAnalyzeMeta);
+  const candleClampHint = useCopilotSessionStore((s) => s.candleClampHint);
   const setModelId = useCopilotSessionStore((s) => s.setModelId);
   const setCandleCountPreset = useCopilotSessionStore((s) => s.setCandleCountPreset);
   const setCustomCandleCount = useCopilotSessionStore((s) => s.setCustomCandleCount);
@@ -67,6 +70,10 @@ export function CopilotPanel({ client, api }: CopilotPanelProps) {
   const previews = shapes.filter((s) => s.status === "preview");
 
   const selectedModel = useMemo(() => findCachedModel(modelId), [modelId]);
+  const headerModelLabel = useMemo(
+    () => modelLabelForSession(getModelsList(), modelId, getDefaultModelId()),
+    [modelId],
+  );
 
   const [prompt, setPrompt] = useState("");
   const sendDisabled = isSendDisabled(connection, inFlight) || !client;
@@ -107,13 +114,7 @@ export function CopilotPanel({ client, api }: CopilotPanelProps) {
       <div className="flex h-10 flex-none items-center justify-between border-b border-[#2b313a] px-3">
         <span className="text-sm font-semibold text-white">{COPILOT_TITLE}</span>
         <span className="font-[family-name:var(--font-plex-mono)] text-[11px] text-[#848e9c]">
-          {health ? (
-            <>
-              {health.style}/{health.model}
-            </>
-          ) : (
-            COPILOT_OFFLINE
-          )}
+          {health?.ok ? headerModelLabel : COPILOT_OFFLINE}
         </span>
       </div>
 
@@ -150,6 +151,7 @@ export function CopilotPanel({ client, api }: CopilotPanelProps) {
               customValue={customCandleCount}
               selectedModel={selectedModel}
               lastMeta={lastAnalyzeMeta}
+              clampHint={candleClampHint}
               onPreset={setCandleCountPreset}
               onCustom={setCustomCandleCount}
               disabled={inFlight}
@@ -211,8 +213,9 @@ export function CopilotPanel({ client, api }: CopilotPanelProps) {
             </button>
           </div>
 
-          <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3 text-sm">
-            {messages.length === 0 && (
+      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3 text-sm">
+        <CopilotAnalyzeProgress inFlight={inFlight} />
+        {messages.length === 0 && (
               <p className="text-xs text-[#474d57]">{COPILOT_EMPTY_STATE}</p>
             )}
             {messages.map((m) => (

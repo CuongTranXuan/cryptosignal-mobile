@@ -1,7 +1,12 @@
 import { create } from "zustand";
 import type { CopilotApiClient } from "../copilot-api";
 import { DEFAULT_CANDLE_COUNT, clampCandleCountForModel } from "../copilot-model-limits";
-import { resolveDefaultModelId } from "../copilot-model-defaults";
+import {
+  modelIdForAnalyzeRequest,
+  resolveDefaultModelId,
+  resolveSessionModelId,
+} from "../copilot-model-defaults";
+import { syncModelsSnapshotFromCache } from "../../components/copilot/use-copilot-models";
 import {
   defaultReasoningEffortForModel,
   resetReasoningForModel,
@@ -13,6 +18,7 @@ import {
   getModelsList,
   loadCopilotModels,
 } from "../copilot-models-cache";
+import { COPILOT_CANDLE_CLAMPED_TO_MAX } from "../copilot-strings";
 import type { AnalyzeMetaEvent, CopilotSessionV1 } from "../copilot-schema";
 import {
   createEmptySession,
@@ -65,6 +71,7 @@ type CopilotSessionState = {
   modelId: string | null;
   candleCount: number;
   customCandleCount: number | null;
+  candleClampHint: string | null;
   lastAnalyzeMeta: AnalyzeMetaEvent | null;
   chartFrom: number;
   chartTo: number;
@@ -115,6 +122,7 @@ export const useCopilotSessionStore = create<CopilotSessionState>((set, get) => 
   modelId: null,
   candleCount: DEFAULT_CANDLE_COUNT,
   customCandleCount: null,
+  candleClampHint: null,
   lastAnalyzeMeta: null,
   chartFrom: 0,
   chartTo: 0,
@@ -130,8 +138,10 @@ export const useCopilotSessionStore = create<CopilotSessionState>((set, get) => 
     try {
       const response = await loadCopilotModels(api);
       models = response.models;
+      syncModelsSnapshotFromCache();
       set({ modelsReady: true });
     } catch {
+      syncModelsSnapshotFromCache();
       set({ modelsReady: true });
     }
 
@@ -139,10 +149,8 @@ export const useCopilotSessionStore = create<CopilotSessionState>((set, get) => 
     let sessions = blob.sessions;
     let active = getActiveSession(blob);
     const apiDefault = getCachedModelsResponse()?.default_model ?? getDefaultModelId();
-    const fallbackModelId = resolveDefaultModelId(models, null, apiDefault);
-
     if (sessions.length === 0) {
-      const model = resolveDefaultModelId(models, null, apiDefault) ?? fallbackModelId ?? "";
+      const model = resolveSessionModelId(models, null, apiDefault);
       const effort = defaultReasoningEffortForModel(findCachedModel(model));
       active = createEmptySession(model, "Phiên mới", effort);
       sessions = [active];
@@ -152,8 +160,7 @@ export const useCopilotSessionStore = create<CopilotSessionState>((set, get) => 
       saveSessionsBlob({ active_session_id: active.id, sessions });
     }
 
-    const resolvedModelId =
-      resolveDefaultModelId(models, active.model_id, apiDefault) ?? active.model_id;
+    const resolvedModelId = resolveSessionModelId(models, active.model_id, apiDefault);
     const resolvedModel = findCachedModel(resolvedModelId);
     const reasoningEffort = resetReasoningForModel(
       resolvedModel,
@@ -194,14 +201,19 @@ export const useCopilotSessionStore = create<CopilotSessionState>((set, get) => 
   },
 
   setCandleCountPreset: (count) => {
-    set({ candleCount: count, customCandleCount: null });
+    set({ candleCount: count, customCandleCount: null, candleClampHint: null });
     get().persistActiveSession();
   },
 
   setCustomCandleCount: (count) => {
     const model = findCachedModel(get().modelId);
+    const requested = Math.floor(count);
     const clamped = clampCandleCountForModel(count, model);
-    set({ candleCount: clamped, customCandleCount: clamped });
+    const hint =
+      Number.isFinite(requested) && requested > clamped
+        ? COPILOT_CANDLE_CLAMPED_TO_MAX.replace("{max}", String(clamped))
+        : null;
+    set({ candleCount: clamped, customCandleCount: clamped, candleClampHint: hint });
     get().persistActiveSession();
   },
 
@@ -211,19 +223,17 @@ export const useCopilotSessionStore = create<CopilotSessionState>((set, get) => 
   },
 
   setLastAnalyzeMeta: (meta) => {
-    set({ lastAnalyzeMeta: meta });
-    if (meta?.candle_count_used != null) {
-      set({ candleCount: meta.candle_count_used });
-    }
+    // Last SSE `meta` wins (server may emit again on retry with fewer candles).
+    set({
+      lastAnalyzeMeta: meta,
+      ...(meta?.candle_count_used != null ? { candleCount: meta.candle_count_used } : {}),
+    });
     get().persistActiveSession();
   },
 
   createSession: () => {
     const models = getModelsList();
-    const modelId =
-      resolveDefaultModelId(models, get().modelId, getDefaultModelId()) ??
-      get().modelId ??
-      "";
+    const modelId = resolveSessionModelId(models, get().modelId, getDefaultModelId());
     const session = createEmptySession(modelId, "Phiên mới", get().reasoningEffort);
     session.chart.candle_count = get().getRequestedCandleCount();
     const blob = loadSessionsBlob();
@@ -244,10 +254,13 @@ export const useCopilotSessionStore = create<CopilotSessionState>((set, get) => 
     const session = blob.sessions.find((s) => s.id === id);
     if (!session) return;
     saveSessionsBlob({ active_session_id: id, sessions: blob.sessions });
-    const model = findCachedModel(session.model_id);
+    const models = getModelsList();
+    const apiDefault = getDefaultModelId();
+    const resolvedId = resolveSessionModelId(models, session.model_id, apiDefault);
+    const model = findCachedModel(resolvedId);
     set({
       activeSessionId: id,
-      modelId: session.model_id,
+      modelId: resolvedId,
       candleCount: session.chart.candle_count,
       customCandleCount: null,
       lastAnalyzeMeta: null,
@@ -274,8 +287,7 @@ export const useCopilotSessionStore = create<CopilotSessionState>((set, get) => 
     if (blob.active_session_id === id) {
       if (sessions.length === 0) {
         const models = getModelsList();
-        const modelId =
-          resolveDefaultModelId(models, get().modelId, getDefaultModelId()) ?? get().modelId ?? "";
+        const modelId = resolveSessionModelId(models, get().modelId, getDefaultModelId());
         const fresh = createEmptySession(modelId, "Phiên mới", get().reasoningEffort);
         sessions.push(fresh);
         saveSessionsBlob({ active_session_id: fresh.id, sessions });
@@ -331,7 +343,11 @@ export const useCopilotSessionStore = create<CopilotSessionState>((set, get) => 
       return {
         ...s,
         updated_at: Math.floor(Date.now() / 1000),
-        model_id: modelId ?? s.model_id,
+        model_id: resolveSessionModelId(
+          getModelsList(),
+          modelId ?? s.model_id,
+          getDefaultModelId(),
+        ),
         reasoning_effort: reasoningEffort,
         chart: {
           symbol: chartStore.symbol,

@@ -62,6 +62,11 @@ export const COPILOT_REASONING_MEDIUM = "Trung bình";
 export const COPILOT_REASONING_HIGH = "Cao";
 export const COPILOT_EFFECTIVE_CANDLES = "Đã dùng {count} nến";
 export const COPILOT_EFFECTIVE_CANDLES_CLAMPED = "Đã dùng {count} nến (đã giới hạn)";
+export const COPILOT_META_CLAMPED_DETAIL =
+  "Máy chủ đã giảm từ {requested} xuống {used} nến (giới hạn token hoặc thử lại tự động)";
+export const COPILOT_CANDLE_CLAMPED_TO_MAX =
+  "Đã giới hạn xuống {max} nến (tối đa mô hình)";
+export const COPILOT_ANALYZING_ELAPSED = "Đã chạy {seconds} giây";
 
 export const COPILOT_MODEL_PICKER_LABEL = "Mô hình";
 export const COPILOT_MODEL_PICKER_PLACEHOLDER = "Chọn mô hình…";

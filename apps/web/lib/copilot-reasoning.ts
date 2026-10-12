@@ -17,20 +17,31 @@ const API_TO_UI: Record<string, UiReasoningLevel> = {
   high: "high",
 };
 
+/** Efforts the user can pick (excludes lone `none` — backend rejects reasoning_effort for those models). */
+export function meaningfulReasoningEfforts(model: CopilotModelRecord | null): string[] {
+  if (!model?.supports_reasoning) return [];
+  const efforts = (model.reasoning_efforts ?? []).map((e) => e.toLowerCase());
+  const withoutNoneOnly =
+    efforts.length === 1 && efforts[0] === "none" ? [] : efforts.filter((e) => e !== "none");
+  if (withoutNoneOnly.length > 0) {
+    return withoutNoneOnly;
+  }
+  return efforts.filter((e) => e !== "none");
+}
+
 export function modelShowsReasoningSelector(model: CopilotModelRecord | null): boolean {
-  if (!model || !model.supports_reasoning) return false;
-  const efforts = model.reasoning_efforts ?? [];
-  return efforts.length > 0;
+  return meaningfulReasoningEfforts(model).length > 0;
 }
 
 export function allowedUiReasoningLevels(model: CopilotModelRecord | null): UiReasoningLevel[] {
   if (!modelShowsReasoningSelector(model)) return [];
   const efforts = new Set((model?.reasoning_efforts ?? []).map((e) => e.toLowerCase()));
-  const levels: UiReasoningLevel[] = ["off", "low", "medium", "high"];
-  return levels.filter((level) => {
-    const api = UI_TO_API[level];
-    return efforts.has(api);
-  });
+  const levels: UiReasoningLevel[] = [];
+  if (efforts.has("none")) levels.push("off");
+  if (efforts.has("low")) levels.push("low");
+  if (efforts.has("medium")) levels.push("medium");
+  if (efforts.has("high")) levels.push("high");
+  return levels;
 }
 
 export function uiReasoningToApi(level: UiReasoningLevel): string {
@@ -48,11 +59,11 @@ export function reasoningEffortForAnalyze(
   storedApiEffort: string | null,
 ): string | null {
   if (!modelShowsReasoningSelector(model) || !storedApiEffort) return null;
-  const allowed = new Set((model?.reasoning_efforts ?? []).map((e) => e.toLowerCase()));
+  const allowed = new Set(meaningfulReasoningEfforts(model));
   const normalized = storedApiEffort.toLowerCase();
+  if (normalized === "none") return null;
   if (!allowed.has(normalized)) {
     if (allowed.has("low")) return "low";
-    if (allowed.has("none")) return "none";
     return null;
   }
   return normalized;
@@ -60,9 +71,8 @@ export function reasoningEffortForAnalyze(
 
 export function defaultReasoningEffortForModel(model: CopilotModelRecord | null): string | null {
   if (!modelShowsReasoningSelector(model)) return null;
-  const allowed = model?.reasoning_efforts ?? [];
+  const allowed = meaningfulReasoningEfforts(model);
   if (allowed.includes("low")) return "low";
-  if (allowed.includes("none")) return "none";
   return allowed[0] ?? null;
 }
 
