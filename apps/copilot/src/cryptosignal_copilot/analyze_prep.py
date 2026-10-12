@@ -12,6 +12,7 @@ from cryptosignal_copilot.candle_budget import (
 )
 from cryptosignal_copilot.config import LlmConfig, load_default_candle_count
 from cryptosignal_copilot.model_catalog import ModelNotFoundError, ModelsCatalog, NormalizedModel
+from cryptosignal_copilot.model_routes import resolve_provider_model_id
 from cryptosignal_copilot.run_settings import build_run_model_settings, lower_reasoning_effort
 from cryptosignal_copilot.schema import AnalyzeRequest
 
@@ -120,6 +121,7 @@ async def prepare_analyze(
     )
     meta = {
         "model": model_id,
+        "provider_model_id": resolve_provider_model_id(model, effort),
         "candle_count_requested": request.candle_count,
         "candle_count_used": used,
         "clamped": clamped,

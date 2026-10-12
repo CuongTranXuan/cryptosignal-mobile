@@ -60,6 +60,6 @@ async def test_models_endpoint_and_cache_single_fetch(llm_env, test_app):
     assert body["default_model"] == "agentrouter/deepseek-v4-flash"
     ids = {m["id"] for m in body["models"]}
     assert "agentrouter/deepseek-v4-flash" in ids
-    assert "combo/auto-router" not in ids
+    assert len(ids) == 4
     assert second.status_code == 200
     assert calls == 1

@@ -56,6 +56,7 @@ class NormalizedModel:
     recommended_candles: int
     recommended_max_candles: int
     presets: tuple[int, ...]
+    effort_routes: tuple[tuple[str, str], ...] = ()
 
     def to_api_dict(self) -> dict[str, Any]:
         return {
@@ -180,6 +181,12 @@ def _request_max_tokens(supports_reasoning: bool, max_output_tokens: int) -> int
 
 
 def normalize_model_row(raw: dict[str, Any], *, window_bars: int = BINANCE_CANDLE_LIMIT) -> NormalizedModel:
+    raw = dict(raw)
+    effort_routes_raw = raw.pop("_effort_routes", None)
+    effort_routes: tuple[tuple[str, str], ...] = ()
+    if isinstance(effort_routes_raw, dict):
+        effort_routes = tuple(sorted((str(k), str(v)) for k, v in effort_routes_raw.items()))
+
     model_id = str(raw.get("id") or "")
     root = raw.get("root")
     root_str = str(root) if root else None
@@ -261,6 +268,7 @@ def normalize_model_row(raw: dict[str, Any], *, window_bars: int = BINANCE_CANDL
         recommended_candles=rec,
         recommended_max_candles=rec_max,
         presets=tuple(presets),
+        effort_routes=effort_routes,
     )
 
 

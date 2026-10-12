@@ -4,41 +4,17 @@ import pytest
 
 from cryptosignal_copilot.config import DEFAULT_LLM_MODEL, LlmConfig
 from cryptosignal_copilot.model_catalog import ModelsCatalog
+from tests.omniroute_fixtures import omniroute_models_payload
 
 
 async def _default_test_models(_cfg: LlmConfig):
-    return [
-        {
-            "id": "deepseek-chat",
-            "owned_by": "deepseek",
-            "context_length": 64000,
-            "max_output_tokens": 8192,
-            "status": "active",
-        },
-        {
-            "id": "agentrouter/deepseek-v4-flash",
-            "owned_by": "agentrouter",
-            "root": "deepseek-v4-flash",
-            "context_length": 1_000_000,
-            "max_output_tokens": 384_000,
-            "status": "active",
-            "capabilities": {
-                "reasoning": True,
-                "effort_tiers": ["none", "low", "medium", "high", "xhigh", "max"],
-            },
-        },
-        {
-            "id": "combo/auto-router",
-            "owned_by": "combo",
-            "status": "inactive",
-        },
-    ]
+    return omniroute_models_payload()
 
 
 @pytest.fixture
 def llm_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LLM_API_STYLE", "openai")
-    monkeypatch.setenv("LLM_BASE_URL", "https://api.deepseek.com")
+    monkeypatch.setenv("LLM_BASE_URL", "http://127.0.0.1:20128/v1")
     monkeypatch.setenv("LLM_API_KEY", "sk-test")
     monkeypatch.setenv("LLM_MODEL", DEFAULT_LLM_MODEL)
 

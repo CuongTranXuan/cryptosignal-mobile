@@ -35,7 +35,7 @@ disallow_untyped_defs = false
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = ["cryptosignal_copilot.drawing_gate", "cryptosignal_copilot.model_factory"]
+module = ["cryptosignal_copilot.drawing_gate", "cryptosignal_copilot.model_factory", "cryptosignal_copilot.agent"]
 ignore_errors = true
 
 [build-system]

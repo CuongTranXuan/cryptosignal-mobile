@@ -18,6 +18,7 @@ from cryptosignal_copilot.drawing_gate import (
     format_drop_note,
 )
 from cryptosignal_copilot.model_factory import build_model
+from cryptosignal_copilot.model_routes import resolve_provider_model_id, strip_thinking_when_routed
 from cryptosignal_copilot.provider_errors import (
     EMPTY_MODEL_OUTPUT_MSG,
     error_payload,
@@ -131,19 +132,11 @@ class PydanticAiRunner:
     async def run(self, plan: AnalyzePlan) -> AsyncIterator[tuple[str, dict]]:
         cfg = load_llm_config()
         request = plan.request
-        model = build_model(cfg, plan.model_id)
         # OmniRoute/agentrouter rejects OpenAI tool_choice="required" (pydantic-ai's
         # default ToolOutput mode). PromptedOutput uses response_format=json_object
         # with tool_choice=auto, which works through the gateway.
         # No @agent.tool_plain tools: OmniRoute 2026-09-19 rejects custom-tool variant
         # (get_klines → type=custom → agentrouter 400). Requests must send tools:[].
-        agent: Agent[None, AnalyzeResult] = Agent(
-            model,
-            output_type=PromptedOutput(AnalyzeResult),
-            instructions=INSTRUCTIONS,
-        )
-
-        # @agent.tool_plain get_klines removed — see OmniRoute 2026-09-19 custom-tool reject.
 
         prompt = _build_user_prompt(request)
         yield "text", {
@@ -156,8 +149,23 @@ class PydanticAiRunner:
         current_plan = plan
         result = None
         for attempt in range(2):
+            provider_model_id = resolve_provider_model_id(
+                current_plan.model,
+                current_plan.reasoning_effort,
+            )
+            model = build_model(cfg, provider_model_id)
+            agent = Agent(
+                model,
+                output_type=PromptedOutput(AnalyzeResult),
+                instructions=INSTRUCTIONS,
+            )
+            run_settings = strip_thinking_when_routed(
+                current_plan.model,
+                current_plan.reasoning_effort,
+                dict(current_plan.model_settings),
+            )
             try:
-                result = await agent.run(prompt, model_settings=current_plan.model_settings)
+                result = await agent.run(prompt, model_settings=run_settings)
                 break
             except UnexpectedModelBehavior as exc:
                 if attempt == 0:
