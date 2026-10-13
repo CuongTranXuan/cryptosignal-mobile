@@ -69,7 +69,6 @@ export const SessionMessageSchema = z.object({
       clamped: z.boolean(),
     })
     .optional(),
-  /** Extension for chart restore (not in spec chart object). */
   markers: z.array(z.unknown()).optional(),
 });
 
@@ -93,6 +92,7 @@ export const SessionSummarySchema = z.object({
   created_at: z.number(),
   updated_at: z.number(),
   model_id: z.string(),
+  reasoning_effort: z.string().nullable().optional(),
   symbol: z.string(),
   interval: z.string(),
   candle_count: z.number(),
@@ -105,15 +105,16 @@ export const SessionsListResponseSchema = z.object({
   sessions: z.array(SessionSummarySchema),
 });
 
-/** Backend `CopilotSession` document (no session-level reasoning_effort). */
+/** Backend `CopilotSession` document. */
 export const CopilotSessionApiSchema = z.object({
   id: z.string(),
   title: z.string(),
   created_at: z.number(),
   updated_at: z.number(),
   model_id: z.string(),
+  reasoning_effort: z.string().nullable().optional(),
   chart: SessionChartSchema,
-  messages: z.array(SessionMessageSchema.omit({ markers: true })),
+  messages: z.array(SessionMessageSchema),
 });
 
 export type CopilotSessionApi = z.infer<typeof CopilotSessionApiSchema>;
@@ -121,8 +122,9 @@ export type CopilotSessionApi = z.infer<typeof CopilotSessionApiSchema>;
 export const CreateSessionRequestSchema = z.object({
   title: z.string(),
   model_id: z.string(),
+  reasoning_effort: z.string().nullable().optional(),
   chart: SessionChartSchema,
-  messages: z.array(SessionMessageSchema.omit({ markers: true })).optional(),
+  messages: z.array(SessionMessageSchema).optional(),
 });
 
 export type CreateSessionRequest = z.infer<typeof CreateSessionRequestSchema>;
@@ -130,8 +132,9 @@ export type CreateSessionRequest = z.infer<typeof CreateSessionRequestSchema>;
 export const UpdateSessionRequestSchema = z.object({
   title: z.string().optional(),
   model_id: z.string().optional(),
+  reasoning_effort: z.string().nullable().optional(),
   chart: SessionChartSchema.optional(),
-  messages: z.array(SessionMessageSchema.omit({ markers: true })).optional(),
+  messages: z.array(SessionMessageSchema).optional(),
 });
 
 export type UpdateSessionRequest = z.infer<typeof UpdateSessionRequestSchema>;

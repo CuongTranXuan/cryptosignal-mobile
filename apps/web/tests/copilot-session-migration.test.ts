@@ -48,6 +48,7 @@ describe("copilot session migration", () => {
       content: "hello",
       model_id: null,
       shapes: [],
+      markers: [],
       created_at: 1,
     });
     saveLegacySessionsBlob({ active_session_id: local.id, sessions: [local] });

@@ -28,6 +28,7 @@ describe("copilot session API (mock)", () => {
           content: "hi",
           model_id: null,
           shapes: [],
+          markers: [],
           created_at: 1,
         },
       ],

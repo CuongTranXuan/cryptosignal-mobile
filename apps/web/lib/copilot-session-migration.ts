@@ -5,7 +5,7 @@ import {
   clientSessionToCreateBody,
   summaryFingerprintFromApi,
 } from "./copilot-session-mapper";
-import { sessionFingerprint } from "./copilot-session-encoding";
+import { sessionFingerprint } from "./copilot-session-wire";
 
 /** Legacy localStorage blob (removed after successful migration). */
 export const LEGACY_SESSIONS_STORAGE_KEY = "copilot.sessions.v1";

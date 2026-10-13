@@ -33,7 +33,7 @@ import {
   summaryFromApiSession,
   summaryFromClientSession,
 } from "../copilot-session-mapper";
-import { encodeSessionTitle } from "../copilot-session-encoding";
+import { repairLegacyEncodedSessionTitle } from "../copilot-session-legacy-cleanup";
 import { migrateLegacySessionsIfNeeded } from "../copilot-session-migration";
 import { buildEmptyClientSession } from "../copilot-session-factory";
 import type { AiMessage } from "./ai-store";
@@ -50,7 +50,7 @@ function aiToSessionMessages(messages: AiMessage[]): CopilotSessionV1["messages"
     content: m.content,
     model_id: m.modelId ?? null,
     shapes: (m.shapes ?? []) as PatternShape[],
-    markers: m.markers,
+    markers: m.markers ?? [],
     created_at: m.createdAt ?? Math.floor(Date.now() / 1000),
     meta: m.analyzeMeta
       ? { candle_count_used: m.analyzeMeta.candle_count_used, clamped: m.analyzeMeta.clamped }
@@ -251,7 +251,10 @@ export const useCopilotSessionStore = create<CopilotSessionState>((set, get) => 
     let activeSession: CopilotSessionV1 | null = null;
     if (activeId && api) {
       try {
-        const apiSession = await api.getSession(activeId);
+        const apiSession = await repairLegacyEncodedSessionTitle(
+          api,
+          await api.getSession(activeId),
+        );
         activeSession = apiSessionToClient(apiSession);
         set({
           sessionCache: { ...get().sessionCache, [activeId]: activeSession },
@@ -471,7 +474,7 @@ export const useCopilotSessionStore = create<CopilotSessionState>((set, get) => 
     let session = get().sessionCache[id];
     if (!session && api) {
       try {
-        const apiSession = await api.getSession(id);
+        const apiSession = await repairLegacyEncodedSessionTitle(api, await api.getSession(id));
         session = apiSessionToClient(apiSession);
         set({ sessionCache: { ...get().sessionCache, [id]: session } });
       } catch {
@@ -521,9 +524,7 @@ export const useCopilotSessionStore = create<CopilotSessionState>((set, get) => 
     try {
       const session = get().sessionCache[id] ?? cached;
       if (!session) return;
-      const updated = await api.updateSession(id, {
-        title: encodeSessionTitle(trimmed, session.reasoning_effort ?? null),
-      });
+      const updated = await api.updateSession(id, { title: trimmed });
       const client = apiSessionToClient(updated);
       set({
         sessionCache: { ...get().sessionCache, [id]: client },

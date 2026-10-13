@@ -1,18 +1,39 @@
 import type { CopilotModelRecord } from "./copilot-schema";
-import type { CopilotSessionApi, CopilotSessionV1, SessionSummary } from "./copilot-schema";
+import type {
+  CopilotSessionApi,
+  CopilotSessionV1,
+  CreateSessionRequest,
+  SessionSummary,
+  UpdateSessionRequest,
+} from "./copilot-schema";
 import { modelLabelForSession } from "./copilot-model-defaults";
 import {
-  chartForApi,
-  decodeSessionTitle,
-  encodeSessionTitle,
-  messagesForApi,
-  sessionFingerprint,
-  stripReasoningFromTitle,
-} from "./copilot-session-encoding";
+  decodeLegacySessionTitle,
+  stripLegacyReasoningFromTitle,
+  titleHasLegacyReasoningEncoding,
+} from "./copilot-session-legacy-title";
+import { chartForApi, messagesForApi, sessionFingerprint } from "./copilot-session-wire";
 import type { AgentMarker, PatternShape } from "./pattern-shape";
 
+function resolveTitleAndReasoning(api: CopilotSessionApi): {
+  title: string;
+  reasoning_effort: string | null;
+} {
+  if (titleHasLegacyReasoningEncoding(api.title)) {
+    const decoded = decodeLegacySessionTitle(api.title);
+    return {
+      title: decoded.title,
+      reasoning_effort: api.reasoning_effort ?? decoded.reasoning_effort,
+    };
+  }
+  return {
+    title: api.title,
+    reasoning_effort: api.reasoning_effort ?? null,
+  };
+}
+
 export function apiSessionToClient(api: CopilotSessionApi): CopilotSessionV1 {
-  const { title, reasoning_effort } = decodeSessionTitle(api.title);
+  const { title, reasoning_effort } = resolveTitleAndReasoning(api);
   return {
     id: api.id,
     title,
@@ -24,31 +45,22 @@ export function apiSessionToClient(api: CopilotSessionApi): CopilotSessionV1 {
     messages: api.messages.map((m) => ({
       ...m,
       shapes: (m.shapes ?? []) as PatternShape[],
-      markers: undefined,
+      markers: (m.markers ?? []) as AgentMarker[],
     })),
   };
 }
 
-export function clientSessionToCreateBody(session: CopilotSessionV1): {
-  title: string;
-  model_id: string;
-  chart: CopilotSessionV1["chart"];
-  messages: ReturnType<typeof messagesForApi>;
-} {
+export function clientSessionToCreateBody(session: CopilotSessionV1): CreateSessionRequest {
   return {
-    title: encodeSessionTitle(session.title, session.reasoning_effort ?? null),
+    title: session.title,
     model_id: session.model_id,
+    reasoning_effort: session.reasoning_effort ?? null,
     chart: chartForApi(session.chart),
     messages: messagesForApi(session.messages),
   };
 }
 
-export function clientSessionToUpdateBody(session: CopilotSessionV1): {
-  title: string;
-  model_id: string;
-  chart: CopilotSessionV1["chart"];
-  messages: ReturnType<typeof messagesForApi>;
-} {
+export function clientSessionToUpdateBody(session: CopilotSessionV1): UpdateSessionRequest {
   return clientSessionToCreateBody(session);
 }
 
@@ -60,7 +72,7 @@ export function summaryFromApi(summary: SessionSummary): {
 } {
   return {
     id: summary.id,
-    title: stripReasoningFromTitle(summary.title),
+    title: stripLegacyReasoningFromTitle(summary.title),
     updated_at: summary.updated_at,
     model_id: summary.model_id,
   };
@@ -72,7 +84,7 @@ export function summaryFromApiSession(api: CopilotSessionApi): {
   updated_at: number;
   model_id: string;
 } {
-  const { title } = decodeSessionTitle(api.title);
+  const { title } = resolveTitleAndReasoning(api);
   return {
     id: api.id,
     title,
@@ -96,7 +108,7 @@ export function summaryFromClientSession(session: CopilotSessionV1): {
 }
 
 export function summaryFingerprintFromApi(summary: SessionSummary): string {
-  return `${summary.created_at}:${stripReasoningFromTitle(summary.title)}:${summary.message_count}`;
+  return `${summary.created_at}:${stripLegacyReasoningFromTitle(summary.title)}:${summary.message_count}`;
 }
 
 export function agentMessageModelLabel(

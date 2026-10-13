@@ -11,7 +11,7 @@ import {
   type SessionSummary,
   type UpdateSessionRequest,
 } from "./copilot-schema";
-import { stripReasoningFromTitle } from "./copilot-session-encoding";
+import { stripLegacyReasoningFromTitle } from "./copilot-session-legacy-title";
 
 export type { CopilotModelRecord, ModelsListResponse } from "./copilot-schema";
 
@@ -140,10 +140,11 @@ function mockSessionSummaries(): SessionSummary[] {
   const list = [...mockSessionsState!.sessions.values()].map((s) => {
     return {
       id: s.id,
-      title: stripReasoningFromTitle(s.title),
+      title: stripLegacyReasoningFromTitle(s.title),
       created_at: s.created_at,
       updated_at: s.updated_at,
       model_id: s.model_id,
+      reasoning_effort: s.reasoning_effort ?? null,
       symbol: s.chart.symbol,
       interval: s.chart.interval,
       candle_count: s.chart.candle_count,
@@ -168,6 +169,7 @@ function mockCreateSession(body: CreateSessionRequest): CopilotSessionApi {
     created_at: now,
     updated_at: now,
     model_id: parsed.model_id,
+    reasoning_effort: parsed.reasoning_effort ?? null,
     chart: parsed.chart,
     messages: parsed.messages ?? [],
   };
@@ -186,6 +188,8 @@ function mockUpdateSession(sessionId: string, body: UpdateSessionRequest): Copil
     ...existing,
     title: parsed.title ?? existing.title,
     model_id: parsed.model_id ?? existing.model_id,
+    reasoning_effort:
+      parsed.reasoning_effort !== undefined ? parsed.reasoning_effort : existing.reasoning_effort,
     chart: parsed.chart ?? existing.chart,
     messages: parsed.messages ?? existing.messages,
     updated_at: Math.floor(Date.now() / 1000),

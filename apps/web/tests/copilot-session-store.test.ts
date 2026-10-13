@@ -4,7 +4,6 @@ import {
   resetCopilotApiMockSessionsForTests,
 } from "../lib/copilot-api";
 import { loadActiveSessionId } from "../lib/copilot-active-session-cache";
-import { encodeSessionTitle } from "../lib/copilot-session-encoding";
 import { agentMessageModelLabel } from "../lib/copilot-session-mapper";
 import { clearCopilotModelsCache, loadCopilotModels } from "../lib/copilot-models-cache";
 import { useCopilotSessionStore } from "../lib/stores/copilot-session-store";
@@ -39,8 +38,9 @@ describe("copilot session store (API)", () => {
     const api = createCopilotApi({ forceMock: true });
     await loadCopilotModels(api);
     const created = await api.createSession({
-      title: encodeSessionTitle("Phiên A", "low"),
+      title: "Phiên A",
       model_id: "agentrouter/deepseek-v4-flash",
+      reasoning_effort: "low",
       chart: {
         symbol: "SOLUSDT",
         interval: "15m",
@@ -55,6 +55,7 @@ describe("copilot session store (API)", () => {
           content: "q",
           model_id: null,
           shapes: [],
+          markers: [],
           created_at: 2,
         },
         {
@@ -63,6 +64,7 @@ describe("copilot session store (API)", () => {
           content: "a",
           model_id: "agentrouter/deepseek-v4-flash",
           shapes: [],
+          markers: [],
           created_at: 3,
         },
       ],
