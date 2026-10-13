@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import {
   allowedUiReasoningLevels,
   defaultReasoningEffortForModel,
@@ -7,10 +7,10 @@ import {
   resetReasoningForModel,
 } from "../lib/copilot-reasoning";
 import type { CopilotModelRecord } from "../lib/copilot-schema";
-import { SESSIONS_STORAGE_KEY, createEmptySession, loadSessionsBlob, saveSessionsBlob } from "../lib/copilot-sessions-v1";
 import { useCopilotSessionStore } from "../lib/stores/copilot-session-store";
 import { clearCopilotModelsCache, loadCopilotModels } from "../lib/copilot-models-cache";
-import { createCopilotApi } from "../lib/copilot-api";
+import { createCopilotApi, resetCopilotApiMockSessionsForTests } from "../lib/copilot-api";
+import { encodeSessionTitle } from "../lib/copilot-session-encoding";
 
 const reasoningModel: CopilotModelRecord = {
   id: "agentrouter/deepseek-v4-flash",
@@ -39,6 +39,17 @@ const cursorNoneOnly: CopilotModelRecord = {
 };
 
 describe("copilot-reasoning", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    resetCopilotApiMockSessionsForTests();
+    clearCopilotModelsCache();
+  });
+
+  afterEach(() => {
+    localStorage.clear();
+    resetCopilotApiMockSessionsForTests();
+  });
+
   it("shows selector only when model exposes reasoning efforts", () => {
     expect(modelShowsReasoningSelector(reasoningModel)).toBe(true);
     expect(modelShowsReasoningSelector(plainModel)).toBe(false);
@@ -56,20 +67,28 @@ describe("copilot-reasoning", () => {
     expect(defaultReasoningEffortForModel(cursorNoneOnly)).toBeNull();
   });
 
-  it("persists reasoning_effort per session in localStorage", async () => {
-    localStorage.removeItem(SESSIONS_STORAGE_KEY);
-    clearCopilotModelsCache();
-    await loadCopilotModels(createCopilotApi({ forceMock: true }));
-    const session = createEmptySession(reasoningModel.id, "R", "medium");
-    saveSessionsBlob({ active_session_id: session.id, sessions: [session] });
-    useCopilotSessionStore.setState({
-      activeSessionId: session.id,
-      modelId: reasoningModel.id,
-      reasoningEffort: "medium",
-      candleCount: 100,
+  it("persists reasoning_effort per session via API title encoding", async () => {
+    const api = createCopilotApi({ forceMock: true });
+    await loadCopilotModels(api);
+    const created = await api.createSession({
+      title: encodeSessionTitle("R", "medium"),
+      model_id: reasoningModel.id,
+      chart: {
+        symbol: "BTCUSDT",
+        interval: "1h",
+        from: 0,
+        to: 0,
+        candle_count: 100,
+      },
+      messages: [],
     });
-    useCopilotSessionStore.getState().persistActiveSession();
-    const blob = loadSessionsBlob();
-    expect(blob.sessions[0]?.reasoning_effort).toBe("medium");
+    useCopilotSessionStore.getState().setApi(api);
+    localStorage.setItem("copilot.active_session_id", created.id);
+    await useCopilotSessionStore.getState().bootstrap();
+    expect(useCopilotSessionStore.getState().reasoningEffort).toBe("medium");
+    useCopilotSessionStore.getState().setReasoningEffort("high");
+    await useCopilotSessionStore.getState().flushPersist();
+    const reloaded = await api.getSession(created.id);
+    expect(reloaded.title).toContain("high");
   });
 });

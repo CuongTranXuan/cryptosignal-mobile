@@ -62,6 +62,7 @@ export function CopilotPanel({ client, api }: CopilotPanelProps) {
   const deleteSession = useCopilotSessionStore((s) => s.deleteSession);
   const reasoningEffort = useCopilotSessionStore((s) => s.reasoningEffort);
   const setReasoningEffort = useCopilotSessionStore((s) => s.setReasoningEffort);
+  const sessionsError = useCopilotSessionStore((s) => s.sessionsError);
 
   const connection = useChartStore((s) => s.connection);
   const shapes = useShapeStore((s) => s.shapes);
@@ -122,10 +123,10 @@ export function CopilotPanel({ client, api }: CopilotPanelProps) {
         <CopilotSessionSidebar
           sessions={sessionRows}
           activeSessionId={activeSessionId}
-          onSelect={switchSession}
-          onCreate={createSession}
-          onRename={renameSession}
-          onDelete={deleteSession}
+          onSelect={(id) => void switchSession(id)}
+          onCreate={() => void createSession()}
+          onRename={(id, title) => void renameSession(id, title)}
+          onDelete={(id) => void deleteSession(id)}
           disabled={inFlight}
         />
 
@@ -214,6 +215,14 @@ export function CopilotPanel({ client, api }: CopilotPanelProps) {
           </div>
 
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3 text-sm">
+        {sessionsError && (
+          <div
+            className="rounded border border-[#f0b90b]/40 bg-[#f0b90b]/10 px-2 py-1.5 text-xs text-[#f0b90b]"
+            role="status"
+          >
+            {sessionsError}
+          </div>
+        )}
         <CopilotAnalyzeProgress inFlight={inFlight} />
         {messages.length === 0 && (
               <p className="text-xs text-[#474d57]">{COPILOT_EMPTY_STATE}</p>

@@ -1,8 +1,17 @@
 import {
+  CopilotSessionApiSchema,
+  CreateSessionRequestSchema,
   ModelsListResponseSchema,
+  SessionsListResponseSchema,
+  UpdateSessionRequestSchema,
+  type CopilotSessionApi,
+  type CreateSessionRequest,
   type CopilotModelRecord,
   type ModelsListResponse,
+  type SessionSummary,
+  type UpdateSessionRequest,
 } from "./copilot-schema";
+import { stripReasoningFromTitle } from "./copilot-session-encoding";
 
 export type { CopilotModelRecord, ModelsListResponse } from "./copilot-schema";
 
@@ -109,7 +118,178 @@ export const MOCK_MODELS_RESPONSE: ModelsListResponse = {
 
 export type CopilotApiClient = {
   fetchModels: (query?: string) => Promise<ModelsListResponse>;
+  listSessions: () => Promise<{ sessions: SessionSummary[] }>;
+  getSession: (sessionId: string) => Promise<CopilotSessionApi>;
+  createSession: (body: CreateSessionRequest) => Promise<CopilotSessionApi>;
+  updateSession: (sessionId: string, body: UpdateSessionRequest) => Promise<CopilotSessionApi>;
+  deleteSession: (sessionId: string) => Promise<{ ok: true }>;
 };
+
+type MockSessionsState = {
+  sessions: Map<string, CopilotSessionApi>;
+};
+
+let mockSessionsState: MockSessionsState | null = null;
+
+function resetMockSessions(): void {
+  mockSessionsState = { sessions: new Map() };
+}
+
+function mockSessionSummaries(): SessionSummary[] {
+  if (!mockSessionsState) resetMockSessions();
+  const list = [...mockSessionsState!.sessions.values()].map((s) => {
+    return {
+      id: s.id,
+      title: stripReasoningFromTitle(s.title),
+      created_at: s.created_at,
+      updated_at: s.updated_at,
+      model_id: s.model_id,
+      symbol: s.chart.symbol,
+      interval: s.chart.interval,
+      candle_count: s.chart.candle_count,
+      message_count: s.messages.length,
+    };
+  });
+  list.sort((a, b) => b.updated_at - a.updated_at);
+  return list.slice(0, 50);
+}
+
+function mockCreateSession(body: CreateSessionRequest): CopilotSessionApi {
+  if (!mockSessionsState) resetMockSessions();
+  const now = Math.floor(Date.now() / 1000);
+  const id =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `sess_${now}_${Math.random().toString(36).slice(2, 9)}`;
+  const parsed = CreateSessionRequestSchema.parse(body);
+  const record: CopilotSessionApi = {
+    id,
+    title: parsed.title,
+    created_at: now,
+    updated_at: now,
+    model_id: parsed.model_id,
+    chart: parsed.chart,
+    messages: parsed.messages ?? [],
+  };
+  mockSessionsState!.sessions.set(id, record);
+  return record;
+}
+
+function mockUpdateSession(sessionId: string, body: UpdateSessionRequest): CopilotSessionApi {
+  if (!mockSessionsState) resetMockSessions();
+  const existing = mockSessionsState!.sessions.get(sessionId);
+  if (!existing) {
+    throw new CopilotApiError(404, { error: "session not found" }, "session not found");
+  }
+  const parsed = UpdateSessionRequestSchema.parse(body);
+  const updated: CopilotSessionApi = {
+    ...existing,
+    title: parsed.title ?? existing.title,
+    model_id: parsed.model_id ?? existing.model_id,
+    chart: parsed.chart ?? existing.chart,
+    messages: parsed.messages ?? existing.messages,
+    updated_at: Math.floor(Date.now() / 1000),
+  };
+  mockSessionsState!.sessions.set(sessionId, updated);
+  return updated;
+}
+
+function createMockSessionsApi(): Pick<
+  CopilotApiClient,
+  "listSessions" | "getSession" | "createSession" | "updateSession" | "deleteSession"
+> {
+  if (!mockSessionsState) resetMockSessions();
+  return {
+    listSessions: async () => ({ sessions: mockSessionSummaries() }),
+    getSession: async (sessionId) => {
+      const record = mockSessionsState!.sessions.get(sessionId);
+      if (!record) {
+        throw new CopilotApiError(404, { error: "session not found" }, "session not found");
+      }
+      return CopilotSessionApiSchema.parse(record);
+    },
+    createSession: async (body) => CopilotSessionApiSchema.parse(mockCreateSession(body)),
+    updateSession: async (sessionId, body) =>
+      CopilotSessionApiSchema.parse(mockUpdateSession(sessionId, body)),
+    deleteSession: async (sessionId) => {
+      if (!mockSessionsState!.sessions.delete(sessionId)) {
+        throw new CopilotApiError(404, { error: "session not found" }, "session not found");
+      }
+      return { ok: true as const };
+    },
+  };
+}
+
+async function jsonOrThrow<T>(res: Response, fallback: string): Promise<T> {
+  if (!res.ok) {
+    const body = await readErrorBody(res);
+    throw new CopilotApiError(res.status, body, fallback);
+  }
+  return (await res.json()) as T;
+}
+
+function createLiveSessionsApi(
+  fetchImpl: typeof fetch,
+  baseUrl: string,
+): Pick<
+  CopilotApiClient,
+  "listSessions" | "getSession" | "createSession" | "updateSession" | "deleteSession"
+> {
+  return {
+    listSessions: async () => {
+      const json = await jsonOrThrow<{ sessions: unknown[] }>(
+        await fetchImpl(`${baseUrl}/v1/copilot/sessions`),
+        "sessions_list_failed",
+      );
+      return SessionsListResponseSchema.parse(json);
+    },
+    getSession: async (sessionId) => {
+      const json = await jsonOrThrow<unknown>(
+        await fetchImpl(`${baseUrl}/v1/copilot/sessions/${encodeURIComponent(sessionId)}`),
+        "session_get_failed",
+      );
+      return CopilotSessionApiSchema.parse(json);
+    },
+    createSession: async (body) => {
+      const parsed = CreateSessionRequestSchema.parse(body);
+      const json = await jsonOrThrow<unknown>(
+        await fetchImpl(`${baseUrl}/v1/copilot/sessions`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(parsed),
+        }),
+        "session_create_failed",
+      );
+      return CopilotSessionApiSchema.parse(json);
+    },
+    updateSession: async (sessionId, body) => {
+      const parsed = UpdateSessionRequestSchema.parse(body);
+      const json = await jsonOrThrow<unknown>(
+        await fetchImpl(`${baseUrl}/v1/copilot/sessions/${encodeURIComponent(sessionId)}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(parsed),
+        }),
+        "session_update_failed",
+      );
+      return CopilotSessionApiSchema.parse(json);
+    },
+    deleteSession: async (sessionId) => {
+      await jsonOrThrow<{ ok: true }>(
+        await fetchImpl(`${baseUrl}/v1/copilot/sessions/${encodeURIComponent(sessionId)}`, {
+          method: "DELETE",
+        }),
+        "session_delete_failed",
+      );
+      return { ok: true };
+    },
+  };
+}
+
+/** Test-only: clear in-memory mock sessions. */
+export function resetCopilotApiMockSessionsForTests(): void {
+  resetMockSessions();
+}
 
 export type CreateCopilotApiOptions = {
   fetchImpl?: typeof fetch;
@@ -123,9 +303,14 @@ export function createCopilotApi(opts: CreateCopilotApiOptions = {}): CopilotApi
   const baseUrl = resolveCopilotBaseUrl(opts.baseUrl);
   const fallbackMock = opts.fallbackMockOnMissing ?? true;
 
+  const sessionsApi = opts.forceMock
+    ? createMockSessionsApi()
+    : createLiveSessionsApi(fetchImpl, baseUrl);
+
   if (opts.forceMock) {
     return {
       fetchModels: async () => MOCK_MODELS_RESPONSE,
+      ...sessionsApi,
     };
   }
 
@@ -143,6 +328,7 @@ export function createCopilotApi(opts: CreateCopilotApiOptions = {}): CopilotApi
       const json = await res.json();
       return ModelsListResponseSchema.parse(json);
     },
+    ...sessionsApi,
   };
 }
 

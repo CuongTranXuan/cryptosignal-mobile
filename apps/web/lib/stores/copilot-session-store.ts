@@ -1,11 +1,8 @@
 import { create } from "zustand";
 import type { CopilotApiClient } from "../copilot-api";
+import { loadActiveSessionId, saveActiveSessionId } from "../copilot-active-session-cache";
 import { DEFAULT_CANDLE_COUNT, clampCandleCountForModel } from "../copilot-model-limits";
-import {
-  modelIdForAnalyzeRequest,
-  resolveDefaultModelId,
-  resolveSessionModelId,
-} from "../copilot-model-defaults";
+import { resolveSessionModelId } from "../copilot-model-defaults";
 import { syncModelsSnapshotFromCache } from "../../components/copilot/use-copilot-models";
 import {
   defaultReasoningEffortForModel,
@@ -18,16 +15,27 @@ import {
   getModelsList,
   loadCopilotModels,
 } from "../copilot-models-cache";
-import { COPILOT_CANDLE_CLAMPED_TO_MAX } from "../copilot-strings";
-import type { AnalyzeMetaEvent, CopilotSessionV1 } from "../copilot-schema";
 import {
-  createEmptySession,
-  loadSessionsBlob,
-  saveSessionsBlob,
-  sessionSummary,
-  shapesFromSessionMessages,
+  COPILOT_CANDLE_CLAMPED_TO_MAX,
+  COPILOT_SESSIONS_MIGRATION_PARTIAL,
+  COPILOT_SESSIONS_OFFLINE,
+  COPILOT_SESSIONS_SAVE_FAILED,
+} from "../copilot-strings";
+import type { AnalyzeMetaEvent, CopilotSessionV1, SessionSummary } from "../copilot-schema";
+import {
+  agentMessageModelLabel,
+  apiSessionToClient,
+  clientSessionToCreateBody,
+  clientSessionToUpdateBody,
   markersFromSessionMessages,
-} from "../copilot-sessions-v1";
+  shapesFromSessionMessages,
+  summaryFromApi,
+  summaryFromApiSession,
+  summaryFromClientSession,
+} from "../copilot-session-mapper";
+import { encodeSessionTitle } from "../copilot-session-encoding";
+import { migrateLegacySessionsIfNeeded } from "../copilot-session-migration";
+import { buildEmptyClientSession } from "../copilot-session-factory";
 import type { AiMessage } from "./ai-store";
 import { useAiStore } from "./ai-store";
 import { useChartStore } from "./chart-store";
@@ -50,13 +58,17 @@ function aiToSessionMessages(messages: AiMessage[]): CopilotSessionV1["messages"
   }));
 }
 
-function sessionToAiMessages(messages: CopilotSessionV1["messages"]): AiMessage[] {
+function sessionToAiMessages(
+  messages: CopilotSessionV1["messages"],
+  models: ReturnType<typeof getModelsList>,
+  apiDefault: string | null,
+): AiMessage[] {
   return messages.map((m) => ({
     id: m.id,
     role: m.role === "user" ? "user" : "agent",
     content: m.content,
     modelId: m.model_id ?? undefined,
-    modelLabel: m.model_id ?? undefined,
+    modelLabel: agentMessageModelLabel(models, m.model_id, apiDefault),
     shapes: m.shapes as PatternShape[],
     markers: m.markers as AgentMarker[] | undefined,
     createdAt: m.created_at,
@@ -64,9 +76,11 @@ function sessionToAiMessages(messages: CopilotSessionV1["messages"]): AiMessage[
   }));
 }
 
+type SessionListRow = ReturnType<typeof summaryFromApi>;
+
 type CopilotSessionState = {
   api: CopilotApiClient | null;
-  sessions: ReturnType<typeof sessionSummary>[];
+  sessions: SessionListRow[];
   activeSessionId: string | null;
   modelId: string | null;
   candleCount: number;
@@ -77,6 +91,10 @@ type CopilotSessionState = {
   chartTo: number;
   reasoningEffort: string | null;
   modelsReady: boolean;
+  sessionsError: string | null;
+  sessionsDirty: boolean;
+  sessionCache: Record<string, CopilotSessionV1>;
+  listFetchedAt: number;
   setApi: (api: CopilotApiClient) => void;
   bootstrap: () => Promise<void>;
   setModelId: (modelId: string) => void;
@@ -85,20 +103,18 @@ type CopilotSessionState = {
   setCustomCandleCount: (count: number) => void;
   getRequestedCandleCount: (closedAvailable?: number) => number;
   setLastAnalyzeMeta: (meta: AnalyzeMetaEvent | null) => void;
-  createSession: () => void;
-  switchSession: (id: string) => void;
-  renameSession: (id: string, title: string) => void;
-  deleteSession: (id: string) => void;
+  createSession: () => Promise<void>;
+  switchSession: (id: string) => Promise<void>;
+  renameSession: (id: string, title: string) => Promise<void>;
+  deleteSession: (id: string) => Promise<void>;
   persistActiveSession: () => void;
+  flushPersist: () => Promise<void>;
   recordAnalysisWindow: (from: number, to: number) => void;
 };
 
-function getActiveSession(blob: ReturnType<typeof loadSessionsBlob>): CopilotSessionV1 | null {
-  if (!blob.active_session_id) return null;
-  return blob.sessions.find((s) => s.id === blob.active_session_id) ?? null;
-}
-
 function applySessionToUi(session: CopilotSessionV1): void {
+  const models = getModelsList();
+  const apiDefault = getDefaultModelId();
   useChartStore.setState({
     symbol: session.chart.symbol,
     interval: session.chart.interval as import("../pattern-shape").Interval,
@@ -109,11 +125,54 @@ function applySessionToUi(session: CopilotSessionV1): void {
   });
   useMarkerStore.setState({ markers: markersFromSessionMessages(session) });
   useAiStore.setState({
-    messages: sessionToAiMessages(session.messages),
+    messages: sessionToAiMessages(session.messages, models, apiDefault),
     lastError: null,
     inFlight: false,
   });
 }
+
+function buildActiveSessionSnapshot(get: () => CopilotSessionState): CopilotSessionV1 | null {
+  const { activeSessionId, modelId, candleCount, reasoningEffort, chartFrom, chartTo } = get();
+  if (!activeSessionId) return null;
+  const cached = get().sessionCache[activeSessionId];
+  const shapes = useShapeStore.getState().shapes;
+  const markers = useMarkerStore.getState().markers;
+  const chartStore = useChartStore.getState();
+  const messages = aiToSessionMessages(useAiStore.getState().messages);
+  let lastAssistantIdx = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i]?.role === "assistant") {
+      lastAssistantIdx = i;
+      break;
+    }
+  }
+  if (lastAssistantIdx >= 0) {
+    messages[lastAssistantIdx] = {
+      ...messages[lastAssistantIdx]!,
+      shapes: shapes as PatternShape[],
+      markers: markers as AgentMarker[],
+    };
+  }
+  const base = cached ?? buildEmptyClientSession(modelId ?? "", "Phiên mới", reasoningEffort);
+  return {
+    ...base,
+    id: activeSessionId,
+    updated_at: Math.floor(Date.now() / 1000),
+    model_id: resolveSessionModelId(getModelsList(), modelId ?? base.model_id, getDefaultModelId()),
+    reasoning_effort: reasoningEffort,
+    chart: {
+      symbol: chartStore.symbol,
+      interval: chartStore.interval,
+      from: chartFrom,
+      to: chartTo,
+      candle_count: candleCount,
+    },
+    messages,
+  };
+}
+
+let persistTimer: ReturnType<typeof setTimeout> | null = null;
+let persistInFlight: Promise<void> | null = null;
 
 export const useCopilotSessionStore = create<CopilotSessionState>((set, get) => ({
   api: null,
@@ -128,12 +187,17 @@ export const useCopilotSessionStore = create<CopilotSessionState>((set, get) => 
   chartTo: 0,
   reasoningEffort: null,
   modelsReady: false,
+  sessionsError: null,
+  sessionsDirty: false,
+  sessionCache: {},
+  listFetchedAt: 0,
 
   setApi: (api) => set({ api }),
 
   bootstrap: async () => {
     const api = get().api;
     if (!api) return;
+
     let models = getModelsList();
     try {
       const response = await loadCopilotModels(api);
@@ -145,47 +209,164 @@ export const useCopilotSessionStore = create<CopilotSessionState>((set, get) => 
       set({ modelsReady: true });
     }
 
-    const blob = loadSessionsBlob();
-    let sessions = blob.sessions;
-    let active = getActiveSession(blob);
     const apiDefault = getCachedModelsResponse()?.default_model ?? getDefaultModelId();
-    if (sessions.length === 0) {
-      const model = resolveSessionModelId(models, null, apiDefault);
-      const effort = defaultReasoningEffortForModel(findCachedModel(model));
-      active = createEmptySession(model, "Phiên mới", effort);
-      sessions = [active];
-      saveSessionsBlob({ active_session_id: active.id, sessions });
-    } else if (!active) {
-      active = sessions[0]!;
-      saveSessionsBlob({ active_session_id: active.id, sessions });
+
+    let listError: string | null = null;
+    let listRows = get().sessions;
+    let serverSummaries: SessionSummary[] = [];
+    try {
+      const listed = await api.listSessions();
+      serverSummaries = listed.sessions;
+      listRows = serverSummaries.map(summaryFromApi);
+      set({ sessions: listRows, listFetchedAt: Date.now(), sessionsError: null });
+    } catch {
+      listError = COPILOT_SESSIONS_OFFLINE;
+      set({ sessionsError: listError });
     }
 
-    const resolvedModelId = resolveSessionModelId(models, active.model_id, apiDefault);
+    let migrationNote: string | null = null;
+    if (!listError) {
+      try {
+        const migration = await migrateLegacySessionsIfNeeded(api, serverSummaries);
+        if (migration.failures.length > 0) {
+          migrationNote = COPILOT_SESSIONS_MIGRATION_PARTIAL;
+        }
+        if (migration.migratedActiveId) {
+          saveActiveSessionId(migration.migratedActiveId);
+        }
+        const listed = await api.listSessions();
+        serverSummaries = listed.sessions;
+        listRows = serverSummaries.map(summaryFromApi);
+        set({ sessions: listRows, listFetchedAt: Date.now() });
+      } catch {
+        migrationNote = COPILOT_SESSIONS_MIGRATION_PARTIAL;
+      }
+    }
+
+    let activeId = loadActiveSessionId();
+    if (!activeId || !listRows.some((s) => s.id === activeId)) {
+      activeId = listRows[0]?.id ?? null;
+    }
+
+    let activeSession: CopilotSessionV1 | null = null;
+    if (activeId && api) {
+      try {
+        const apiSession = await api.getSession(activeId);
+        activeSession = apiSessionToClient(apiSession);
+        set({
+          sessionCache: { ...get().sessionCache, [activeId]: activeSession },
+        });
+      } catch {
+        listError = listError ?? COPILOT_SESSIONS_OFFLINE;
+      }
+    }
+
+    if (!activeSession) {
+      const model = resolveSessionModelId(models, null, apiDefault);
+      const effort = defaultReasoningEffortForModel(findCachedModel(model));
+      const draft = buildEmptyClientSession(model, "Phiên mới", effort);
+      try {
+        const created = await api.createSession(clientSessionToCreateBody(draft));
+        activeSession = apiSessionToClient(created);
+        activeId = activeSession.id;
+        listRows = [summaryFromApiSession(created), ...listRows.filter((s) => s.id !== created.id)];
+        set({
+          sessions: listRows,
+          sessionCache: { ...get().sessionCache, [activeId]: activeSession },
+          listFetchedAt: Date.now(),
+        });
+        saveActiveSessionId(activeId);
+      } catch {
+        set({
+          sessionsError: COPILOT_SESSIONS_OFFLINE,
+          sessionsDirty: true,
+          sessionCache: { ...get().sessionCache, [draft.id]: draft },
+          activeSessionId: draft.id,
+          modelId: model,
+          reasoningEffort: effort,
+          candleCount: draft.chart.candle_count,
+        });
+        applySessionToUi(draft);
+        return;
+      }
+    }
+
+    const resolvedModelId = resolveSessionModelId(models, activeSession!.model_id, apiDefault);
     const resolvedModel = findCachedModel(resolvedModelId);
     const reasoningEffort = resetReasoningForModel(
       resolvedModel,
-      active.reasoning_effort ?? null,
+      activeSession!.reasoning_effort ?? null,
     );
-    if (resolvedModelId !== active.model_id || reasoningEffort !== active.reasoning_effort) {
-      active = {
-        ...active,
-        model_id: resolvedModelId,
-        reasoning_effort: reasoningEffort,
-      };
-      sessions = sessions.map((s) => (s.id === active!.id ? active! : s));
-      saveSessionsBlob({ active_session_id: active.id, sessions });
-    }
 
+    saveActiveSessionId(activeId);
     set({
-      sessions: sessions.map(sessionSummary),
-      activeSessionId: active.id,
+      sessions: listRows,
+      activeSessionId: activeId,
       modelId: resolvedModelId,
-      candleCount: active.chart.candle_count || DEFAULT_CANDLE_COUNT,
-      chartFrom: active.chart.from,
-      chartTo: active.chart.to,
+      candleCount: activeSession!.chart.candle_count || DEFAULT_CANDLE_COUNT,
+      chartFrom: activeSession!.chart.from,
+      chartTo: activeSession!.chart.to,
       reasoningEffort,
+      sessionsError: migrationNote ?? listError,
     });
-    applySessionToUi(active);
+    applySessionToUi({
+      ...activeSession!,
+      model_id: resolvedModelId,
+      reasoning_effort: reasoningEffort,
+    });
+  },
+
+  flushPersist: async () => {
+    if (persistTimer) {
+      clearTimeout(persistTimer);
+      persistTimer = null;
+    }
+    if (persistInFlight) {
+      await persistInFlight;
+    }
+    const api = get().api;
+    const snapshot = buildActiveSessionSnapshot(get);
+    if (!api || !snapshot?.id) return;
+
+    const previous = get().sessionCache[snapshot.id];
+    const run = async () => {
+      try {
+        const updated = await api.updateSession(snapshot.id, clientSessionToUpdateBody(snapshot));
+        const client = apiSessionToClient(updated);
+        set({
+          sessionCache: { ...get().sessionCache, [snapshot.id]: client },
+          sessionsDirty: false,
+          sessionsError: null,
+        });
+      } catch {
+        if (previous) {
+          set({ sessionCache: { ...get().sessionCache, [snapshot.id]: previous } });
+        }
+        set({ sessionsDirty: true, sessionsError: COPILOT_SESSIONS_SAVE_FAILED });
+      }
+    };
+    persistInFlight = run().finally(() => {
+      persistInFlight = null;
+    });
+    await persistInFlight;
+  },
+
+  persistActiveSession: () => {
+    const snapshot = buildActiveSessionSnapshot(get);
+    if (!snapshot?.id) return;
+    set({
+      sessionCache: { ...get().sessionCache, [snapshot.id]: snapshot },
+      sessions: get().sessions.map((row) =>
+        row.id === snapshot.id
+          ? { ...row, updated_at: snapshot.updated_at, model_id: snapshot.model_id, title: snapshot.title }
+          : row,
+      ),
+    });
+    if (persistTimer) clearTimeout(persistTimer);
+    persistTimer = setTimeout(() => {
+      persistTimer = null;
+      void get().flushPersist();
+    }, 400);
   },
 
   setModelId: (modelId) => {
@@ -223,7 +404,6 @@ export const useCopilotSessionStore = create<CopilotSessionState>((set, get) => 
   },
 
   setLastAnalyzeMeta: (meta) => {
-    // Last SSE `meta` wins (server may emit again on retry with fewer candles).
     set({
       lastAnalyzeMeta: meta,
       ...(meta?.candle_count_used != null ? { candleCount: meta.candle_count_used } : {}),
@@ -231,29 +411,77 @@ export const useCopilotSessionStore = create<CopilotSessionState>((set, get) => 
     get().persistActiveSession();
   },
 
-  createSession: () => {
+  createSession: async () => {
+    const api = get().api;
+    await get().flushPersist();
     const models = getModelsList();
     const modelId = resolveSessionModelId(models, get().modelId, getDefaultModelId());
-    const session = createEmptySession(modelId, "Phiên mới", get().reasoningEffort);
-    session.chart.candle_count = get().getRequestedCandleCount();
-    const blob = loadSessionsBlob();
-    const sessions = [session, ...blob.sessions];
-    saveSessionsBlob({ active_session_id: session.id, sessions });
+    const draft = buildEmptyClientSession(modelId, "Phiên mới", get().reasoningEffort);
+    draft.chart.candle_count = get().getRequestedCandleCount();
+
+    const previousSessions = get().sessions;
+    const optimisticRow = summaryFromClientSession(draft);
+
     set({
-      sessions: sessions.map(sessionSummary),
-      activeSessionId: session.id,
+      sessions: [optimisticRow, ...previousSessions],
+      activeSessionId: draft.id,
       lastAnalyzeMeta: null,
+      sessionCache: { ...get().sessionCache, [draft.id]: draft },
     });
     useAiStore.setState({ messages: [], lastError: null, inFlight: false });
-    applySessionToUi(session);
+    applySessionToUi(draft);
+
+    if (!api) {
+      set({ sessionsDirty: true, sessionsError: COPILOT_SESSIONS_OFFLINE });
+      return;
+    }
+
+    try {
+      const created = await api.createSession(clientSessionToCreateBody(draft));
+      const client = apiSessionToClient(created);
+      const row = summaryFromApiSession(created);
+      const cache = { ...get().sessionCache };
+      delete cache[draft.id];
+      cache[created.id] = client;
+      set({
+        sessions: [row, ...previousSessions],
+        activeSessionId: created.id,
+        sessionCache: cache,
+        sessionsError: null,
+        listFetchedAt: Date.now(),
+      });
+      saveActiveSessionId(created.id);
+    } catch {
+      set({
+        sessions: previousSessions,
+        activeSessionId: previousSessions[0]?.id ?? null,
+        sessionsError: COPILOT_SESSIONS_SAVE_FAILED,
+      });
+      if (previousSessions[0]?.id) {
+        const cached = get().sessionCache[previousSessions[0].id];
+        if (cached) applySessionToUi(cached);
+      }
+    }
   },
 
-  switchSession: (id) => {
-    get().persistActiveSession();
-    const blob = loadSessionsBlob();
-    const session = blob.sessions.find((s) => s.id === id);
+  switchSession: async (id) => {
+    if (id === get().activeSessionId) return;
+    await get().flushPersist();
+    const api = get().api;
+    let session = get().sessionCache[id];
+    if (!session && api) {
+      try {
+        const apiSession = await api.getSession(id);
+        session = apiSessionToClient(apiSession);
+        set({ sessionCache: { ...get().sessionCache, [id]: session } });
+      } catch {
+        set({ sessionsError: COPILOT_SESSIONS_OFFLINE });
+        return;
+      }
+    }
     if (!session) return;
-    saveSessionsBlob({ active_session_id: id, sessions: blob.sessions });
+
+    saveActiveSessionId(id);
     const models = getModelsList();
     const apiDefault = getDefaultModelId();
     const resolvedId = resolveSessionModelId(models, session.model_id, apiDefault);
@@ -265,102 +493,110 @@ export const useCopilotSessionStore = create<CopilotSessionState>((set, get) => 
       customCandleCount: null,
       lastAnalyzeMeta: null,
       reasoningEffort: resetReasoningForModel(model, session.reasoning_effort ?? null),
-      sessions: blob.sessions.map(sessionSummary),
     });
-    applySessionToUi(session);
+    applySessionToUi({ ...session, model_id: resolvedId });
   },
 
-  renameSession: (id, title) => {
+  renameSession: async (id, title) => {
     const trimmed = title.trim();
     if (!trimmed) return;
-    const blob = loadSessionsBlob();
-    const sessions = blob.sessions.map((s) =>
-      s.id === id ? { ...s, title: trimmed, updated_at: Math.floor(Date.now() / 1000) } : s,
-    );
-    saveSessionsBlob({ active_session_id: blob.active_session_id, sessions });
-    set({ sessions: sessions.map(sessionSummary) });
-  },
-
-  deleteSession: (id) => {
-    const blob = loadSessionsBlob();
-    const sessions = blob.sessions.filter((s) => s.id !== id);
-    if (blob.active_session_id === id) {
-      if (sessions.length === 0) {
-        const models = getModelsList();
-        const modelId = resolveSessionModelId(models, get().modelId, getDefaultModelId());
-        const fresh = createEmptySession(modelId, "Phiên mới", get().reasoningEffort);
-        sessions.push(fresh);
-        saveSessionsBlob({ active_session_id: fresh.id, sessions });
-        set({
-          sessions: sessions.map(sessionSummary),
-          activeSessionId: fresh.id,
-          lastAnalyzeMeta: null,
-        });
-        applySessionToUi(fresh);
-        return;
-      }
-      const next = sessions[0]!;
-      saveSessionsBlob({ active_session_id: next.id, sessions });
+    const api = get().api;
+    const cached = get().sessionCache[id];
+    const previousTitle = get().sessions.find((s) => s.id === id)?.title;
+    set({
+      sessions: get().sessions.map((s) => (s.id === id ? { ...s, title: trimmed } : s)),
+    });
+    if (cached) {
       set({
-        sessions: sessions.map(sessionSummary),
-        activeSessionId: next.id,
-        modelId: next.model_id,
-        candleCount: next.chart.candle_count,
-        lastAnalyzeMeta: null,
+        sessionCache: {
+          ...get().sessionCache,
+          [id]: { ...cached, title: trimmed, updated_at: Math.floor(Date.now() / 1000) },
+        },
       });
-      applySessionToUi(next);
+    }
+    if (!api) {
+      set({ sessionsDirty: true, sessionsError: COPILOT_SESSIONS_OFFLINE });
       return;
     }
-    saveSessionsBlob({ active_session_id: blob.active_session_id, sessions });
-    set({ sessions: sessions.map(sessionSummary) });
+    try {
+      const session = get().sessionCache[id] ?? cached;
+      if (!session) return;
+      const updated = await api.updateSession(id, {
+        title: encodeSessionTitle(trimmed, session.reasoning_effort ?? null),
+      });
+      const client = apiSessionToClient(updated);
+      set({
+        sessionCache: { ...get().sessionCache, [id]: client },
+        sessions: get().sessions.map((s) =>
+          s.id === id ? { ...summaryFromApiSession(updated), title: trimmed } : s,
+        ),
+      });
+    } catch {
+      if (previousTitle) {
+        set({
+          sessions: get().sessions.map((s) => (s.id === id ? { ...s, title: previousTitle } : s)),
+        });
+      }
+      set({ sessionsError: COPILOT_SESSIONS_SAVE_FAILED });
+    }
   },
 
-  persistActiveSession: () => {
-    const { activeSessionId, modelId, candleCount, reasoningEffort } = get();
-    if (!activeSessionId) return;
-    const blob = loadSessionsBlob();
-    const shapes = useShapeStore.getState().shapes;
-    const markers = useMarkerStore.getState().markers;
-    const chartStore = useChartStore.getState();
-    const messages = aiToSessionMessages(useAiStore.getState().messages);
-    let lastAssistantIdx = -1;
-    for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i]?.role === "assistant") {
-        lastAssistantIdx = i;
-        break;
+  deleteSession: async (id) => {
+    const api = get().api;
+    const previousSessions = get().sessions;
+    const previousActive = get().activeSessionId;
+    const previousCache = get().sessionCache;
+    const wasActive = id === previousActive;
+    const remaining = previousSessions.filter((s) => s.id !== id);
+
+    if (wasActive) {
+      await get().flushPersist();
+      if (remaining.length === 0) {
+        set({ sessions: [] });
+      } else {
+        const nextId = remaining[0]!.id;
+        saveActiveSessionId(nextId);
+        const session = previousCache[nextId];
+        if (session) {
+          set({
+            sessions: remaining,
+            activeSessionId: nextId,
+            sessionCache: { ...previousCache },
+          });
+          applySessionToUi(session);
+        }
       }
+    } else {
+      set({ sessions: remaining });
     }
-    if (lastAssistantIdx >= 0) {
-      messages[lastAssistantIdx] = {
-        ...messages[lastAssistantIdx]!,
-        shapes: shapes as PatternShape[],
-        markers: markers as AgentMarker[],
-      };
+
+    const cache = { ...get().sessionCache };
+    delete cache[id];
+    set({ sessionCache: cache });
+
+    if (wasActive && remaining.length === 0) {
+      await get().createSession();
     }
-    const { chartFrom, chartTo } = get();
-    const sessions = blob.sessions.map((s) => {
-      if (s.id !== activeSessionId) return s;
-      return {
-        ...s,
-        updated_at: Math.floor(Date.now() / 1000),
-        model_id: resolveSessionModelId(
-          getModelsList(),
-          modelId ?? s.model_id,
-          getDefaultModelId(),
-        ),
-        reasoning_effort: reasoningEffort,
-        chart: {
-          symbol: chartStore.symbol,
-          interval: chartStore.interval,
-          from: chartFrom,
-          to: chartTo,
-          candle_count: candleCount,
-        },
-        messages,
-      };
-    });
-    saveSessionsBlob({ active_session_id: activeSessionId, sessions });
-    set({ sessions: sessions.map(sessionSummary) });
+
+    if (!api) {
+      set({ sessionsDirty: true, sessionsError: COPILOT_SESSIONS_OFFLINE });
+      return;
+    }
+    try {
+      await api.deleteSession(id);
+      set({ listFetchedAt: Date.now(), sessionsError: null });
+    } catch {
+      set({
+        sessions: previousSessions,
+        sessionCache: previousCache,
+        activeSessionId: previousActive,
+        sessionsError: COPILOT_SESSIONS_SAVE_FAILED,
+      });
+      if (previousActive && previousCache[previousActive]) {
+        applySessionToUi(previousCache[previousActive]);
+      }
+      saveActiveSessionId(previousActive);
+    }
   },
 
   recordAnalysisWindow: (from, to) => {

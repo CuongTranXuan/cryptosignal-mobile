@@ -1,7 +1,7 @@
 import { mergeCandles } from "./binance";
 import { mapCopilotHttpError, mapCopilotSseErrorPayload } from "./copilot-errors";
 import { AnalyzeMetaEventSchema } from "./copilot-schema";
-import { modelIdForAnalyzeRequest } from "./copilot-model-defaults";
+import { modelIdForAnalyzeRequest, modelLabelForSession } from "./copilot-model-defaults";
 import { findCachedModel, getDefaultModelId, getModelsList } from "./copilot-models-cache";
 import { reasoningEffortForAnalyze } from "./copilot-reasoning";
 import { resolveCopilotBaseUrl } from "./copilot-api";
@@ -193,11 +193,14 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
           for (let i = messages.length - 1; i >= 0; i--) {
             const msg = messages[i];
             if (msg?.role === "agent") {
-              const model = findCachedModel(parsed.data.model);
               messages[i] = {
                 ...msg,
                 modelId: parsed.data.model,
-                modelLabel: model?.label ?? parsed.data.model,
+                modelLabel: modelLabelForSession(
+                  getModelsList(),
+                  parsed.data.model,
+                  getDefaultModelId(),
+                ),
                 analyzeMeta: {
                   candle_count_used: parsed.data.candle_count_used,
                   clamped: parsed.data.clamped,
@@ -410,7 +413,11 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
     useAiStore.getState().appendUser(prompt);
     useAiStore.getState().startAgent({
       modelId: model?.id ?? displayModelId,
-      modelLabel: model?.label ?? displayModelId,
+      modelLabel: modelLabelForSession(
+        models,
+        model?.id ?? displayModelId,
+        apiDefault,
+      ),
     });
     useCopilotSessionStore.getState().recordAnalysisWindow(window.from, window.to);
 

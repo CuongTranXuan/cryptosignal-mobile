@@ -15,7 +15,8 @@ import {
 } from "../lib/copilot-strings";
 import { createCopilotApi } from "../lib/copilot-api";
 import { clearCopilotModelsCache, loadCopilotModels } from "../lib/copilot-models-cache";
-import { SESSIONS_STORAGE_KEY } from "../lib/copilot-sessions-v1";
+import { LEGACY_SESSIONS_STORAGE_KEY } from "../lib/copilot-session-migration";
+import { resetCopilotApiMockSessionsForTests } from "../lib/copilot-api";
 import { useCopilotSessionStore } from "../lib/stores/copilot-session-store";
 import { createCopilotClient } from "../lib/use-copilot";
 
@@ -94,17 +95,18 @@ function streamResponse(chunks: string[], status = 200): Response {
 }
 
 async function resetStores() {
-  localStorage.removeItem(SESSIONS_STORAGE_KEY);
+  localStorage.clear();
+  resetCopilotApiMockSessionsForTests();
+  localStorage.removeItem(LEGACY_SESSIONS_STORAGE_KEY);
+  const api = createCopilotApi({ forceMock: true });
   clearCopilotModelsCache();
-  await loadCopilotModels(createCopilotApi({ forceMock: true }));
+  await loadCopilotModels(api);
+  useCopilotSessionStore.getState().setApi(api);
+  await useCopilotSessionStore.getState().bootstrap();
   useCopilotSessionStore.setState({
-    modelId: "agentrouter/deepseek-v4-flash",
-    candleCount: 100,
     reasoningEffort: "low",
     customCandleCount: null,
     lastAnalyzeMeta: null,
-    chartFrom: 0,
-    chartTo: 0,
   });
   useChartStore.setState({
     symbol: "BTCUSDT",

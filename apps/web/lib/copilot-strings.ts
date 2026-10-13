@@ -78,6 +78,12 @@ export const COPILOT_SESSION_RENAME = "Đổi tên";
 export const COPILOT_SESSION_DELETE = "Xóa";
 export const COPILOT_SESSION_DELETE_CONFIRM = "Xóa phiên này?";
 export const COPILOT_SESSION_EMPTY = "Chưa có phiên — tạo phiên mới để lưu lịch sử.";
+export const COPILOT_SESSIONS_OFFLINE =
+  "Không lưu được phiên lên máy chủ — tin nhắn vẫn giữ trên thiết bị này. Sẽ thử lại khi kết nối lại.";
+export const COPILOT_SESSIONS_SAVE_FAILED =
+  "Không lưu được phiên — thay đổi được giữ tạm trên thiết bị. Thử lại sau.";
+export const COPILOT_SESSIONS_MIGRATION_PARTIAL =
+  "Một phần phiên cũ chưa chuyển lên máy chủ — vẫn lưu cục bộ cho đến khi chuyển thành công.";
 export const COPILOT_MODEL_LIMITS_PREFIX = "Giới hạn";
 
 export function copilotDrewShapes(count: number, lines: string[]): string {

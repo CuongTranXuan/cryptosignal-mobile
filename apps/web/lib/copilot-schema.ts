@@ -86,6 +86,56 @@ export const CopilotSessionSchema = z.object({
 
 export type CopilotSessionV1 = z.infer<typeof CopilotSessionSchema>;
 
+/** Backend `SessionSummary` (list endpoint). */
+export const SessionSummarySchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  created_at: z.number(),
+  updated_at: z.number(),
+  model_id: z.string(),
+  symbol: z.string(),
+  interval: z.string(),
+  candle_count: z.number(),
+  message_count: z.number(),
+});
+
+export type SessionSummary = z.infer<typeof SessionSummarySchema>;
+
+export const SessionsListResponseSchema = z.object({
+  sessions: z.array(SessionSummarySchema),
+});
+
+/** Backend `CopilotSession` document (no session-level reasoning_effort). */
+export const CopilotSessionApiSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  created_at: z.number(),
+  updated_at: z.number(),
+  model_id: z.string(),
+  chart: SessionChartSchema,
+  messages: z.array(SessionMessageSchema.omit({ markers: true })),
+});
+
+export type CopilotSessionApi = z.infer<typeof CopilotSessionApiSchema>;
+
+export const CreateSessionRequestSchema = z.object({
+  title: z.string(),
+  model_id: z.string(),
+  chart: SessionChartSchema,
+  messages: z.array(SessionMessageSchema.omit({ markers: true })).optional(),
+});
+
+export type CreateSessionRequest = z.infer<typeof CreateSessionRequestSchema>;
+
+export const UpdateSessionRequestSchema = z.object({
+  title: z.string().optional(),
+  model_id: z.string().optional(),
+  chart: SessionChartSchema.optional(),
+  messages: z.array(SessionMessageSchema.omit({ markers: true })).optional(),
+});
+
+export type UpdateSessionRequest = z.infer<typeof UpdateSessionRequestSchema>;
+
 export type CopilotProviderGroup = {
   id: string;
   label: string;
