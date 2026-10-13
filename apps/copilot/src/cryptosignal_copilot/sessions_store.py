@@ -6,6 +6,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
+from typing import Any
 
 from cryptosignal_copilot.config import load_sessions_db_path
 from cryptosignal_copilot.schema import (
@@ -13,7 +14,9 @@ from cryptosignal_copilot.schema import (
     SessionChartContext,
     SessionMessage,
     SessionSummary,
+    normalize_session_reasoning_effort,
 )
+from cryptosignal_copilot.sessions_migrate import apply_sessions_migrations
 
 MAX_SESSIONS = 50
 MAX_MESSAGES_PER_SESSION = 200
@@ -51,6 +54,7 @@ class SessionsStore:
                     )
                     """
                 )
+                apply_sessions_migrations(conn)
                 conn.commit()
 
     def list_sessions(self) -> list[SessionSummary]:
@@ -75,6 +79,7 @@ class SessionsStore:
                     created_at=session.created_at,
                     updated_at=session.updated_at,
                     model_id=session.model_id,
+                    reasoning_effort=session.reasoning_effort,
                     symbol=session.chart.symbol,
                     interval=session.chart.interval,
                     candle_count=session.chart.candle_count,
@@ -101,6 +106,7 @@ class SessionsStore:
         model_id: str,
         chart: SessionChartContext,
         messages: list[SessionMessage] | None = None,
+        reasoning_effort: str | None = None,
     ) -> CopilotSession:
         self._evict_if_needed()
         now = int(time.time())
@@ -110,30 +116,24 @@ class SessionsStore:
             created_at=now,
             updated_at=now,
             model_id=model_id,
+            reasoning_effort=normalize_session_reasoning_effort(reasoning_effort),
             chart=chart,
             messages=(messages or [])[:MAX_MESSAGES_PER_SESSION],
         )
         self._upsert(session)
         return session
 
-    def update_session(
-        self,
-        session_id: str,
-        *,
-        title: str | None = None,
-        model_id: str | None = None,
-        chart: SessionChartContext | None = None,
-        messages: list[SessionMessage] | None = None,
-    ) -> CopilotSession:
+    def update_session(self, session_id: str, **updates: Any) -> CopilotSession:
         record = self.get_session(session_id)
-        if title is not None:
-            record = record.model_copy(update={"title": title})
-        if model_id is not None:
-            record = record.model_copy(update={"model_id": model_id})
-        if chart is not None:
-            record = record.model_copy(update={"chart": chart})
-        if messages is not None:
-            record = record.model_copy(update={"messages": messages[:MAX_MESSAGES_PER_SESSION]})
+        allowed = {"title", "model_id", "chart", "messages", "reasoning_effort"}
+        for key, value in updates.items():
+            if key not in allowed:
+                continue
+            if key == "reasoning_effort":
+                value = normalize_session_reasoning_effort(value)
+            if key == "messages" and value is not None:
+                value = value[:MAX_MESSAGES_PER_SESSION]
+            record = record.model_copy(update={key: value})
         record = record.model_copy(update={"updated_at": int(time.time())})
         self._upsert(record)
         return record
@@ -172,12 +172,15 @@ class SessionsStore:
             with self._connect() as conn:
                 conn.execute(
                     """
-                    INSERT INTO copilot_sessions (id, title, created_at, updated_at, payload)
-                    VALUES (?, ?, ?, ?, ?)
+                    INSERT INTO copilot_sessions (
+                        id, title, created_at, updated_at, payload, reasoning_effort
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
                         title = excluded.title,
                         updated_at = excluded.updated_at,
-                        payload = excluded.payload
+                        payload = excluded.payload,
+                        reasoning_effort = excluded.reasoning_effort
                     """,
                     (
                         record.id,
@@ -185,6 +188,7 @@ class SessionsStore:
                         float(record.created_at),
                         float(record.updated_at),
                         json.dumps(payload),
+                        record.reasoning_effort,
                     ),
                 )
                 conn.commit()

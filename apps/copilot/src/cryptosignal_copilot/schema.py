@@ -2,7 +2,7 @@ import logging
 from dataclasses import replace
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from cryptosignal_copilot.drawing_gate import DrawingWindow, Drop, apply_preview_gate
 
@@ -15,6 +15,19 @@ Status = Literal["preview", "committed"]
 # Trading-order keys. PatternShape forbids `side` as an order field.
 # AgentMarker.side is signal direction (buy|sell|neutral), not an order.
 FORBIDDEN = {"order", "side", "quantity", "apiKey", "secret", "leverage"}
+
+SESSION_REASONING_EFFORTS: frozenset[str] = frozenset(
+    {"none", "low", "medium", "high", "xhigh", "max"},
+)
+
+
+def normalize_session_reasoning_effort(value: str | None) -> str | None:
+    """Soft validation: null or a known effort tier; unknown values become null."""
+    if value is None:
+        return None
+    if value in SESSION_REASONING_EFFORTS:
+        return value
+    return None
 
 
 class Point(BaseModel):
@@ -146,6 +159,7 @@ class SessionMessage(BaseModel):
     content: str
     model_id: str | None = None
     shapes: list[PatternShape] = Field(default_factory=list)
+    markers: list[AgentMarker] = Field(default_factory=list)
     created_at: int
     meta: SessionMessageMeta | None = None
 
@@ -158,8 +172,18 @@ class CopilotSession(BaseModel):
     created_at: int
     updated_at: int
     model_id: str
+    reasoning_effort: str | None = None
     chart: SessionChartContext
     messages: list[SessionMessage] = Field(default_factory=list)
+
+    @field_validator("reasoning_effort", mode="before")
+    @classmethod
+    def _soft_reasoning_effort(cls, value: object) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return normalize_session_reasoning_effort(value)
+        return None
 
 
 class SessionSummary(BaseModel):
@@ -170,6 +194,7 @@ class SessionSummary(BaseModel):
     created_at: int
     updated_at: int
     model_id: str
+    reasoning_effort: str | None = None
     symbol: str
     interval: str
     candle_count: int
@@ -181,8 +206,18 @@ class CreateSessionRequest(BaseModel):
 
     title: str = "New chat"
     model_id: str
+    reasoning_effort: str | None = None
     chart: SessionChartContext
     messages: list[SessionMessage] = Field(default_factory=list)
+
+    @field_validator("reasoning_effort", mode="before")
+    @classmethod
+    def _soft_reasoning_effort(cls, value: object) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return normalize_session_reasoning_effort(value)
+        return None
 
 
 class UpdateSessionRequest(BaseModel):
@@ -190,8 +225,18 @@ class UpdateSessionRequest(BaseModel):
 
     title: str | None = None
     model_id: str | None = None
+    reasoning_effort: str | None = None
     chart: SessionChartContext | None = None
     messages: list[SessionMessage] | None = None
+
+    @field_validator("reasoning_effort", mode="before")
+    @classmethod
+    def _soft_reasoning_effort(cls, value: object) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return normalize_session_reasoning_effort(value)
+        return None
 
 
 class AnalyzeResult(BaseModel):

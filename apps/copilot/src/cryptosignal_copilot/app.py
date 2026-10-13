@@ -123,6 +123,7 @@ def create_app(
             model_id=body.model_id,
             chart=body.chart,
             messages=body.messages,
+            reasoning_effort=body.reasoning_effort,
         )
         return record.model_dump(by_alias=True)
 
@@ -137,14 +138,8 @@ def create_app(
     @app.patch("/v1/copilot/sessions/{session_id}")
     async def patch_session(session_id: str, body: UpdateSessionRequest):
         try:
-            record = await asyncio.to_thread(
-                store.update_session,
-                session_id,
-                title=body.title,
-                model_id=body.model_id,
-                chart=body.chart,
-                messages=body.messages,
-            )
+            patch = body.model_dump(exclude_unset=True, by_alias=True)
+            record = await asyncio.to_thread(store.update_session, session_id, **patch)
         except SessionNotFoundError:
             return JSONResponse({"error": "session not found"}, status_code=404)
         return record.model_dump(by_alias=True)
