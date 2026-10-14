@@ -10,6 +10,7 @@ from cryptosignal_copilot.model_visibility import (
     is_media_model_row,
     load_visibility_allowlist,
     normalize_upstream_model_id,
+    should_keep_despite_media_row,
 )
 
 
@@ -62,7 +63,9 @@ def filter_available_models(
             if include_combo:
                 scoped.append(row)
             continue
-        if is_media_model_row(row):
+        if is_media_model_row(row) and not should_keep_despite_media_row(
+            model_id, default_model_id=default_model_id
+        ):
             continue
         if is_hidden_model(model_id):
             continue

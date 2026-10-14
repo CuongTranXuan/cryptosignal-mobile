@@ -28,6 +28,22 @@ def test_omniroute_visibility_filter_collapses_large_catalog(monkeypatch, omniro
     assert flash["_effort_routes"]["none"] == "agentrouter/no-think/deepseek-v4-flash"
 
 
+def test_allowlisted_media_mislabel_kept(monkeypatch, omniroute_catalog_env):
+    rows = [
+        {
+            "id": "cursor/composer-2.5",
+            "owned_by": "cursor",
+            "type": "image",
+            "capabilities": {"output_modalities": ["image"]},
+        },
+        {"id": "cursor/veo-3", "owned_by": "cursor", "type": "video"},
+    ]
+    filtered = filter_available_models(rows, default_model_id="agentrouter/deepseek-v4-flash")
+    ids = {row["id"] for row in filtered}
+    assert "cursor/composer-2.5" in ids
+    assert "cursor/veo-3" not in ids
+
+
 def test_media_and_legacy_cursor_hidden(monkeypatch, omniroute_catalog_env):
     rows = [
         {"id": "aihorde/flux", "owned_by": "aihorde", "type": "image"},

@@ -11,6 +11,7 @@ from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError, UnexpectedMode
 from cryptosignal_copilot.agent_output import build_agent_output_type, output_retries_for_model
 from cryptosignal_copilot.analyze_prep import AnalyzePlan, retry_plan
 from cryptosignal_copilot.config import load_llm_config
+from cryptosignal_copilot.env_parse import env_flag
 from cryptosignal_copilot.drawing_gate import (
     DrawingWindow,
     bar_seconds,
@@ -202,14 +203,17 @@ class PydanticAiRunner:
                 yield "error", model_http_error_payload(exc)
                 yield "done", {}
                 return
-            except Exception:
+            except Exception as exc:
                 logger.exception("copilot agent run failed")
+                detail = "unexpected agent failure"
+                if env_flag("COPILOT_EXPOSE_ERROR_DETAIL"):
+                    detail = f"{type(exc).__name__}: {exc}"[:500]
                 yield (
                     "error",
                     error_payload(
                         "internal_error",
                         "Lỗi nội bộ máy chủ Copilot",
-                        "unexpected agent failure",
+                        detail,
                     ),
                 )
                 yield "done", {}

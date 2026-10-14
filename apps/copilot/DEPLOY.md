@@ -28,7 +28,8 @@
 | `COPILOT_DATA_DIR` | no | — | Default sqlite file: `{dir}/sessions.sqlite3` |
 | `COPILOT_RUN_DB_MIGRATIONS` | no | `false` | Run `alembic upgrade head` on process start |
 | `COPILOT_MODEL_PROVIDERS` | no | empty | CSV `owned_by` / id prefix filter; empty = all providers |
-| `COPILOT_MODEL_VISIBILITY_ALLOWLIST` | no | empty | CSV model ids after collapse; empty = no allowlist |
+| `COPILOT_MODEL_VISIBILITY_ALLOWLIST` | no | empty | CSV model ids after collapse; empty = no allowlist. Entries **bypass the media filter** when gateways mislabel chat models as `type=image`. |
+| `COPILOT_EXPOSE_ERROR_DETAIL` | no | `false` | Include truncated exception text in SSE `internal_error` detail (always logged to stderr). |
 | `COPILOT_MODEL_ID_PREFIX_ALIASES` | no | empty | `from/:to/` prefix rewrites (CSV) |
 | `COPILOT_MODEL_OVERRIDES_FILE` | no | — | JSON file for per-model limits, `structured_output_mode`, hide, advanced |
 | `COPILOT_MODEL_OVERRIDES_JSON` | no | — | Inline overrides JSON (same schema as file) |

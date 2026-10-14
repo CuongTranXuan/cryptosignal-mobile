@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-import json
+import os
+import tempfile
 from pathlib import Path
 
 import pytest
 
-from cryptosignal_copilot.config import LlmConfig
+from cryptosignal_copilot.config import LlmConfig, sqlite_url_for_path
 from cryptosignal_copilot.model_catalog import ModelsCatalog
 from tests.omniroute_fixtures import omniroute_models_payload
 
@@ -14,6 +15,18 @@ TEST_LLM_MODEL = "agentrouter/deepseek-v4-flash"
 _OMNIROUTE_OVERRIDES = (
     Path(__file__).resolve().parents[1] / "config/omniroute.model-overrides.json.example"
 )
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Isolate session DB before any test imports app or sessions_store."""
+    if os.environ.get("_COPILOT_PYTEST_DB_ISOLATED"):
+        return
+    base = Path(tempfile.gettempdir()) / "cryptosignal-copilot-pytest"
+    base.mkdir(parents=True, exist_ok=True)
+    db_path = base / f"sessions-{os.getpid()}.sqlite3"
+    os.environ["DATABASE_URL"] = sqlite_url_for_path(db_path)
+    os.environ.setdefault("COPILOT_RUN_DB_MIGRATIONS", "true")
+    os.environ["_COPILOT_PYTEST_DB_ISOLATED"] = "1"
 
 
 async def _default_test_models(_cfg: LlmConfig):
@@ -56,6 +69,7 @@ def test_app(test_models_catalog, tmp_path, monkeypatch):
     from cryptosignal_copilot.sessions_store import reset_sessions_store_for_tests
 
     monkeypatch.setenv("COPILOT_RUN_DB_MIGRATIONS", "true")
+    monkeypatch.setenv("DATABASE_URL", sqlite_url_for_path(tmp_path / "sessions.sqlite3"))
     db = tmp_path / "sessions.sqlite3"
     store = reset_sessions_store_for_tests(db)
     catalog = ModelsCatalog(fetch_models=_default_test_models)

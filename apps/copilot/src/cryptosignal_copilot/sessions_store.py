@@ -22,6 +22,14 @@ from cryptosignal_copilot.schema import (
     normalize_session_reasoning_effort,
 )
 
+
+def _coerce_chart(value: object) -> SessionChartContext:
+    if isinstance(value, SessionChartContext):
+        return value
+    if isinstance(value, dict):
+        return SessionChartContext.model_validate(value)
+    raise TypeError(f"chart must be SessionChartContext or dict, got {type(value)!r}")
+
 MAX_SESSIONS = 50
 MAX_MESSAGES_PER_SESSION = 200
 
@@ -121,6 +129,8 @@ class SessionsStore:
                 continue
             if key == "reasoning_effort":
                 value = normalize_session_reasoning_effort(value)
+            if key == "chart" and value is not None:
+                value = _coerce_chart(value)
             if key == "messages" and value is not None:
                 value = value[:MAX_MESSAGES_PER_SESSION]
             record = record.model_copy(update={key: value})

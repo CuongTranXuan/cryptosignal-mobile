@@ -6,6 +6,16 @@ from typing import Any
 from cryptosignal_copilot.env_parse import parse_csv_env
 from cryptosignal_copilot.model_overrides import apply_id_prefix_aliases, match_model_override
 
+# Re-export for availability layer
+__all__ = [
+    "load_visibility_allowlist",
+    "normalize_upstream_model_id",
+    "is_media_model_row",
+    "is_hidden_model",
+    "is_advanced_route",
+    "should_keep_despite_media_row",
+]
+
 _MEDIA_MODALITIES = frozenset({"image", "video", "audio", "images", "videos"})
 _MEDIA_TYPES = frozenset({"image", "video", "audio", "embedding", "moderation"})
 
@@ -64,6 +74,22 @@ def is_media_model_row(row: dict[str, Any]) -> bool:
     if "image" in lower and "composer" not in lower:
         return True
     return False
+
+
+def should_keep_despite_media_row(
+    model_id: str,
+    *,
+    default_model_id: str,
+) -> bool:
+    """Allowlist / overrides win over provider media mislabels (e.g. OmniRoute type=image)."""
+    canonical = normalize_upstream_model_id(model_id)
+    allowlist = set(load_visibility_allowlist())
+    if canonical in allowlist:
+        return True
+    if canonical == normalize_upstream_model_id(default_model_id):
+        return True
+    override = match_model_override(canonical)
+    return bool(override and override.force_include)
 
 
 def is_hidden_model(model_id: str) -> bool:

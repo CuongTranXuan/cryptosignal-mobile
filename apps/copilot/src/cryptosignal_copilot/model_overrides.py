@@ -15,6 +15,7 @@ StructuredOutputMode = Literal["prompted", "text_json"]
 @dataclass(frozen=True)
 class ModelOverride:
     hide: bool = False
+    force_include: bool = False
     advanced: bool | None = None
     structured_output_mode: StructuredOutputMode | None = None
     supports_reasoning: bool | None = None
@@ -72,8 +73,14 @@ def _parse_override(raw: dict[str, Any]) -> ModelOverride:
     structured: StructuredOutputMode | None = None
     if mode in ("prompted", "text_json"):
         structured = mode
+    hide = raw.get("hide")
+    hide_flag = bool(hide) if isinstance(hide, bool) else False
+    force_include = bool(raw.get("force_include"))
+    if hide is False:
+        force_include = True
     return ModelOverride(
-        hide=bool(raw.get("hide")),
+        hide=hide_flag,
+        force_include=force_include,
         advanced=raw.get("advanced") if isinstance(raw.get("advanced"), bool) else None,
         structured_output_mode=structured,
         supports_reasoning=raw.get("supports_reasoning")
@@ -127,6 +134,7 @@ def match_model_override(model_id: str) -> ModelOverride | None:
 def _merge_overrides(base: ModelOverride, patch: ModelOverride) -> ModelOverride:
     return ModelOverride(
         hide=patch.hide or base.hide,
+        force_include=patch.force_include or base.force_include,
         advanced=patch.advanced if patch.advanced is not None else base.advanced,
         structured_output_mode=patch.structured_output_mode or base.structured_output_mode,
         supports_reasoning=patch.supports_reasoning
