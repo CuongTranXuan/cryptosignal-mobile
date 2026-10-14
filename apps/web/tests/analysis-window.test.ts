@@ -208,6 +208,23 @@ describe("analysis-window", () => {
     expect(annotated).toContain("mode=viewport");
   });
 
+  it("uses candle_count for default prompts but not visible-window phrasing", () => {
+    const closed = series(120);
+    const visible = { from: closed[100]!.time, to: closed[119]!.time };
+    const presetWindow = selectAnalysisCandles(closed, {
+      candleCount: 50,
+      prompt: "find patterns",
+    });
+    expect(presetWindow.candles.length).toBe(50);
+    const viewportWindow = selectAnalysisCandles(closed, {
+      candleCount: 50,
+      visibleRange: visible,
+      prompt: "find triangles in this window",
+    });
+    expect(viewportWindow.mode).toBe("viewport");
+    expect(viewportWindow.candles.length).toBeLessThan(50);
+  });
+
   it("detects whether shape times already sit in the viewport", () => {
     const visible = { from: 100, to: 200 };
     expect(timesInsideVisibleRange([120, 150], visible)).toBe(true);

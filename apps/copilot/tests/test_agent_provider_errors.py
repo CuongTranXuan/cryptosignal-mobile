@@ -2,10 +2,11 @@
 
 from pydantic_ai.exceptions import ModelHTTPError
 
-from cryptosignal_copilot.agent import (
+from cryptosignal_copilot.provider_errors import (
     PROVIDER_CREDITS_EXHAUSTED_MSG,
     PROVIDER_UNAUTHORIZED_MSG,
-    _model_http_error_message,
+    model_http_error_message,
+    model_http_error_payload,
 )
 
 
@@ -15,7 +16,14 @@ def test_model_http_error_402_maps_to_credits_exhausted():
         model_name="omniroute",
         body={"error": {"message": "Budget pool quota exhausted"}},
     )
-    assert _model_http_error_message(exc) == PROVIDER_CREDITS_EXHAUSTED_MSG
+    assert model_http_error_message(exc) == PROVIDER_CREDITS_EXHAUSTED_MSG
+
+
+def test_model_http_error_payload_has_code():
+    exc = ModelHTTPError(status_code=500, model_name="x", body={"message": "boom"})
+    payload = model_http_error_payload(exc)
+    assert payload["code"] == "provider_error"
+    assert "message" in payload
 
 
 def test_model_http_error_credits_exhausted_body_without_402():
@@ -24,7 +32,7 @@ def test_model_http_error_credits_exhausted_body_without_402():
         model_name="omniroute",
         body={"error": {"message": "credits exhausted"}},
     )
-    assert _model_http_error_message(exc) == PROVIDER_CREDITS_EXHAUSTED_MSG
+    assert model_http_error_message(exc) == PROVIDER_CREDITS_EXHAUSTED_MSG
 
 
 def test_model_http_error_401_stays_unauthorized():
@@ -33,7 +41,7 @@ def test_model_http_error_401_stays_unauthorized():
         model_name="omniroute",
         body={"error": {"message": "invalid api key"}},
     )
-    msg = _model_http_error_message(exc)
+    msg = model_http_error_message(exc)
     assert msg.startswith(PROVIDER_UNAUTHORIZED_MSG)
     assert "invalid api key" in msg
 
@@ -44,6 +52,6 @@ def test_model_http_error_403_stays_unauthorized():
         model_name="omniroute",
         body={"error": {"message": "forbidden"}},
     )
-    msg = _model_http_error_message(exc)
+    msg = model_http_error_message(exc)
     assert msg.startswith(PROVIDER_UNAUTHORIZED_MSG)
     assert "forbidden" in msg

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import httpx
+
 from cryptosignal_copilot.schema import Candle
 
 KLINES_URL = "https://api.binance.com/api/v3/klines"

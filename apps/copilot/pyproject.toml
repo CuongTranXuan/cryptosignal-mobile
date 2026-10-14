@@ -6,13 +6,47 @@ dependencies = [
   "fastapi>=0.115",
   "uvicorn[standard]>=0.32",
   "pydantic>=2.10",
-  "pydantic-ai>=0.8",
+  "pydantic-ai>=2.55,<3",
   "httpx>=0.28",
   "python-dotenv>=1.0",
+  "sqlalchemy>=2.0",
+  "alembic>=1.14",
+  "psycopg[binary]>=3.2",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.3", "pytest-asyncio>=0.24"]
+libsql = ["sqlalchemy-libsql>=0.1"]
+dev = [
+  "pytest>=8.3",
+  "pytest-asyncio>=0.24",
+  "ruff>=0.9",
+  "mypy>=1.14",
+  "testcontainers[postgres]>=4.9",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501", "B905"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["E501", "I001", "F401"]
+
+[tool.mypy]
+python_version = "3.12"
+packages = ["cryptosignal_copilot"]
+mypy_path = "src"
+strict = false
+disallow_untyped_defs = false
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["cryptosignal_copilot.drawing_gate", "cryptosignal_copilot.model_factory", "cryptosignal_copilot.agent"]
+ignore_errors = true
 
 [build-system]
 requires = ["setuptools>=75"]
@@ -22,5 +56,6 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]
+pythonpath = ["src", "."]
+testpaths = ["tests"]
 asyncio_mode = "auto"

@@ -15,6 +15,10 @@ import {
 import { useEffect, useRef, useState, type MutableRefObject } from "react";
 import type { ChartCoordinateApi } from "../lib/chart-api";
 import { CHART_THEME } from "../lib/chart-theme";
+import {
+  effectiveProjectionBars,
+  timeToCoordinateWithProjection,
+} from "../lib/shape-projection";
 import { mapAgentMarkersToSeriesMarkers } from "../lib/marker-map";
 import { toVolumeData } from "../lib/volume-map";
 import { useChartStore } from "../lib/stores/chart-store";
@@ -64,6 +68,11 @@ export function ChartCanvas({ coordApiRef }: ChartCanvasProps) {
   const [overlayTick, setOverlayTick] = useState(0);
 
   const candles = useChartStore((s) => s.candles);
+  const interval = useChartStore((s) => s.interval);
+  const candlesRef = useRef(candles);
+  candlesRef.current = candles;
+  const intervalRef = useRef(interval);
+  intervalRef.current = interval;
   const tickerPercent = useChartStore((s) => s.tickerPercent);
   const connection = useChartStore((s) => s.connection);
   const symbol = useChartStore((s) => s.symbol);
@@ -130,11 +139,18 @@ export function ChartCanvas({ coordApiRef }: ChartCanvasProps) {
         coordApiRef.current = null;
         return;
       }
+      const rawTimeToCoordinate = (time: number) => {
+        const v = c.timeScale().timeToCoordinate(time as UTCTimestamp);
+        return v == null ? null : Number(v);
+      };
       coordApiRef.current = {
-        timeToCoordinate: (time) => {
-          const v = c.timeScale().timeToCoordinate(time as UTCTimestamp);
-          return v == null ? null : Number(v);
-        },
+        timeToCoordinate: (time) =>
+          timeToCoordinateWithProjection(
+            time,
+            rawTimeToCoordinate,
+            candlesRef.current,
+            intervalRef.current,
+          ),
         priceToCoordinate: (price) => {
           const v = s.priceToCoordinate(price);
           return v == null ? null : Number(v);
@@ -250,6 +266,14 @@ export function ChartCanvas({ coordApiRef }: ChartCanvasProps) {
     setOverlayTick((n) => n + 1);
   }, [candles]);
 
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    chart.timeScale().applyOptions({
+      rightOffset: effectiveProjectionBars(interval),
+    });
+    setOverlayTick((n) => n + 1);
+  }, [interval, candles.length]);
 
   // Drawing mode: stop LWC from eating pointer events under the overlay.
   useEffect(() => {

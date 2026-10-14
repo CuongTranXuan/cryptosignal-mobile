@@ -43,7 +43,7 @@ uvicorn cryptosignal_copilot.app:app --app-dir src --reload --port 8000
 ```bash
 cd apps/web
 pnpm install
-cp .env.example .env.local   # optional; leave NEXT_PUBLIC_COPILOT_URL empty for local rewrite
+cp .env.example .env.local   # optional; see apps/web/README.md
 pnpm dev
 ```
 
@@ -57,10 +57,12 @@ Web alone can show the live chart. Copilot actions fail visibly until `apps/copi
 
 ### Web (`apps/web/.env.example`)
 
-| Variable | Local | Production (Vercel) |
+| Variable | Local | Production |
 |---|---|---|
-| `NEXT_PUBLIC_COPILOT_URL` | Empty → same-origin `/v1/copilot/*` (Next rewrite) | `https://<render-service>.onrender.com` (origin only; client adds `/v1/copilot/health` and `/v1/copilot/analyze`) |
-| `COPILOT_UPSTREAM_URL` | `http://127.0.0.1:8000` (rewrite target) | Not used when public URL is set |
+| `NEXT_PUBLIC_COPILOT_URL` | Empty → same-origin `/v1/copilot/*` (runtime App Router proxy) | Optional direct copilot origin (no `/v1` suffix); when set, proxy is unused |
+| `COPILOT_UPSTREAM_URL` | `http://127.0.0.1:8000` (proxy target at **request** time) | Set on the web container/VM when using same-origin proxy (e.g. Docker Compose) |
+
+See [`apps/web/README.md`](apps/web/README.md) for Docker and Compose notes.
 
 ### Copilot (`apps/copilot/.env.example`)
 
