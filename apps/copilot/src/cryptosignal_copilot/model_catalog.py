@@ -15,6 +15,8 @@ from cryptosignal_copilot.candle_budget import (
 )
 from cryptosignal_copilot.config import (
     LlmConfig,
+    load_default_model_context_window,
+    load_default_model_max_output_tokens,
     load_models_cache_ttl_s,
     load_models_fetch_timeout_s,
 )
@@ -47,8 +49,6 @@ _TABLE: list[tuple[re.Pattern[str], int, int, bool, list[str] | None]] = [
     (re.compile(r"gemini-2\.5", re.I), 1_000_000, 65_536, True, None),
 ]
 
-_DEFAULT_CONTEXT = 32_000
-_DEFAULT_MAX_OUT = 4_096
 _REASONING_CAP = 16_384
 _DEEPSEEK_FLASH_REASONING_CAP = 32_768
 _NON_REASONING_CAP = 4_096
@@ -113,9 +113,17 @@ class _FieldSources:
 
 
 def _match_table(model_id: str, root: str | None) -> tuple[int, int, bool, list[str] | None] | None:
+    """Heuristic limits from the model name only (ignore unrelated provider `root` aliases)."""
+    basename = model_id.rsplit("/", 1)[-1]
+    targets = [basename]
+    if root:
+        root_str = str(root)
+        if root_str == basename or root_str in model_id:
+            targets.append(root_str)
     for pattern, ctx, out, reasoning, efforts in _TABLE:
-        if pattern.search(model_id) or (root and pattern.search(root)):
-            return ctx, out, reasoning, efforts
+        for target in targets:
+            if pattern.search(target):
+                return ctx, out, reasoning, efforts
     return None
 
 
@@ -255,14 +263,14 @@ def normalize_model_row(
             ctx = table[0]
             sources.context_window = "table"
         else:
-            ctx = _DEFAULT_CONTEXT
+            ctx = load_default_model_context_window()
             sources.context_window = "default"
     if out is None:
         if table is not None:
             out = table[1]
             sources.max_output_tokens = "table"
         else:
-            out = _DEFAULT_MAX_OUT
+            out = load_default_model_max_output_tokens()
             sources.max_output_tokens = "default"
     if reasoning is None:
         if table is not None:

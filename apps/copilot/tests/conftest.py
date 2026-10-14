@@ -16,6 +16,19 @@ _OMNIROUTE_OVERRIDES = (
     Path(__file__).resolve().parents[1] / "config/omniroute.model-overrides.json.example"
 )
 
+_CATALOG_ENV_KEYS = (
+    "COPILOT_MODEL_PROVIDERS",
+    "COPILOT_MODEL_VISIBILITY_ALLOWLIST",
+    "COPILOT_MODEL_ALLOWLIST",
+    "COPILOT_MODEL_ID_PREFIX_ALIASES",
+    "COPILOT_MODEL_OVERRIDES_FILE",
+    "COPILOT_MODEL_OVERRIDES_JSON",
+    "COPILOT_MODEL_ADVANCED_SUBSTRINGS",
+    "COPILOT_MODEL_INCLUDE_COMBO",
+    "COPILOT_DEFAULT_MODEL_CONTEXT",
+    "COPILOT_DEFAULT_MODEL_MAX_OUTPUT",
+)
+
 
 def pytest_configure(config: pytest.Config) -> None:
     """Isolate session DB before any test imports app or sessions_store."""
@@ -27,6 +40,13 @@ def pytest_configure(config: pytest.Config) -> None:
     os.environ["DATABASE_URL"] = sqlite_url_for_path(db_path)
     os.environ.setdefault("COPILOT_RUN_DB_MIGRATIONS", "true")
     os.environ["_COPILOT_PYTEST_DB_ISOLATED"] = "1"
+
+
+@pytest.fixture(autouse=True)
+def isolate_model_catalog_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ignore host-exported catalog overrides unless a test fixture sets them."""
+    for key in _CATALOG_ENV_KEYS:
+        monkeypatch.delenv(key, raising=False)
 
 
 async def _default_test_models(_cfg: LlmConfig):

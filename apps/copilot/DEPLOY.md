@@ -38,6 +38,8 @@
 | `COPILOT_MODEL_NEGATIVE_CACHE_TTL_S` | no | `300` | Temporary hide after 402/502 |
 | `COPILOT_MODELS_CACHE_TTL_S` | no | `600` | `/models` cache TTL |
 | `COPILOT_DEFAULT_CANDLE_COUNT` | no | `100` | Default session/analyze window |
+| `COPILOT_DEFAULT_MODEL_CONTEXT` | no | `32000` | Catalog fallback when provider omits limits |
+| `COPILOT_DEFAULT_MODEL_MAX_OUTPUT` | no | `4096` | Max-output fallback when provider omits limits |
 | `CORS_ORIGINS` / `COPILOT_CORS_ORIGINS` | prod** | localhost dev | Browser origins when calling API directly |
 | `RATE_LIMIT_PER_MINUTE` | no | `10` | `POST /analyze` per IP |
 | `PORT` | no | `8000` | Uvicorn bind (Docker / Cloud Run) |

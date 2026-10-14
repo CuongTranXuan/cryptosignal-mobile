@@ -11,13 +11,13 @@ from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError, UnexpectedMode
 from cryptosignal_copilot.agent_output import build_agent_output_type, output_retries_for_model
 from cryptosignal_copilot.analyze_prep import AnalyzePlan, retry_plan
 from cryptosignal_copilot.config import load_llm_config
-from cryptosignal_copilot.env_parse import env_flag
 from cryptosignal_copilot.drawing_gate import (
     DrawingWindow,
     bar_seconds,
     effective_project_bars,
     format_drop_note,
 )
+from cryptosignal_copilot.env_parse import env_flag
 from cryptosignal_copilot.model_factory import build_model
 from cryptosignal_copilot.model_negative_cache import get_model_negative_cache
 from cryptosignal_copilot.model_routes import resolve_provider_model_id, strip_thinking_when_routed

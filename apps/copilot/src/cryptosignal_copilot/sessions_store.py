@@ -30,6 +30,7 @@ def _coerce_chart(value: object) -> SessionChartContext:
         return SessionChartContext.model_validate(value)
     raise TypeError(f"chart must be SessionChartContext or dict, got {type(value)!r}")
 
+
 MAX_SESSIONS = 50
 MAX_MESSAGES_PER_SESSION = 200
 

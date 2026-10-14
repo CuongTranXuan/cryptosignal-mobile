@@ -19,3 +19,22 @@ def test_cursor_auto_marked_advanced(monkeypatch, omniroute_catalog_env):
 
 def test_cursor_auto_router_advanced(omniroute_catalog_env):
     assert is_advanced_route("cursor/auto-balance", "cursor")
+
+
+def test_cursor_models_same_default_context_without_provider_limits(omniroute_catalog_env):
+    from cryptosignal_copilot.config import DEFAULT_MODEL_CONTEXT_WINDOW
+    from cryptosignal_copilot.model_catalog import normalize_model_row
+
+    ids = (
+        "cursor/auto",
+        "cursor/auto-balance",
+        "cursor/composer-2.5",
+        "cursor/composer-2.5-fast",
+    )
+    windows = [
+        normalize_model_row(
+            {"id": mid, "owned_by": "cursor", "root": "claude-3-opus"},
+        ).context_window
+        for mid in ids
+    ]
+    assert windows == [DEFAULT_MODEL_CONTEXT_WINDOW] * len(ids)

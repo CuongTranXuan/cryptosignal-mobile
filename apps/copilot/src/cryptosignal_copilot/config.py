@@ -9,6 +9,8 @@ VALID_LLM_STYLES = frozenset({"openai", "anthropic"})
 DEFAULT_MODELS_CACHE_TTL_S = 600.0
 DEFAULT_MODELS_FETCH_TIMEOUT_S = 10.0
 DEFAULT_CANDLE_COUNT = 100
+DEFAULT_MODEL_CONTEXT_WINDOW = 32_000
+DEFAULT_MODEL_MAX_OUTPUT_TOKENS = 4_096
 
 
 class LlmConfigError(Exception):
@@ -87,6 +89,37 @@ def load_models_fetch_timeout_s() -> float:
     except ValueError:
         return DEFAULT_MODELS_FETCH_TIMEOUT_S
     return max(1.0, value)
+
+
+def load_default_model_context_window() -> int:
+    raw = os.environ.get("COPILOT_DEFAULT_MODEL_CONTEXT", "").strip()
+    if not raw:
+        return DEFAULT_MODEL_CONTEXT_WINDOW
+    try:
+        value = int(raw)
+    except ValueError:
+        return DEFAULT_MODEL_CONTEXT_WINDOW
+    return max(1, value)
+
+
+def load_default_model_max_output_tokens() -> int:
+    raw = os.environ.get("COPILOT_DEFAULT_MODEL_MAX_OUTPUT", "").strip()
+    if not raw:
+        return DEFAULT_MODEL_MAX_OUTPUT_TOKENS
+    try:
+        value = int(raw)
+    except ValueError:
+        return DEFAULT_MODEL_MAX_OUTPUT_TOKENS
+    return max(1, value)
+
+
+def normalize_postgres_database_url(url: str) -> str:
+    """Map testcontainers / libpq URLs to the psycopg 3 SQLAlchemy driver."""
+    if url.startswith("postgresql+psycopg2://"):
+        return "postgresql+psycopg://" + url[len("postgresql+psycopg2://") :]
+    if url.startswith("postgresql://"):
+        return "postgresql+psycopg://" + url[len("postgresql://") :]
+    return url
 
 
 def load_default_candle_count() -> int:
