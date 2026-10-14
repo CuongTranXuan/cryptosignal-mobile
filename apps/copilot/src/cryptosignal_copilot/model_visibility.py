@@ -1,84 +1,83 @@
 from __future__ import annotations
 
-import os
 import re
+from typing import Any
 
-_DEFAULT_VISIBILITY_ALLOWLIST: tuple[str, ...] = (
-    "agentrouter/deepseek-v4-flash",
-    "cursor/auto",
-    "cursor/auto-balance",
-    "cursor/auto-cost",
-    "cursor/auto-intelligence",
-    "cursor/composer-2.5",
-    "cursor/composer-2.5-fast",
+from cryptosignal_copilot.env_parse import parse_csv_env
+from cryptosignal_copilot.model_overrides import apply_id_prefix_aliases, match_model_override
+
+_MEDIA_MODALITIES = frozenset({"image", "video", "audio", "images", "videos"})
+_MEDIA_TYPES = frozenset({"image", "video", "audio", "embedding", "moderation"})
+
+_MEDIA_ID_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"(^|/)(dall-?e|stable-?diffusion|midjourney|imagen|text-to-image)", re.I),
+    re.compile(r"(^|/)veo", re.I),
 )
-
-_MEDIA_ID_RE = re.compile(
-    r"(^|/)(veo|flux|dall-?e|stable-?diffusion|midjourney|imagen|image-gen|text-to-image)",
-    re.I,
-)
-_VIDEO_ID_RE = re.compile(r"(^|/)veo", re.I)
-
-
-def _parse_csv_env(name: str) -> list[str]:
-    raw = os.environ.get(name, "").strip()
-    if not raw:
-        return []
-    return [part.strip() for part in raw.split(",") if part.strip()]
 
 
 def load_visibility_allowlist() -> tuple[str, ...]:
-    explicit = _parse_csv_env("COPILOT_MODEL_VISIBILITY_ALLOWLIST")
+    explicit = parse_csv_env("COPILOT_MODEL_VISIBILITY_ALLOWLIST")
     if explicit:
         return tuple(explicit)
-    legacy = _parse_csv_env("COPILOT_MODEL_ALLOWLIST")
+    legacy = parse_csv_env("COPILOT_MODEL_ALLOWLIST")
     if legacy:
         return tuple(legacy)
-    return _DEFAULT_VISIBILITY_ALLOWLIST
+    return ()
 
 
 def normalize_upstream_model_id(model_id: str) -> str:
-    """Dedupe OmniRoute `cu/` aliases to `cursor/`."""
-    if model_id.startswith("cu/"):
-        return f"cursor/{model_id[3:]}"
-    return model_id
+    return apply_id_prefix_aliases(model_id)
 
 
-def is_leaked_media_model(model_id: str, owned_by: str) -> bool:
-    """Drop image/video models that leak past OmniRoute visibility."""
-    if owned_by == "aihorde":
+def _row_modality(row: dict[str, Any]) -> str | None:
+    for key in ("modality", "type"):
+        value = row.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip().lower()
+    return None
+
+
+def is_media_model_row(row: dict[str, Any]) -> bool:
+    """Drop image/video/audio models using provider metadata when available."""
+    modality = _row_modality(row)
+    if modality in _MEDIA_MODALITIES or modality in _MEDIA_TYPES:
         return True
+    caps = row.get("capabilities")
+    if isinstance(caps, dict):
+        for key in ("image", "video", "audio", "image_generation", "video_generation"):
+            if caps.get(key) is True:
+                return True
+        output_modalities = caps.get("output_modalities")
+        if isinstance(output_modalities, list):
+            if any(str(m).lower() in _MEDIA_MODALITIES for m in output_modalities):
+                return True
+    architecture = row.get("architecture")
+    if isinstance(architecture, dict):
+        modality = architecture.get("modality")
+        if isinstance(modality, str) and modality.lower() in _MEDIA_MODALITIES:
+            return True
+    model_id = str(row.get("id") or "")
     lower = model_id.lower()
-    if _VIDEO_ID_RE.search(lower):
-        return True
-    if _MEDIA_ID_RE.search(lower):
-        return True
+    for pattern in _MEDIA_ID_PATTERNS:
+        if pattern.search(lower):
+            return True
     if "image" in lower and "composer" not in lower:
         return True
     return False
 
 
-def is_hidden_cursor_legacy(model_id: str) -> bool:
-    """Hide `cursor/composer-2` and other pre-2.5 composer ids."""
-    canonical = normalize_upstream_model_id(model_id)
-    base = canonical.rsplit("/", 1)[-1]
-    if base == "composer-2":
+def is_hidden_model(model_id: str) -> bool:
+    override = match_model_override(model_id)
+    return bool(override and override.hide)
+
+
+def is_advanced_route(model_id: str, owned_by: str) -> bool:
+    override = match_model_override(model_id)
+    if override and override.advanced is not None:
+        return override.advanced
+    if owned_by == "combo":
         return True
-    if base.startswith("composer-2") and not base.startswith("composer-2.5"):
-        return True
-    return False
+    lower = model_id.lower()
+    from cryptosignal_copilot.model_overrides import load_advanced_substrings
 
-
-def is_no_think_route(model_id: str) -> bool:
-    return "/no-think/" in model_id or model_id.startswith("no-think/")
-
-
-def is_cursor_auto_router(model_id: str) -> bool:
-    canonical = normalize_upstream_model_id(model_id)
-    name = canonical.split("/", 1)[-1] if "/" in canonical else canonical
-    return name == "auto" or name.startswith("auto-")
-
-
-def is_cursor_provider_model(model_id: str, owned_by: str) -> bool:
-    canonical = normalize_upstream_model_id(model_id)
-    return owned_by == "cursor" or canonical.startswith("cursor/")
+    return any(part in lower for part in load_advanced_substrings())

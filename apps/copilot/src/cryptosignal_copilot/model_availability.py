@@ -3,27 +3,18 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from cryptosignal_copilot.env_parse import parse_csv_env
 from cryptosignal_copilot.model_routes import collapse_variant_rows
 from cryptosignal_copilot.model_visibility import (
-    is_hidden_cursor_legacy,
-    is_leaked_media_model,
+    is_hidden_model,
+    is_media_model_row,
     load_visibility_allowlist,
     normalize_upstream_model_id,
 )
 
-_DEFAULT_PROVIDERS = ("agentrouter", "cursor")
-
-
-def _parse_csv_env(name: str) -> list[str]:
-    raw = os.environ.get(name, "").strip()
-    if not raw:
-        return []
-    return [part.strip() for part in raw.split(",") if part.strip()]
-
 
 def load_model_providers() -> tuple[str, ...]:
-    values = _parse_csv_env("COPILOT_MODEL_PROVIDERS")
-    return tuple(values) if values else _DEFAULT_PROVIDERS
+    return tuple(parse_csv_env("COPILOT_MODEL_PROVIDERS"))
 
 
 def load_include_combo_models() -> bool:
@@ -49,12 +40,14 @@ def filter_available_models(
     default_model_id: str,
     blocked_ids: frozenset[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """OmniRoute safety net: providers, visibility allowlist, media leak filter, collapse."""
+    """Provider filters, optional visibility allowlist, media filter, variant collapse."""
     providers = set(load_model_providers())
     visibility = set(load_visibility_allowlist())
     visibility.add(normalize_upstream_model_id(default_model_id))
     include_combo = load_include_combo_models()
     blocked = blocked_ids or frozenset()
+    filter_by_provider = bool(providers)
+    filter_by_visibility = bool(load_visibility_allowlist())
 
     scoped: list[dict[str, Any]] = []
     for row in rows:
@@ -69,27 +62,23 @@ def filter_available_models(
             if include_combo:
                 scoped.append(row)
             continue
-        if is_leaked_media_model(model_id, owned_by):
+        if is_media_model_row(row):
             continue
-        if is_hidden_cursor_legacy(model_id):
+        if is_hidden_model(model_id):
             continue
-        prefix = model_id.split("/", 1)[0] if "/" in model_id else ""
-        if owned_by not in providers and prefix not in providers:
-            continue
+        if filter_by_provider:
+            prefix = model_id.split("/", 1)[0] if "/" in model_id else ""
+            if owned_by not in providers and prefix not in providers:
+                continue
         scoped.append(row)
 
     collapsed = collapse_variant_rows(scoped)
-    collapsed = [row for row in collapsed if row["id"] in visibility]
+    if filter_by_visibility:
+        collapsed = [row for row in collapsed if row["id"] in visibility]
 
     out_ids = {row["id"] for row in collapsed}
     default_canonical = normalize_upstream_model_id(default_model_id)
     if default_canonical and default_canonical not in out_ids and default_canonical not in blocked:
-        collapsed.append(
-            {
-                "id": default_canonical,
-                "owned_by": default_canonical.split("/")[0]
-                if "/" in default_canonical
-                else "agentrouter",
-            }
-        )
+        owned = default_canonical.split("/")[0] if "/" in default_canonical else "default"
+        collapsed.append({"id": default_canonical, "owned_by": owned})
     return collapsed

@@ -18,6 +18,7 @@ from cryptosignal_copilot.config import (
     load_llm_config,
     validate_llm_env_on_startup,
 )
+from cryptosignal_copilot.db.migrate import run_db_migrations
 from cryptosignal_copilot.model_catalog import ModelsCatalog, get_models_catalog
 from cryptosignal_copilot.provider_errors import error_payload
 from cryptosignal_copilot.rate_limit import SlidingWindowRateLimiter, client_ip
@@ -278,4 +279,5 @@ def create_app(
 
 
 validate_llm_env_on_startup()
+run_db_migrations()
 app = create_app()

@@ -8,7 +8,6 @@ from urllib.parse import urlparse
 VALID_LLM_STYLES = frozenset({"openai", "anthropic"})
 DEFAULT_MODELS_CACHE_TTL_S = 600.0
 DEFAULT_MODELS_FETCH_TIMEOUT_S = 10.0
-DEFAULT_LLM_MODEL = "agentrouter/deepseek-v4-flash"
 DEFAULT_CANDLE_COUNT = 100
 
 
@@ -38,7 +37,7 @@ def load_llm_config() -> LlmConfig:
     style = os.environ.get("LLM_API_STYLE", "").strip().lower()
     base_url = os.environ.get("LLM_BASE_URL", "").strip().rstrip("/")
     api_key = os.environ.get("LLM_API_KEY", "").strip()
-    model = os.environ.get("LLM_MODEL", DEFAULT_LLM_MODEL).strip() or DEFAULT_LLM_MODEL
+    model = os.environ.get("LLM_MODEL", "").strip()
     timeout_s = float(os.environ.get("LLM_TIMEOUT_S", "60"))
     missing = [
         n
@@ -101,11 +100,32 @@ def load_default_candle_count() -> int:
     return max(1, value)
 
 
-def load_sessions_db_path() -> Path:
-    raw = os.environ.get("COPILOT_SESSIONS_DB", "").strip()
-    if raw:
-        return Path(raw).expanduser()
+def default_sessions_sqlite_path() -> Path:
     data_dir = os.environ.get("COPILOT_DATA_DIR", "").strip()
     if data_dir:
         return Path(data_dir).expanduser() / "sessions.sqlite3"
     return Path(os.environ.get("TMPDIR", "/tmp")) / "cryptosignal-copilot-sessions.sqlite3"
+
+
+def load_sessions_db_path() -> Path:
+    """Filesystem path for the default SQLite sessions file (legacy helpers)."""
+    raw = os.environ.get("COPILOT_SESSIONS_DB", "").strip()
+    if raw:
+        return Path(raw).expanduser()
+    return default_sessions_sqlite_path()
+
+
+def sqlite_url_for_path(path: Path) -> str:
+    path = path.expanduser().resolve()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return f"sqlite:///{path.as_posix()}"
+
+
+def load_database_url() -> str:
+    url = os.environ.get("DATABASE_URL", "").strip()
+    if url:
+        return url
+    legacy = os.environ.get("COPILOT_SESSIONS_DB", "").strip()
+    if legacy:
+        return sqlite_url_for_path(Path(legacy))
+    return sqlite_url_for_path(default_sessions_sqlite_path())

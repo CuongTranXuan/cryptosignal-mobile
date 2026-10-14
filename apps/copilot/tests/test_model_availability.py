@@ -1,13 +1,20 @@
+from cryptosignal_copilot.config import LlmConfig
 from cryptosignal_copilot.model_availability import filter_available_models
 from cryptosignal_copilot.model_catalog import snapshot_from_rows
-from cryptosignal_copilot.config import LlmConfig
-from cryptosignal_copilot.model_visibility import load_visibility_allowlist
 from tests.omniroute_fixtures import omniroute_models_payload
 
+_VISIBILITY = {
+    "agentrouter/deepseek-v4-flash",
+    "cursor/auto",
+    "cursor/auto-balance",
+    "cursor/auto-cost",
+    "cursor/auto-intelligence",
+    "cursor/composer-2.5",
+    "cursor/composer-2.5-fast",
+}
 
-def test_omniroute_visibility_filter_collapses_large_catalog(monkeypatch):
-    monkeypatch.delenv("COPILOT_MODEL_VISIBILITY_ALLOWLIST", raising=False)
-    monkeypatch.delenv("COPILOT_MODEL_ALLOWLIST", raising=False)
+
+def test_omniroute_visibility_filter_collapses_large_catalog(monkeypatch, omniroute_catalog_env):
     monkeypatch.delenv("COPILOT_MODEL_INCLUDE_COMBO", raising=False)
     rows = omniroute_models_payload()
     assert len(rows) > 1600
@@ -15,17 +22,16 @@ def test_omniroute_visibility_filter_collapses_large_catalog(monkeypatch):
         rows,
         default_model_id="agentrouter/deepseek-v4-flash",
     )
-    expected = set(load_visibility_allowlist())
-    assert {row["id"] for row in filtered} == expected
+    assert {row["id"] for row in filtered} == _VISIBILITY
     flash = next(r for r in filtered if r["id"] == "agentrouter/deepseek-v4-flash")
     assert flash["_effort_routes"]["low"] == "agentrouter/deepseek-v4-flash-low"
     assert flash["_effort_routes"]["none"] == "agentrouter/no-think/deepseek-v4-flash"
 
 
-def test_media_and_legacy_cursor_hidden(monkeypatch):
+def test_media_and_legacy_cursor_hidden(monkeypatch, omniroute_catalog_env):
     rows = [
-        {"id": "aihorde/flux", "owned_by": "aihorde"},
-        {"id": "cursor/veo-3", "owned_by": "cursor"},
+        {"id": "aihorde/flux", "owned_by": "aihorde", "type": "image"},
+        {"id": "cursor/veo-3", "owned_by": "cursor", "type": "video"},
         {"id": "cursor/composer-2", "owned_by": "cursor"},
         {"id": "agentrouter/deepseek-v4-flash", "owned_by": "agentrouter"},
     ]
@@ -33,7 +39,11 @@ def test_media_and_legacy_cursor_hidden(monkeypatch):
     assert [row["id"] for row in filtered] == ["agentrouter/deepseek-v4-flash"]
 
 
-def test_cu_alias_deduped(monkeypatch):
+def test_cu_alias_deduped(monkeypatch, omniroute_catalog_env):
+    monkeypatch.setenv(
+        "COPILOT_MODEL_VISIBILITY_ALLOWLIST",
+        "cursor/auto,agentrouter/deepseek-v4-flash",
+    )
     rows = [
         {"id": "cu/auto", "owned_by": "cu"},
         {"id": "cursor/auto", "owned_by": "cursor"},
@@ -42,14 +52,25 @@ def test_cu_alias_deduped(monkeypatch):
     assert sum(1 for row in filtered if row["id"] == "cursor/auto") == 1
 
 
-def test_combo_excluded_by_default(monkeypatch):
+def test_combo_excluded_by_default(monkeypatch, omniroute_catalog_env):
     monkeypatch.delenv("COPILOT_MODEL_INCLUDE_COMBO", raising=False)
     rows = [{"id": "combo/route-0", "owned_by": "combo"}]
     filtered = filter_available_models(rows, default_model_id="agentrouter/deepseek-v4-flash")
     assert {row["id"] for row in filtered} == {"agentrouter/deepseek-v4-flash"}
 
 
-def test_snapshot_deepseek_request_max_tokens_cap(monkeypatch):
+def test_no_provider_filter_when_unset(monkeypatch):
+    monkeypatch.delenv("COPILOT_MODEL_PROVIDERS", raising=False)
+    monkeypatch.delenv("COPILOT_MODEL_VISIBILITY_ALLOWLIST", raising=False)
+    rows = [
+        {"id": "vendor/a", "owned_by": "vendor"},
+        {"id": "other/b", "owned_by": "other"},
+    ]
+    filtered = filter_available_models(rows, default_model_id="vendor/a")
+    assert {row["id"] for row in filtered} == {"vendor/a", "other/b"}
+
+
+def test_snapshot_deepseek_request_max_tokens_cap(monkeypatch, omniroute_catalog_env):
     cfg = LlmConfig(
         style="openai",
         base_url="http://127.0.0.1:20128/v1",

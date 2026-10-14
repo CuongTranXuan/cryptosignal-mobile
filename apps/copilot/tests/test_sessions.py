@@ -138,11 +138,8 @@ def test_legacy_payload_without_new_fields(tmp_path):
     conn.commit()
     conn.close()
 
-    store = SessionsStore(db_path=db)
+    store = SessionsStore(db_path=db, run_migrations=True)
     session = store.get_session("legacy-1")
     assert session.reasoning_effort is None
     assert session.messages[0].markers == []
-
-    with store._connect() as conn:
-        cols = {row[1] for row in conn.execute("PRAGMA table_info(copilot_sessions)")}
-    assert "reasoning_effort" in cols
+    assert store.has_reasoning_effort_column()

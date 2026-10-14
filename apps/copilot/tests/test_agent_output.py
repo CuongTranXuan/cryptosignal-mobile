@@ -1,44 +1,32 @@
+from cryptosignal_copilot.agent_output import build_agent_output_type
+from cryptosignal_copilot.model_catalog import normalize_model_row
 from pydantic_ai.output import PromptedOutput, TextOutput
 
-from cryptosignal_copilot.agent_output import build_agent_output_type, output_retries_for_model
-from cryptosignal_copilot.model_catalog import normalize_model_row
-from cryptosignal_copilot.schema import AnalyzeResult
 
-
-def test_cursor_uses_text_json_output_and_8k_tokens():
+def test_cursor_uses_text_json_output_and_8k_tokens(monkeypatch, omniroute_catalog_env):
     model = normalize_model_row({"id": "cursor/composer-2.5", "owned_by": "cursor"})
     assert model.structured_output_mode == "text_json"
     assert model.request_max_tokens == 8_192
-    output_type = build_agent_output_type(model)
-    assert isinstance(output_type, TextOutput)
-    assert output_retries_for_model(model) == 3
+    assert isinstance(build_agent_output_type(model), TextOutput)
 
 
-def test_agentrouter_uses_prompted_output():
+def test_agentrouter_uses_prompted_output(monkeypatch, omniroute_catalog_env):
     model = normalize_model_row(
         {
             "id": "agentrouter/deepseek-v4-flash",
             "owned_by": "agentrouter",
-            "context_length": 1_000_000,
-            "max_output_tokens": 384_000,
-            "capabilities": {
-                "reasoning": True,
-                "effort_tiers": ["none", "low"],
-            },
+            "capabilities": {"reasoning": True},
         }
     )
     assert model.structured_output_mode == "prompted"
-    output_type = build_agent_output_type(model)
-    assert isinstance(output_type, PromptedOutput)
-    assert output_retries_for_model(model) == 2
+    assert isinstance(build_agent_output_type(model), PromptedOutput)
 
 
-def test_catalog_capability_overrides_output_mode():
-    model = normalize_model_row(
-        {
-            "id": "cursor/composer-2.5",
-            "owned_by": "cursor",
-            "capabilities": {"structured_output_mode": "prompted"},
-        }
+def test_override_text_json(monkeypatch):
+    monkeypatch.setenv(
+        "COPILOT_MODEL_OVERRIDES_JSON",
+        '{"models":{"demo/*":{"structured_output_mode":"text_json","request_max_tokens":4096}}}',
     )
-    assert model.structured_output_mode == "prompted"
+    model = normalize_model_row({"id": "demo/chat", "owned_by": "demo"})
+    assert model.structured_output_mode == "text_json"
+    assert model.request_max_tokens == 4096

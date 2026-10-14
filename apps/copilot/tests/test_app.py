@@ -88,7 +88,7 @@ async def test_analyze_invalid_reasoning_effort_400_json(llm_env, test_app):
 
 
 @pytest.mark.asyncio
-async def test_analyze_cursor_rejects_reasoning_effort(llm_env, test_app):
+async def test_analyze_cursor_rejects_reasoning_effort(llm_env, test_app, omniroute_catalog_env):
     app = test_app(FakeRunner())
     bad = {**ANALYZE, "model": "cursor/auto", "reasoning_effort": "low"}
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:

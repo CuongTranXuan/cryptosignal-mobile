@@ -9,10 +9,20 @@ dependencies = [
   "pydantic-ai>=2.55,<3",
   "httpx>=0.28",
   "python-dotenv>=1.0",
+  "sqlalchemy>=2.0",
+  "alembic>=1.14",
+  "psycopg[binary]>=3.2",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.3", "pytest-asyncio>=0.24", "ruff>=0.9", "mypy>=1.14"]
+libsql = ["sqlalchemy-libsql>=0.1"]
+dev = [
+  "pytest>=8.3",
+  "pytest-asyncio>=0.24",
+  "ruff>=0.9",
+  "mypy>=1.14",
+  "testcontainers[postgres]>=4.9",
+]
 
 [tool.ruff]
 target-version = "py312"

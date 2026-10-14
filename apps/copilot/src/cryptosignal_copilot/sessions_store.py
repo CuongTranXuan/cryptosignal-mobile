@@ -1,14 +1,19 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 import threading
 import time
 import uuid
 from pathlib import Path
 from typing import Any
 
-from cryptosignal_copilot.config import load_sessions_db_path
+from sqlalchemy import delete, func, select
+from sqlalchemy.orm import Session, sessionmaker
+
+from cryptosignal_copilot.config import sqlite_url_for_path
+from cryptosignal_copilot.db.engine import get_engine, reset_engine_for_tests
+from cryptosignal_copilot.db.migrate import run_db_migrations
+from cryptosignal_copilot.db.models import CopilotSessionRow
 from cryptosignal_copilot.schema import (
     CopilotSession,
     SessionChartContext,
@@ -16,7 +21,6 @@ from cryptosignal_copilot.schema import (
     SessionSummary,
     normalize_session_reasoning_effort,
 )
-from cryptosignal_copilot.sessions_migrate import apply_sessions_migrations
 
 MAX_SESSIONS = 50
 MAX_MESSAGES_PER_SESSION = 200
@@ -29,75 +33,61 @@ class SessionNotFoundError(Exception):
 
 
 class SessionsStore:
-    def __init__(self, db_path: Path | None = None) -> None:
-        self._db_path = db_path or load_sessions_db_path()
+    def __init__(
+        self,
+        *,
+        database_url: str | None = None,
+        db_path: Path | None = None,
+        run_migrations: bool = False,
+    ) -> None:
+        url = database_url
+        if url is None and db_path is not None:
+            url = sqlite_url_for_path(db_path)
+        self._database_url = url
+        self._engine = get_engine(url)
+        self._session_factory = sessionmaker(bind=self._engine, expire_on_commit=False)
         self._lock = threading.Lock()
-        self._ensure_schema()
+        if run_migrations:
+            run_db_migrations(url, force=True)
 
-    def _connect(self) -> sqlite3.Connection:
-        self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(self._db_path, check_same_thread=False)
-        conn.row_factory = sqlite3.Row
-        return conn
-
-    def _ensure_schema(self) -> None:
-        with self._lock:
-            with self._connect() as conn:
-                conn.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS copilot_sessions (
-                        id TEXT PRIMARY KEY,
-                        title TEXT NOT NULL,
-                        created_at REAL NOT NULL,
-                        updated_at REAL NOT NULL,
-                        payload TEXT NOT NULL
-                    )
-                    """
-                )
-                apply_sessions_migrations(conn)
-                conn.commit()
+    def _session(self) -> Session:
+        return self._session_factory()
 
     def list_sessions(self) -> list[SessionSummary]:
         with self._lock:
-            with self._connect() as conn:
-                rows = conn.execute(
-                    """
-                    SELECT id, title, created_at, updated_at, payload
-                    FROM copilot_sessions
-                    ORDER BY updated_at DESC
-                    LIMIT ?
-                    """,
-                    (MAX_SESSIONS,),
-                ).fetchall()
+            with self._session() as session:
+                rows = session.execute(
+                    select(CopilotSessionRow)
+                    .order_by(CopilotSessionRow.updated_at.desc())
+                    .limit(MAX_SESSIONS)
+                ).scalars()
+                payloads = [row.payload for row in rows]
         out: list[SessionSummary] = []
-        for row in rows:
-            session = CopilotSession.model_validate(json.loads(row["payload"]))
+        for payload in payloads:
+            record = CopilotSession.model_validate(json.loads(payload))
             out.append(
                 SessionSummary(
-                    id=session.id,
-                    title=session.title,
-                    created_at=session.created_at,
-                    updated_at=session.updated_at,
-                    model_id=session.model_id,
-                    reasoning_effort=session.reasoning_effort,
-                    symbol=session.chart.symbol,
-                    interval=session.chart.interval,
-                    candle_count=session.chart.candle_count,
-                    message_count=len(session.messages),
+                    id=record.id,
+                    title=record.title,
+                    created_at=record.created_at,
+                    updated_at=record.updated_at,
+                    model_id=record.model_id,
+                    reasoning_effort=record.reasoning_effort,
+                    symbol=record.chart.symbol,
+                    interval=record.chart.interval,
+                    candle_count=record.chart.candle_count,
+                    message_count=len(record.messages),
                 )
             )
         return out
 
     def get_session(self, session_id: str) -> CopilotSession:
         with self._lock:
-            with self._connect() as conn:
-                row = conn.execute(
-                    "SELECT payload FROM copilot_sessions WHERE id = ?",
-                    (session_id,),
-                ).fetchone()
+            with self._session() as session:
+                row = session.get(CopilotSessionRow, session_id)
         if row is None:
             raise SessionNotFoundError(session_id)
-        return CopilotSession.model_validate(json.loads(row["payload"]))
+        return CopilotSession.model_validate(json.loads(row.payload))
 
     def create_session(
         self,
@@ -110,7 +100,7 @@ class SessionsStore:
     ) -> CopilotSession:
         self._evict_if_needed()
         now = int(time.time())
-        session = CopilotSession(
+        record = CopilotSession(
             id=str(uuid.uuid4()),
             title=title,
             created_at=now,
@@ -120,8 +110,8 @@ class SessionsStore:
             chart=chart,
             messages=(messages or [])[:MAX_MESSAGES_PER_SESSION],
         )
-        self._upsert(session)
-        return session
+        self._upsert(record)
+        return record
 
     def update_session(self, session_id: str, **updates: Any) -> CopilotSession:
         record = self.get_session(session_id)
@@ -140,58 +130,52 @@ class SessionsStore:
 
     def delete_session(self, session_id: str) -> None:
         with self._lock:
-            with self._connect() as conn:
-                cur = conn.execute("DELETE FROM copilot_sessions WHERE id = ?", (session_id,))
-                conn.commit()
-                if cur.rowcount == 0:
+            with self._session() as session:
+                row = session.get(CopilotSessionRow, session_id)
+                if row is None:
                     raise SessionNotFoundError(session_id)
+                session.delete(row)
+                session.commit()
 
     def _evict_if_needed(self) -> None:
         with self._lock:
-            with self._connect() as conn:
-                count = conn.execute("SELECT COUNT(*) FROM copilot_sessions").fetchone()[0]
+            with self._session() as session:
+                count = session.scalar(select(func.count()).select_from(CopilotSessionRow)) or 0
                 if count < MAX_SESSIONS:
                     return
                 to_remove = count - MAX_SESSIONS + 1
-                conn.execute(
-                    """
-                    DELETE FROM copilot_sessions
-                    WHERE id IN (
-                        SELECT id FROM copilot_sessions
-                        ORDER BY updated_at ASC
-                        LIMIT ?
-                    )
-                    """,
-                    (to_remove,),
-                )
-                conn.commit()
+                oldest = session.execute(
+                    select(CopilotSessionRow.id)
+                    .order_by(CopilotSessionRow.updated_at.asc())
+                    .limit(to_remove)
+                ).scalars()
+                ids = list(oldest)
+                if ids:
+                    session.execute(delete(CopilotSessionRow).where(CopilotSessionRow.id.in_(ids)))
+                session.commit()
 
     def _upsert(self, record: CopilotSession) -> None:
         payload = record.model_dump(mode="json", by_alias=True)
+        row = CopilotSessionRow(
+            id=record.id,
+            title=record.title,
+            created_at=float(record.created_at),
+            updated_at=float(record.updated_at),
+            payload=json.dumps(payload),
+            reasoning_effort=record.reasoning_effort,
+        )
         with self._lock:
-            with self._connect() as conn:
-                conn.execute(
-                    """
-                    INSERT INTO copilot_sessions (
-                        id, title, created_at, updated_at, payload, reasoning_effort
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(id) DO UPDATE SET
-                        title = excluded.title,
-                        updated_at = excluded.updated_at,
-                        payload = excluded.payload,
-                        reasoning_effort = excluded.reasoning_effort
-                    """,
-                    (
-                        record.id,
-                        record.title,
-                        float(record.created_at),
-                        float(record.updated_at),
-                        json.dumps(payload),
-                        record.reasoning_effort,
-                    ),
-                )
-                conn.commit()
+            with self._session() as session:
+                session.merge(row)
+                session.commit()
+
+    def has_reasoning_effort_column(self) -> bool:
+        """Test helper: verify denormalized column exists (post-migration)."""
+        from sqlalchemy import inspect as sa_inspect
+
+        inspector = sa_inspect(self._engine)
+        cols = {col["name"] for col in inspector.get_columns("copilot_sessions")}
+        return "reasoning_effort" in cols
 
 
 _default_store: SessionsStore | None = None
@@ -206,5 +190,6 @@ def get_sessions_store() -> SessionsStore:
 
 def reset_sessions_store_for_tests(db_path: Path) -> SessionsStore:
     global _default_store
-    _default_store = SessionsStore(db_path=db_path)
+    reset_engine_for_tests()
+    _default_store = SessionsStore(db_path=db_path, run_migrations=True)
     return _default_store

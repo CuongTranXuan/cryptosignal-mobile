@@ -4,13 +4,18 @@ from __future__ import annotations
 
 from typing import Any
 
-from cryptosignal_copilot.model_visibility import load_visibility_allowlist
-
 _AGENTROUTER_BASES = ("agentrouter/deepseek-v4-flash",)
 
 _EFFORT_SUFFIXES = ("-low", "-medium", "-high", "-max")
 
-_CURSOR_VISIBILITY = tuple(mid for mid in load_visibility_allowlist() if mid.startswith("cursor/"))
+_CURSOR_VISIBILITY = (
+    "cursor/auto",
+    "cursor/auto-balance",
+    "cursor/auto-cost",
+    "cursor/auto-intelligence",
+    "cursor/composer-2.5",
+    "cursor/composer-2.5-fast",
+)
 
 
 def _agentrouter_row(model_id: str) -> dict[str, Any]:
@@ -64,7 +69,7 @@ def omniroute_models_payload() -> list[dict[str, Any]]:
 
     rows.append(_cursor_row("cursor/composer-2"))
     rows.append({"id": "aihorde/flux-schnell", "owned_by": "aihorde"})
-    rows.append({"id": "cursor/veo-2", "owned_by": "cursor"})
+    rows.append({"id": "cursor/veo-2", "owned_by": "cursor", "type": "video"})
     rows.extend({"id": f"cursor/noise-{i}", "owned_by": "cursor"} for i in range(200))
     rows.extend({"id": f"cursor/model-{i}", "owned_by": "cursor"} for i in range(1400))
     rows.extend({"id": f"combo/route-{i}", "owned_by": "combo"} for i in range(45))

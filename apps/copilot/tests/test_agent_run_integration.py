@@ -46,7 +46,7 @@ async def test_agent_run_prompted_output_with_test_model():
 
 
 @pytest.mark.asyncio
-async def test_agent_run_text_json_fence_with_test_model():
+async def test_agent_run_text_json_fence_with_test_model(omniroute_catalog_env):
     model = normalize_model_row({"id": "cursor/composer-2.5", "owned_by": "cursor"})
     fenced = f"```json\n{_VALID_JSON}\n```"
     output = await _run_with_test_model(model, fenced)

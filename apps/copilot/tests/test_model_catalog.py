@@ -31,6 +31,21 @@ def test_combo_route_marked_advanced():
     assert model.advanced is True
 
 
+def test_snapshot_always_includes_configured_default_model():
+    from cryptosignal_copilot.config import LlmConfig
+    from cryptosignal_copilot.model_catalog import snapshot_from_rows
+
+    cfg = LlmConfig(
+        style="openai",
+        base_url="http://127.0.0.1/v1",
+        api_key="k",
+        model="acme/special",
+        timeout_s=60.0,
+    )
+    snap = snapshot_from_rows(cfg, [], fetched_at=1.0, ttl_s=600.0)
+    assert "acme/special" in snap.by_id()
+
+
 def test_bare_openai_defaults_unknown():
     model = normalize_model_row({"id": "custom-unknown-model", "owned_by": "openai"})
     assert model.context_window == 32_000
@@ -39,7 +54,7 @@ def test_bare_openai_defaults_unknown():
 
 
 @pytest.mark.asyncio
-async def test_models_endpoint_and_cache_single_fetch(llm_env, test_app):
+async def test_models_endpoint_and_cache_single_fetch(llm_env, test_app, omniroute_catalog_env):
     calls = 0
 
     async def counting_fetch(cfg):
@@ -48,10 +63,14 @@ async def test_models_endpoint_and_cache_single_fetch(llm_env, test_app):
         return await _default_test_models(cfg)
 
     from cryptosignal_copilot.app import create_app
-    from cryptosignal_copilot.sessions_store import SessionsStore
+    from cryptosignal_copilot.sessions_store import get_sessions_store
 
     catalog = ModelsCatalog(fetch_models=counting_fetch)
-    app = create_app(runner=FakeRunner(), models_catalog=catalog, sessions_store=SessionsStore())
+    app = create_app(
+        runner=FakeRunner(),
+        models_catalog=catalog,
+        sessions_store=get_sessions_store(),
+    )
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         first = await client.get("/v1/copilot/models")
         second = await client.get("/v1/copilot/models")

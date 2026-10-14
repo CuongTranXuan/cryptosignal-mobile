@@ -25,7 +25,7 @@ gcloud run deploy "${SERVICE}" \
   --min-instances 0 \
   --timeout 600 \
   --port 8080 \
-  --set-env-vars "COPILOT_RUN_DB_MIGRATIONS=true,LLM_API_STYLE=openai" \
+  --set-env-vars "PORT=8080,COPILOT_RUN_DB_MIGRATIONS=true,LLM_API_STYLE=openai" \
   --set-secrets "LLM_API_KEY=LLM_API_KEY:latest,LLM_BASE_URL=LLM_BASE_URL:latest,LLM_MODEL=LLM_MODEL:latest,DATABASE_URL=DATABASE_URL:latest,CORS_ORIGINS=CORS_ORIGINS:latest"
 
 echo "Deployed ${SERVICE} in ${REGION}"

@@ -20,9 +20,9 @@ from cryptosignal_copilot.config import (
 )
 from cryptosignal_copilot.model_availability import filter_available_models
 from cryptosignal_copilot.model_negative_cache import get_model_negative_cache
+from cryptosignal_copilot.model_overrides import match_model_override
 from cryptosignal_copilot.model_visibility import (
-    is_cursor_auto_router,
-    is_cursor_provider_model,
+    is_advanced_route,
     normalize_upstream_model_id,
 )
 
@@ -49,8 +49,6 @@ _TABLE: list[tuple[re.Pattern[str], int, int, bool, list[str] | None]] = [
 
 _DEFAULT_CONTEXT = 32_000
 _DEFAULT_MAX_OUT = 4_096
-_CURSOR_CONTEXT = 128_000
-_CURSOR_MAX_OUT = 8_192
 _REASONING_CAP = 16_384
 _DEEPSEEK_FLASH_REASONING_CAP = 32_768
 _NON_REASONING_CAP = 4_096
@@ -202,19 +200,6 @@ def _read_json_support(raw: dict[str, Any]) -> bool | None:
     return None
 
 
-def _is_advanced_route(model_id: str, owned_by: str) -> bool:
-    lower = model_id.lower()
-    if owned_by == "combo":
-        return True
-    if is_cursor_auto_router(model_id):
-        return True
-    if "/no-think/" in lower:
-        return True
-    if lower.startswith("auto/") or "/auto/" in lower:
-        return True
-    return False
-
-
 def _request_max_tokens(
     supports_reasoning: bool,
     max_output_tokens: int,
@@ -244,8 +229,6 @@ def normalize_model_row(
     root = raw.get("root")
     root_str = str(root) if root else None
     owned_by = str(raw.get("owned_by") or "")
-    if model_id.startswith("cursor/"):
-        owned_by = "cursor"
     label = str(raw.get("name") or raw.get("label") or model_id.split("/")[-1])
     provider = owned_by or (model_id.split("/")[0] if "/" in model_id else "unknown")
 
@@ -301,21 +284,27 @@ def normalize_model_row(
 
     structured_mode = _read_structured_output_mode(raw) or "prompted"
 
-    if is_cursor_provider_model(model_id, owned_by):
-        reasoning = False
-        efforts = []
-        sources.supports_reasoning = "provider"
-        sources.reasoning_efforts = "provider"
-        structured_mode = _read_structured_output_mode(raw) or "text_json"
-        if ctx == _DEFAULT_CONTEXT:
-            ctx = _CURSOR_CONTEXT
-            sources.context_window = "default"
-        if out == _DEFAULT_MAX_OUT:
-            out = _CURSOR_MAX_OUT
-            sources.max_output_tokens = "default"
+    override = match_model_override(model_id)
+    if override:
+        if override.supports_reasoning is not None:
+            reasoning = override.supports_reasoning
+            sources.supports_reasoning = "provider"
+        if override.reasoning_efforts is not None:
+            efforts = list(override.reasoning_efforts)
+            sources.reasoning_efforts = "provider"
+        if override.structured_output_mode is not None:
+            structured_mode = override.structured_output_mode
+        if override.context_window is not None:
+            ctx = override.context_window
+            sources.context_window = "provider"
+        if override.max_output_tokens is not None:
+            out = override.max_output_tokens
+            sources.max_output_tokens = "provider"
 
-    if structured_mode == "text_json":
-        request_max = min(_CURSOR_MAX_OUT, out)
+    if override and override.request_max_tokens is not None:
+        request_max = override.request_max_tokens
+    elif structured_mode == "text_json":
+        request_max = min(out, max(out, _NON_REASONING_CAP))
     else:
         request_max = _request_max_tokens(
             reasoning,
@@ -341,7 +330,7 @@ def normalize_model_row(
         reasoning_efforts=tuple(efforts),
         supports_json=json_support,
         source=sources.worst(),
-        advanced=_is_advanced_route(model_id, owned_by),
+        advanced=is_advanced_route(model_id, owned_by),
         request_max_tokens=request_max,
         recommended_candles=rec,
         recommended_max_candles=rec_max,
