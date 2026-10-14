@@ -1,0 +1,6 @@
+# Optional override: publish copilot on the host for debugging (curl / health checks).
+# Usage: docker compose -f docker-compose.yml -f docker-compose.expose-copilot.yml up
+services:
+  copilot:
+    ports:
+      - "${COPILOT_PUBLISH_PORT:-8000}:8000"
