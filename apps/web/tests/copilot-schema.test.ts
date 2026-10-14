@@ -16,8 +16,8 @@ describe("copilot-schema", () => {
     };
     const normal: CopilotModelRecord = {
       ...advanced,
-      id: "agentrouter/deepseek-v4-flash",
-      provider: "agentrouter",
+      id: "provider-a/model-alpha",
+      provider: "provider-a",
     };
     expect(isAdvancedRouteModel(advanced)).toBe(true);
     expect(isAdvancedRouteModel(normal)).toBe(false);

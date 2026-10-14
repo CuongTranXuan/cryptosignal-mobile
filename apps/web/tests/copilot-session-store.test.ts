@@ -39,7 +39,7 @@ describe("copilot session store (API)", () => {
     await loadCopilotModels(api);
     const created = await api.createSession({
       title: "Phiên A",
-      model_id: "agentrouter/deepseek-v4-flash",
+      model_id: "provider-a/model-alpha",
       reasoning_effort: "low",
       chart: {
         symbol: "SOLUSDT",
@@ -62,7 +62,7 @@ describe("copilot session store (API)", () => {
           id: "a1",
           role: "assistant",
           content: "a",
-          model_id: "agentrouter/deepseek-v4-flash",
+          model_id: "provider-a/model-alpha",
           shapes: [],
           markers: [],
           created_at: 3,
@@ -86,9 +86,9 @@ describe("copilot session store (API)", () => {
     const models = (await loadCopilotModels(api)).models;
     const label = agentMessageModelLabel(
       models,
-      "agentrouter/deepseek-v4-flash",
+      "provider-a/model-alpha",
       models[0]?.id,
     );
-    expect(label).toBe("agentrouter · deepseek-v4-flash");
+    expect(label).toBe("provider-a · model-alpha");
   });
 });

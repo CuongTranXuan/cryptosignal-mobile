@@ -206,7 +206,7 @@ describe("use-copilot / createCopilotClient", () => {
     const fetchMock = vi.fn(async () =>
       streamResponse([
         sseChunk("meta", {
-          model: "agentrouter/deepseek-v4-flash",
+          model: "provider-a/model-alpha",
           candle_count_requested: 300,
           candle_count_used: 200,
           clamped: true,

@@ -4,7 +4,7 @@ import { formatAnalyzeMetaNotice } from "../lib/copilot-analyze-meta";
 describe("formatAnalyzeMetaNotice", () => {
   it("explains server-side clamp with requested vs used", () => {
     const text = formatAnalyzeMetaNotice({
-      model: "agentrouter/deepseek-v4-flash",
+      model: "provider-a/model-alpha",
       candle_count_requested: 100,
       candle_count_used: 50,
       clamped: true,

@@ -16,7 +16,7 @@ describe("legacy session title cleanup", () => {
     const encodedTitle = `My chat${SESSION_REASONING_TITLE_SEP}medium`;
     const created = await api.createSession({
       title: encodedTitle,
-      model_id: "agentrouter/deepseek-v4-flash",
+      model_id: "provider-a/model-alpha",
       reasoning_effort: null,
       chart: {
         symbol: "BTCUSDT",

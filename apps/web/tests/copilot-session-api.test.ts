@@ -13,7 +13,7 @@ describe("copilot session API (mock)", () => {
     const api = createCopilotApi({ forceMock: true });
     const created = await api.createSession({
       title: "Test",
-      model_id: "agentrouter/deepseek-v4-flash",
+      model_id: "provider-a/model-alpha",
       chart: {
         symbol: "ETHUSDT",
         interval: "4h",

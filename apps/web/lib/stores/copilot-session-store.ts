@@ -2,7 +2,7 @@ import { create } from "zustand";
 import type { CopilotApiClient } from "../copilot-api";
 import { loadActiveSessionId, saveActiveSessionId } from "../copilot-active-session-cache";
 import { DEFAULT_CANDLE_COUNT, clampCandleCountForModel } from "../copilot-model-limits";
-import { resolveSessionModelId } from "../copilot-model-defaults";
+import { resolveCatalogDefaultId, resolveSessionModelId } from "../copilot-model-defaults";
 import { syncModelsSnapshotFromCache } from "../../components/copilot/use-copilot-models";
 import {
   defaultReasoningEffortForModel,
@@ -158,7 +158,9 @@ function buildActiveSessionSnapshot(get: () => CopilotSessionState): CopilotSess
     ...base,
     id: activeSessionId,
     updated_at: Math.floor(Date.now() / 1000),
-    model_id: resolveSessionModelId(getModelsList(), modelId ?? base.model_id, getDefaultModelId()),
+    model_id:
+      resolveSessionModelId(getModelsList(), modelId ?? base.model_id, getDefaultModelId()) ??
+      base.model_id,
     reasoning_effort: reasoningEffort,
     chart: {
       symbol: chartStore.symbol,
@@ -265,7 +267,19 @@ export const useCopilotSessionStore = create<CopilotSessionState>((set, get) => 
     }
 
     if (!activeSession) {
-      const model = resolveSessionModelId(models, null, apiDefault);
+      const model =
+        resolveSessionModelId(models, null, apiDefault) ??
+        resolveCatalogDefaultId(models, apiDefault);
+      if (!model) {
+        set({
+          sessions: listRows,
+          activeSessionId: null,
+          modelId: null,
+          sessionsError: listError,
+          modelsReady: true,
+        });
+        return;
+      }
       const effort = defaultReasoningEffortForModel(findCachedModel(model));
       const draft = buildEmptyClientSession(model, "Phiên mới", effort);
       try {
@@ -314,7 +328,7 @@ export const useCopilotSessionStore = create<CopilotSessionState>((set, get) => 
     });
     applySessionToUi({
       ...activeSession!,
-      model_id: resolvedModelId,
+      model_id: resolvedModelId ?? activeSession!.model_id,
       reasoning_effort: reasoningEffort,
     });
   },
@@ -418,7 +432,13 @@ export const useCopilotSessionStore = create<CopilotSessionState>((set, get) => 
     const api = get().api;
     await get().flushPersist();
     const models = getModelsList();
-    const modelId = resolveSessionModelId(models, get().modelId, getDefaultModelId());
+    const modelId =
+      resolveSessionModelId(models, get().modelId, getDefaultModelId()) ??
+      resolveCatalogDefaultId(models, getDefaultModelId());
+    if (!modelId) {
+      set({ sessionsError: COPILOT_SESSIONS_OFFLINE });
+      return;
+    }
     const draft = buildEmptyClientSession(modelId, "Phiên mới", get().reasoningEffort);
     draft.chart.candle_count = get().getRequestedCandleCount();
 
@@ -497,7 +517,7 @@ export const useCopilotSessionStore = create<CopilotSessionState>((set, get) => 
       lastAnalyzeMeta: null,
       reasoningEffort: resetReasoningForModel(model, session.reasoning_effort ?? null),
     });
-    applySessionToUi({ ...session, model_id: resolvedId });
+    applySessionToUi({ ...session, model_id: resolvedId ?? session.model_id });
   },
 
   renameSession: async (id, title) => {

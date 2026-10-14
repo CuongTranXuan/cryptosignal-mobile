@@ -1,50 +1,52 @@
 import { describe, expect, it } from "vitest";
 import {
-  PREFERRED_DEFAULT_MODEL_ID,
   modelIdForAnalyzeRequest,
+  resolveCatalogDefaultId,
   resolveDefaultModelId,
   resolveSessionModelId,
 } from "../lib/copilot-model-defaults";
 import type { CopilotModelRecord } from "../lib/copilot-schema";
 import { DEFAULT_CANDLE_COUNT } from "../lib/copilot-model-limits";
 
-const flash: CopilotModelRecord = {
-  id: "agentrouter/deepseek-v4-flash",
-  label: "flash",
-  provider: "agentrouter",
-  context_window: 1_000_000,
-  max_output_tokens: 384_000,
-  supports_reasoning: true,
-  reasoning_efforts: ["none", "low"],
-  supports_json: true,
-};
-
-const other: CopilotModelRecord = {
-  ...flash,
-  id: "other/model",
-  label: "other",
-};
+function model(id: string, provider = "p"): CopilotModelRecord {
+  return {
+    id,
+    label: id.split("/").pop() ?? id,
+    provider,
+    context_window: 128_000,
+    max_output_tokens: 8_192,
+    supports_reasoning: true,
+    reasoning_efforts: ["none", "low"],
+    supports_json: true,
+  };
+}
 
 describe("resolveDefaultModelId", () => {
+  const alpha = model("provider-a/alpha");
+  const beta = model("provider-b/beta");
+
   it("prefers saved id when still in list", () => {
-    expect(resolveDefaultModelId([flash, other], flash.id, other.id)).toBe(flash.id);
+    expect(resolveDefaultModelId([alpha, beta], alpha.id, beta.id)).toBe(alpha.id);
   });
 
-  it("falls back to deepseek-v4-flash when saved id is missing", () => {
-    expect(resolveDefaultModelId([flash, other], "gone", other.id)).toBe(
-      PREFERRED_DEFAULT_MODEL_ID,
-    );
+  it("uses API default_model when saved id is gone", () => {
+    expect(resolveDefaultModelId([alpha, beta], "removed/id", beta.id)).toBe(beta.id);
   });
 
-  it("falls back to API default then first model", () => {
-    expect(resolveDefaultModelId([other], null, other.id)).toBe(other.id);
-    expect(resolveDefaultModelId([other], null, "missing")).toBe(other.id);
-    expect(resolveDefaultModelId([], null, null)).toBeNull();
+  it("falls back to first model when API default is missing or unknown", () => {
+    expect(resolveDefaultModelId([alpha, beta], null, "missing")).toBe(alpha.id);
+    expect(resolveDefaultModelId([beta], null, null)).toBe(beta.id);
   });
 
-  it("resolveSessionModelId never returns empty when catalog is empty", () => {
-    expect(resolveSessionModelId([], "", null)).toBe(PREFERRED_DEFAULT_MODEL_ID);
-    expect(modelIdForAnalyzeRequest([], "", null)).toBeUndefined();
+  it("returns null when catalog is empty", () => {
+    expect(resolveDefaultModelId([], "saved", "api")).toBeNull();
+    expect(resolveSessionModelId([], "", null)).toBeNull();
+    expect(modelIdForAnalyzeRequest([], "saved", null)).toBeUndefined();
+  });
+
+  it("resolveCatalogDefaultId has no hard-coded ids", () => {
+    expect(resolveCatalogDefaultId([beta], alpha.id)).toBe(beta.id);
+    expect(resolveCatalogDefaultId([], "any")).toBeNull();
   });
 });
 

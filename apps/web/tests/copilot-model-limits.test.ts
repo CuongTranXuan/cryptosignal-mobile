@@ -7,9 +7,9 @@ import {
 } from "../lib/copilot-model-limits";
 
 const model: CopilotModelRecord = {
-  id: "agentrouter/deepseek-v4-flash",
-  label: "deepseek-v4-flash",
-  provider: "agentrouter",
+  id: "provider-a/model-alpha",
+  label: "model-alpha",
+  provider: "provider-a",
   context_window: 1_000_000,
   max_output_tokens: 384_000,
   supports_reasoning: true,

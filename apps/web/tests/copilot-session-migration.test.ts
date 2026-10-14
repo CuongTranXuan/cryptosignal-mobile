@@ -41,7 +41,7 @@ describe("copilot session migration", () => {
 
   it("migrates legacy blob and clears local storage on success", async () => {
     const api = createCopilotApi({ forceMock: true });
-    const local = buildEmptyClientSession("agentrouter/deepseek-v4-flash", "Legacy", "medium");
+    const local = buildEmptyClientSession("provider-a/model-alpha", "Legacy", "medium");
     local.messages.push({
       id: "m1",
       role: "user",
@@ -66,7 +66,7 @@ describe("copilot session migration", () => {
 
   it("rerun does not duplicate sessions", async () => {
     const api = createCopilotApi({ forceMock: true });
-    const local = buildEmptyClientSession("agentrouter/deepseek-v4-flash", "Once", null);
+    const local = buildEmptyClientSession("provider-a/model-alpha", "Once", null);
     saveLegacySessionsBlob({ active_session_id: local.id, sessions: [local] });
     await migrateLegacySessionsIfNeeded(api, []);
     const listed = await api.listSessions();
@@ -76,7 +76,7 @@ describe("copilot session migration", () => {
 
   it("keeps legacy rows when server create fails", async () => {
     const api = createCopilotApi({ fetchImpl: mockFetchWithFailingCreate() });
-    const local = buildEmptyClientSession("agentrouter/deepseek-v4-flash", "Stuck", null);
+    const local = buildEmptyClientSession("provider-a/model-alpha", "Stuck", null);
     saveLegacySessionsBlob({ active_session_id: local.id, sessions: [local] });
     const result = await migrateLegacySessionsIfNeeded(api, []);
     expect(result.failures).toHaveLength(1);

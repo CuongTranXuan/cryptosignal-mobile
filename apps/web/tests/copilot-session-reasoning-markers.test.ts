@@ -71,7 +71,7 @@ describe("session reasoning_effort and markers", () => {
     const api = createCopilotApi({ forceMock: true });
     const created = await api.createSession({
       title: "R",
-      model_id: "agentrouter/deepseek-v4-flash",
+      model_id: "provider-a/model-alpha",
       reasoning_effort: "high",
       chart: {
         symbol: "BTCUSDT",
@@ -94,14 +94,14 @@ describe("session reasoning_effort and markers", () => {
       id: "a1",
       role: "assistant",
       content: "done",
-      model_id: "agentrouter/deepseek-v4-flash",
+      model_id: "provider-a/model-alpha",
       shapes: [],
       markers: [sampleMarker],
       created_at: 3,
     });
     const created = await api.createSession({
       title: "Markers",
-      model_id: "agentrouter/deepseek-v4-flash",
+      model_id: "provider-a/model-alpha",
       reasoning_effort: "low",
       chart: {
         symbol: "BTCUSDT",

@@ -12,9 +12,9 @@ import { clearCopilotModelsCache, loadCopilotModels } from "../lib/copilot-model
 import { createCopilotApi, resetCopilotApiMockSessionsForTests } from "../lib/copilot-api";
 
 const reasoningModel: CopilotModelRecord = {
-  id: "agentrouter/deepseek-v4-flash",
-  label: "flash",
-  provider: "agentrouter",
+  id: "provider-a/model-alpha",
+  label: "model-alpha",
+  provider: "provider-a",
   context_window: 1_000_000,
   max_output_tokens: 384_000,
   supports_reasoning: true,

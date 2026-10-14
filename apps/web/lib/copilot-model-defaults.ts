@@ -1,9 +1,18 @@
 import type { CopilotModelRecord } from "./copilot-schema";
 
-export const PREFERRED_DEFAULT_MODEL_ID = "agentrouter/deepseek-v4-flash";
+/** Catalog default: API `default_model` when listed, else first model. */
+export function resolveCatalogDefaultId(
+  models: CopilotModelRecord[],
+  apiDefaultId: string | null | undefined,
+): string | null {
+  if (apiDefaultId?.trim() && models.some((m) => m.id === apiDefaultId)) {
+    return apiDefaultId;
+  }
+  return models[0]?.id ?? null;
+}
 
 /**
- * Product default: prefer deepseek-v4-flash, then API default_model, then first listed model.
+ * Saved session id when still in catalog; otherwise catalog default (API default_model, else first).
  */
 export function resolveDefaultModelId(
   models: CopilotModelRecord[],
@@ -14,24 +23,15 @@ export function resolveDefaultModelId(
   if (trimmed && models.some((m) => m.id === trimmed)) {
     return trimmed;
   }
-  if (models.some((m) => m.id === PREFERRED_DEFAULT_MODEL_ID)) {
-    return PREFERRED_DEFAULT_MODEL_ID;
-  }
-  if (apiDefaultId && models.some((m) => m.id === apiDefaultId)) {
-    return apiDefaultId;
-  }
-  return models[0]?.id ?? null;
+  return resolveCatalogDefaultId(models, apiDefaultId);
 }
 
-/** UI/session id: never empty; falls back to preferred id even when catalog is empty. */
 export function resolveSessionModelId(
   models: CopilotModelRecord[],
   savedId: string | null | undefined,
   apiDefaultId: string | null | undefined,
-): string {
-  return (
-    resolveDefaultModelId(models, savedId, apiDefaultId) ?? PREFERRED_DEFAULT_MODEL_ID
-  );
+): string | null {
+  return resolveDefaultModelId(models, savedId, apiDefaultId);
 }
 
 /** Analyze body: omit model when id is not in the discovered catalog (server default applies). */
@@ -41,7 +41,7 @@ export function modelIdForAnalyzeRequest(
   apiDefaultId: string | null | undefined,
 ): string | undefined {
   const candidate = resolveSessionModelId(models, sessionModelId, apiDefaultId);
-  if (!models.some((m) => m.id === candidate)) {
+  if (!candidate || !models.some((m) => m.id === candidate)) {
     return undefined;
   }
   return candidate;
@@ -53,6 +53,7 @@ export function modelLabelForSession(
   apiDefaultId: string | null | undefined,
 ): string {
   const id = resolveSessionModelId(models, sessionModelId, apiDefaultId);
+  if (!id) return "";
   const hit = models.find((m) => m.id === id);
   if (hit) return `${hit.provider} · ${hit.label}`;
   return id;

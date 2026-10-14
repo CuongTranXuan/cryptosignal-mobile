@@ -67,13 +67,13 @@ async function readErrorBody(res: Response): Promise<ApiErrorBody> {
 }
 
 export const MOCK_MODELS_RESPONSE: ModelsListResponse = {
-  default_model: "agentrouter/deepseek-v4-flash",
+  default_model: "provider-a/model-alpha",
   fetched_at: 1_791_843_996,
   models: [
     {
-      id: "agentrouter/deepseek-v4-flash",
-      label: "deepseek-v4-flash",
-      provider: "agentrouter",
+      id: "provider-a/model-alpha",
+      label: "model-alpha",
+      provider: "provider-a",
       context_window: 1_000_000,
       max_output_tokens: 384_000,
       supports_reasoning: true,
@@ -86,9 +86,9 @@ export const MOCK_MODELS_RESPONSE: ModelsListResponse = {
       presets: [50, 100, 150, 200, 300, 500],
     },
     {
-      id: "cursor/auto",
-      label: "cursor-auto",
-      provider: "cursor",
+      id: "provider-b/auto-route",
+      label: "auto-route",
+      provider: "provider-b",
       context_window: 128_000,
       max_output_tokens: 8_192,
       supports_reasoning: true,
@@ -100,8 +100,8 @@ export const MOCK_MODELS_RESPONSE: ModelsListResponse = {
       presets: [50, 100, 150, 200, 300, 500],
     },
     {
-      id: "auto/combo-fast",
-      label: "combo-fast",
+      id: "combo/fast",
+      label: "fast",
       provider: "combo",
       context_window: 128_000,
       max_output_tokens: 8_192,
