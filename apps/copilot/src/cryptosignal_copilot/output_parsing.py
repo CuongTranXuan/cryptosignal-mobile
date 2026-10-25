@@ -25,14 +25,19 @@ def extract_json_text(raw: str) -> str:
 def parse_analyze_result_llm_text(raw: str) -> AnalyzeResultLlm:
     """Parse id-based LLM output from plain-text (cursor text_json style)."""
     payload = json.loads(extract_json_text(raw))
-    if "drawing_intents" in payload or "shapes" not in payload:
-        return AnalyzeResultLlm.model_validate(payload)
-    # Legacy fallback: map shapes-only payloads to empty intents (resolved elsewhere).
-    return AnalyzeResultLlm(
-        summary=str(payload.get("summary", "")),
-        drawing_intents=[],
-        markers=list(payload.get("markers") or []),
-    )
+    if "shapes" in payload and "drawing_intents" not in payload:
+        return AnalyzeResultLlm(
+            pick_notes=[],
+            drawing_intents=[],
+            markers=list(payload.get("markers") or []),
+        )
+    if "summary" in payload and "pick_notes" not in payload:
+        payload = {
+            "pick_notes": [],
+            "drawing_intents": list(payload.get("drawing_intents") or []),
+            "markers": list(payload.get("markers") or []),
+        }
+    return AnalyzeResultLlm.model_validate(payload)
 
 
 def parse_analyze_result_text(raw: str) -> AnalyzeResult:

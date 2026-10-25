@@ -181,6 +181,39 @@ def _wick_safe_price(candle: Candle, price: float, tolerance: float) -> float:
     return float(candle.low if price <= (candle.open + candle.close) / 2 else candle.high)
 
 
+def _sr_zone_start_time(cand: DrawingCandidate) -> int:
+    shape = cand.shapes[0] if cand.shapes else {}
+    points = shape.get("points")
+    if isinstance(points, list) and points:
+        return int(points[0].get("time", 0))
+    return cand.break_time or 0
+
+
+def _sr_price_crossed_zone(
+    candles: list[Candle], low_f: float, high_f: float, start_t: int
+) -> bool:
+    """True when closes traded from inside/below the band to above high, or inside/above to below low."""
+    after = [float(c.close) for c in candles if c.time >= start_t]
+    if not after:
+        return False
+    saw_at_or_below_high = False
+    saw_at_or_above_low = False
+    saw_above_high = False
+    saw_below_low = False
+    for close in after:
+        if close <= high_f:
+            saw_at_or_below_high = True
+        if close >= low_f:
+            saw_at_or_above_low = True
+        if close > high_f:
+            saw_above_high = True
+        if close < low_f:
+            saw_below_low = True
+    crossed_up = saw_at_or_below_high and saw_above_high
+    crossed_down = saw_at_or_above_low and saw_below_low
+    return crossed_up or crossed_down
+
+
 def _sr_role_from_last_close(cand: DrawingCandidate, candles: list[Candle]) -> DrawingCandidate:
     if cand.pattern_id != "support_resistance" or not candles:
         return cand
@@ -192,14 +225,14 @@ def _sr_role_from_last_close(cand: DrawingCandidate, candles: list[Candle]) -> D
     low_f, high_f = float(low), float(high)
     close = float(candles[-1].close)
     base_price = (low_f + high_f) / 2.0
+    start_t = _sr_zone_start_time(cand)
+    flipped = _sr_price_crossed_zone(candles, low_f, high_f, start_t)
     if close > high_f:
         role = "support"
         inv = low_f
-        tag = "S/R support (flipped)"
     elif close < low_f:
         role = "resistance"
         inv = high_f
-        tag = "S/R resistance (flipped)"
     else:
         return DrawingCandidate(
             id=cand.id,
@@ -213,17 +246,26 @@ def _sr_role_from_last_close(cand: DrawingCandidate, candles: list[Candle]) -> D
             break_time=cand.break_time,
             name=f"S/R {base_price:.2f}",
         )
+    score = cand.score * 0.95 if flipped else cand.score
+    if flipped:
+        side = "support" if role == "support" else "resistance"
+        name = f"S/R {side} (flipped) {base_price:.2f}"
+    else:
+        name = f"S/R {base_price:.2f}"
+    evidence = list(cand.evidence_against)
+    if flipped:
+        evidence.append(f"role from close: {role}")
     return DrawingCandidate(
         id=cand.id,
         pattern_id=cand.pattern_id,
         style=cand.style,
-        score=cand.score * 0.95,
+        score=score,
         swing_ids=cand.swing_ids,
         shapes=cand.shapes,
-        evidence_against=list(cand.evidence_against) + [f"role from close: {role}"],
+        evidence_against=evidence,
         invalidation_price=inv,
         break_time=cand.break_time,
-        name=f"{tag} {base_price:.2f}",
+        name=name,
     )
 
 

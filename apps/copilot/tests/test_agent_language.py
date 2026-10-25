@@ -15,7 +15,7 @@ def test_instructions_default_vietnamese_summary():
 
 def test_instructions_encode_actionable_drawing_rules():
     assert "Max 6" in INSTRUCTIONS or "Max 6" in INSTRUCTIONS.replace("max", "Max")
-    assert "Do not promise entries" in INSTRUCTIONS or "Do not claim entries" in INSTRUCTIONS
+    assert "no trade verbs" in INSTRUCTIONS or "no SL/TP" in INSTRUCTIONS
     assert "feature sheet" in INSTRUCTIONS
     assert "get_klines" not in INSTRUCTIONS
 

@@ -54,13 +54,26 @@ DrawingIntent = Annotated[
 ]
 
 
+class PickNote(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    candidate_id: str = Field(min_length=3, max_length=64)
+    note: str = Field(default="", max_length=240)
+
+    @field_validator("candidate_id")
+    @classmethod
+    def _valid_pick_note_id(cls, value: str) -> str:
+        if not CANDIDATE_ID_RE.match(value):
+            raise ValueError(f"candidate_id must match {CANDIDATE_ID_RE.pattern}")
+        return value
+
+
 class AnalyzeResultLlm(BaseModel):
-    """Structured LLM output — references candidates by id."""
+    """Structured LLM output — references candidates by id; bias text is server-side."""
 
     model_config = ConfigDict(extra="forbid")
 
-    summary: str
-    summary_direction: Literal["bullish", "bearish", "neutral", "conditional"] = "neutral"
+    pick_notes: list[PickNote] = Field(default_factory=list, max_length=MAX_DRAWING_INTENTS)
     drawing_intents: list[DrawingIntent] = Field(
         default_factory=list, max_length=MAX_DRAWING_INTENTS
     )
@@ -260,17 +273,9 @@ def deterministic_top_intents(
 def build_deterministic_fallback(
     catalog: CandidateCatalog,
     style: str,
-    summary: str = "Chọn mẫu hình từ danh sách điểm số cao nhất (fallback máy chủ).",
 ) -> AnalyzeResultLlm:
-    from cryptosignal_copilot.analysis_events import regime_to_bias
-
-    bias = regime_to_bias(str(catalog.regime))
-    direction: Literal["bullish", "bearish", "neutral", "conditional"] = (
-        "bullish" if bias == "bullish" else "bearish" if bias == "bearish" else "neutral"
-    )
     return AnalyzeResultLlm(
-        summary=summary,
-        summary_direction=direction,
+        pick_notes=[],
         drawing_intents=deterministic_top_intents(catalog, style),
         markers=[],
     )

@@ -12,8 +12,7 @@ from cryptosignal_copilot.drawing_intent import AnalyzeResultLlm
 
 _VALID_JSON = json.dumps(
     {
-        "summary": "Phân tích ngắn",
-        "summary_direction": "neutral",
+        "pick_notes": [],
         "drawing_intents": [],
         "markers": [],
     }
@@ -49,7 +48,7 @@ async def test_agent_run_prompted_output_with_test_model():
         }
     )
     output = await _run_with_test_model(model, _VALID_JSON)
-    assert output.summary == "Phân tích ngắn"
+    assert output.pick_notes == []
 
 
 @pytest.mark.asyncio
@@ -57,4 +56,4 @@ async def test_agent_run_text_json_fence_with_test_model(omniroute_catalog_env):
     model = normalize_model_row({"id": "cursor/composer-2.5", "owned_by": "cursor"})
     fenced = f"```json\n{_VALID_JSON}\n```"
     output = await _run_with_test_model(model, fenced)
-    assert output.summary == "Phân tích ngắn"
+    assert output.pick_notes == []

@@ -51,6 +51,7 @@ from cryptosignal_copilot.schema import (
     filter_agent_markers,
     filter_preview_details,
 )
+from cryptosignal_copilot.server_summary import compose_stream_summary
 from cryptosignal_copilot.wire_shape import shapes_for_wire
 
 # LANGUAGE: require Vietnamese for `summary` and chat-facing text the user sees.
@@ -66,18 +67,15 @@ from cryptosignal_copilot.wire_shape import shapes_for_wire
 INSTRUCTIONS = (
     "You are a crypto chart assistant. Use ONLY closed candles and the server-built "
     "feature sheet + candidate ids (geometry is precomputed). "
-    "LANGUAGE: Vietnamese for `summary` unless the user asks for English. "
     "JSON field names stay English. No tools; no invented OHLC or times. "
-    "Return `summary` (friendly multi-paragraph chat) plus `drawing_intents`: "
-    "each item is {type:'candidate', candidate_id} referencing ids from the sheet "
-    "(or type:'pair' with two ids for a channel/triangle). "
+    "Return `drawing_intents` (candidate ids from the sheet) and optional `pick_notes`: "
+    "short Vietnamese notes per picked id ({candidate_id, note}) — geometry/touches only, "
+    "no bias, no trade verbs, no SL/TP, no directional forecasts. "
+    "The server writes the user-facing bias paragraph. "
     "Hard limits: Max 6 drawing_intents and total shape_cost across picks <= 6 "
     "(use shape_cost on each candidate row). "
-    "Set summary_direction to bullish|bearish|neutral|conditional aligned with detector "
-    "regime (use conditional when describing if/then invalidation). "
     "Optional `markers` for point signals (AgentMarker schema). "
-    "Do not emit raw PatternShape geometry — ids only. "
-    "Do not promise entries, stops, or that levels will hold."
+    "Do not emit raw PatternShape geometry — ids only."
 )
 
 logger = logging.getLogger(__name__)
@@ -139,6 +137,7 @@ class PydanticAiRunner:
 
         current_plan = plan
         llm_output: AnalyzeResultLlm | None = None
+        stream_summary_direction: str | None = None
         if raw_shapes is None:
             for attempt in range(2):
                 provider_model_id = resolve_provider_model_id(
@@ -181,22 +180,25 @@ class PydanticAiRunner:
                                 structured_output_mode=current_plan.model.structured_output_mode,
                             )
                             yield "meta", current_plan.meta
+                            intent_check = (current_plan.meta or {}).get("intent_check") or {}
+                            if catalog is not None:
+                                yield (
+                                    "regime",
+                                    build_regime_event(
+                                        catalog,
+                                        intent_check,
+                                        htf=(current_plan.meta or {}).get("htf"),
+                                    ),
+                                )
                             continue
                     fallback_catalog = current_plan.candidate_catalog or catalog
                     if fallback_catalog is not None:
                         style = (request.intent.style if request.intent else "classic") or "classic"
-                        regime_label = str(fallback_catalog.regime)
                         llm_output = build_deterministic_fallback(
                             fallback_catalog,
                             style,
-                            summary=(
-                                f"Chế độ detector: {regime_label}. "
-                                "Mô hình không trả về lựa chọn hợp lệ; "
-                                "lớp phủ dùng pick máy chủ theo điểm (fallback)."
-                            ),
                         )
                         meta = dict(current_plan.meta or {})
-                        meta["intent_budget_fallback"] = True
                         meta["validator_fallback"] = True
                         current_plan = replace(current_plan, meta=meta)
                         catalog = fallback_catalog
@@ -246,9 +248,6 @@ class PydanticAiRunner:
                     meta["intent_budget_fallback"] = True
                     current_plan = replace(current_plan, meta=meta)
 
-            yield "text", {"delta": "Mô hình đã xong. Đang dựng lớp phủ…"}
-            if llm_output and llm_output.summary:
-                yield "text", {"delta": "\n\n" + llm_output.summary}
             if catalog is not None and llm_output is not None:
                 last_close = (
                     float(request.closedCandles[-1].close) if request.closedCandles else None
@@ -256,9 +255,36 @@ class PydanticAiRunner:
                 raw_shapes, _ = resolve_drawing_intents(llm_output.drawing_intents, catalog)
                 raw_shapes = enrich_resolved_shapes(raw_shapes, catalog, last_close=last_close)
                 output_markers = list(llm_output.markers)
+                intent_check_pre = (current_plan.meta or {}).get("intent_check") or {}
+                by_id = catalog.by_id()
+                picked_pre: list[DrawingCandidate] = []
+                for intent in llm_output.drawing_intents:
+                    if intent.type == "candidate":
+                        cand = by_id.get(intent.candidate_id)
+                        if cand is not None:
+                            picked_pre.append(cand)
+                    else:
+                        for cid in intent.candidate_ids:
+                            cand = by_id.get(cid)
+                            if cand is not None:
+                                picked_pre.append(cand)
+                stream_text, stream_summary_direction = compose_stream_summary(
+                    catalog,
+                    llm_output,
+                    symbol=request.symbol,
+                    interval=request.interval,
+                    intent_check=intent_check_pre,
+                    shapes=raw_shapes,
+                    picked=picked_pre,
+                )
             else:
                 raw_shapes = []
                 output_markers = []
+                stream_text = None
+
+            yield "text", {"delta": "Mô hình đã xong. Đang dựng lớp phủ…"}
+            if stream_text:
+                yield "text", {"delta": "\n\n" + stream_text}
 
         allowed_times = {c.time for c in request.closedCandles}
         window = DrawingWindow(
@@ -291,7 +317,11 @@ class PydanticAiRunner:
             interval=request.interval,
         )
         extra_skips: list[SkipReasonCode] = []
-        if bool((current_plan.meta or {}).get("intent_budget_fallback")):
+        validator_fallback = bool((current_plan.meta or {}).get("validator_fallback"))
+        budget_fallback_only = bool((current_plan.meta or {}).get("intent_budget_fallback")) and (
+            not validator_fallback
+        )
+        if budget_fallback_only:
             extra_skips.append("cap")
         requested = (request.intent.requested_pattern if request.intent else None) or None
         if requested and not any(
@@ -301,8 +331,7 @@ class PydanticAiRunner:
         ):
             extra_skips.append("unsupported_pattern")
         skipped, skipped_count = aggregate_skipped(dropped, extra=extra_skips or None)
-        budget_fallback = bool((current_plan.meta or {}).get("intent_budget_fallback"))
-        if budget_fallback:
+        if budget_fallback_only:
             yield (
                 "text",
                 {
@@ -354,8 +383,8 @@ class PydanticAiRunner:
                 "intent_check": intent_check,
             }
         )
-        if llm_output is not None:
-            analysis_payload["summary_direction"] = llm_output.summary_direction
+        if stream_summary_direction is not None:
+            analysis_payload["summary_direction"] = stream_summary_direction
         yield "analysis", analysis_payload
         if valid_shapes:
             names = ", ".join(str(s.get("name", "?")) for s in valid_shapes[:5])
@@ -371,6 +400,10 @@ class PydanticAiRunner:
                     {"delta": f"\n\nĐã bỏ qua {len(dropped_marker_ids)} marker không hợp lệ."},
                 )
             yield "markers", {"markers": valid_markers}
+
+        final_meta = dict(current_plan.meta or {})
+        if final_meta.get("validator_fallback") or final_meta.get("intent_budget_fallback"):
+            yield "meta", final_meta
 
         yield "done", {}
 
@@ -430,7 +463,7 @@ def _build_user_prompt(
     if structured_output_mode == "text_json":
         json_hint = (
             "OUTPUT: Reply with one JSON object for AnalyzeResultLlm "
-            "(summary, drawing_intents[], markers[]). "
+            "(pick_notes[], drawing_intents[], markers[]). "
             "You may wrap it in ```json fences. No tool calls.\n"
         )
     return (
