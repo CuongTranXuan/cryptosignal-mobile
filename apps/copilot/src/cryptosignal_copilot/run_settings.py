@@ -4,6 +4,7 @@ from typing import cast
 
 from pydantic_ai.settings import ModelSettings, ThinkingLevel
 
+from cryptosignal_copilot.llm_provider import gemini_table_reasoning_efforts
 from cryptosignal_copilot.model_catalog import NormalizedModel
 
 
@@ -11,11 +12,29 @@ def build_run_model_settings(
     model: NormalizedModel,
     *,
     reasoning_effort: str | None = None,
+    provider_id: str = "generic",
 ) -> tuple[ModelSettings, str | None]:
     """Map spec §2.3 to pydantic-ai `ModelSettings` (unified `thinking` field)."""
     max_tokens = model.request_max_tokens
     effort = reasoning_effort
     routes = dict(model.effort_routes)
+
+    if provider_id == "gemini":
+        gemini_efforts = gemini_table_reasoning_efforts(model.id)
+        if not gemini_efforts:
+            return {"max_tokens": max_tokens}, None
+        effort = reasoning_effort or "low"
+        if effort == "none" and "none" not in gemini_efforts:
+            effort = "low"
+        if effort not in gemini_efforts:
+            effort = gemini_efforts[0]
+        return (
+            cast(
+                ModelSettings,
+                {"max_tokens": max_tokens, "openai_reasoning_effort": effort},
+            ),
+            effort,
+        )
 
     if not model.supports_reasoning or not model.reasoning_efforts:
         return {"max_tokens": model.request_max_tokens}, None

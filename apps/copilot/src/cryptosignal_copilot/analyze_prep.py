@@ -16,6 +16,7 @@ from cryptosignal_copilot.config import LlmConfig, load_default_candle_count
 from cryptosignal_copilot.features import build_feature_sheet
 from cryptosignal_copilot.intent_prep import build_intent_check, validate_analyze_intent
 from cryptosignal_copilot.intent_step import candidate_id_list_for_prompt, rules_first_step
+from cryptosignal_copilot.llm_provider import detect_llm_provider
 from cryptosignal_copilot.model_catalog import ModelNotFoundError, ModelsCatalog, NormalizedModel
 from cryptosignal_copilot.model_routes import resolve_provider_model_id
 from cryptosignal_copilot.prep_errors import AnalyzePrepError
@@ -136,13 +137,15 @@ async def prepare_analyze(
     compact_chars = len(
         json.dumps(feature_sheet, separators=(",", ":"))
     ) + estimate_prompt_candle_chars(trimmed, compact=True)
+    provider_id = detect_llm_provider(cfg)
     settings, effort = build_run_model_settings(
         model,
         reasoning_effort=request.reasoning_effort,
+        provider_id=provider_id,
     )
     meta = {
         "model": model_id,
-        "provider_model_id": resolve_provider_model_id(model, effort),
+        "provider_model_id": resolve_provider_model_id(model, effort, cfg=cfg),
         "candle_count_requested": request.candle_count,
         "candle_count_used": used,
         "clamped": clamped,
@@ -152,6 +155,7 @@ async def prepare_analyze(
         "intent": intent.model_dump(),
         "intent_check": build_intent_check(request, intent),
         "intent_source": step.intent_source,
+        "llm_provider": provider_id,
         "feature_sheet": feature_sheet,
         "candidates": candidate_id_list_for_prompt(candidate_catalog, intent),
         "prompt_candle_chars_legacy": legacy_chars,
@@ -180,7 +184,12 @@ def retry_plan(plan: AnalyzePlan) -> AnalyzePlan | None:
         return None
     trimmed = trim_request_candles(plan.request, prev)
     effort = lower_reasoning_effort(plan.reasoning_effort, plan.model)
-    settings, resolved_effort = build_run_model_settings(plan.model, reasoning_effort=effort)
+    provider_id = str(plan.meta.get("llm_provider") or "generic")
+    settings, resolved_effort = build_run_model_settings(
+        plan.model,
+        reasoning_effort=effort,
+        provider_id=provider_id,
+    )
     meta = dict(plan.meta)
     meta.update(
         {

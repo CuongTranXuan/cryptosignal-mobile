@@ -20,6 +20,7 @@ from cryptosignal_copilot.config import (
     load_models_cache_ttl_s,
     load_models_fetch_timeout_s,
 )
+from cryptosignal_copilot.llm_provider import detect_llm_provider, normalize_gemini_catalog_id
 from cryptosignal_copilot.model_availability import filter_available_models
 from cryptosignal_copilot.model_negative_cache import get_model_negative_cache
 from cryptosignal_copilot.model_overrides import match_model_override
@@ -46,7 +47,24 @@ _TABLE: list[tuple[re.Pattern[str], int, int, bool, list[str] | None]] = [
     (re.compile(r"gpt-4o|gpt-4\.1", re.I), 128_000, 16_384, False, None),
     (re.compile(r"o[134]|gpt-5", re.I), 200_000, 100_000, True, ["low", "medium", "high"]),
     (re.compile(r"claude-", re.I), 200_000, 64_000, True, None),
-    (re.compile(r"gemini-2\.5", re.I), 1_000_000, 65_536, True, None),
+    (re.compile(r"gemini-2\.5-pro", re.I), 1_048_576, 65_536, True, ["low", "medium", "high"]),
+    (
+        re.compile(r"gemini-2\.5-flash-lite", re.I),
+        1_048_576,
+        65_536,
+        True,
+        ["none", "low", "medium", "high"],
+    ),
+    (
+        re.compile(r"gemini-2\.5-flash", re.I),
+        1_048_576,
+        65_536,
+        True,
+        ["none", "low", "medium", "high"],
+    ),
+    (re.compile(r"gemini-2\.5", re.I), 1_048_576, 65_536, True, ["none", "low", "medium", "high"]),
+    (re.compile(r"gemini-3", re.I), 1_048_576, 65_536, True, ["low", "medium", "high"]),
+    (re.compile(r"gemini-2\.0", re.I), 1_048_576, 8_192, False, None),
 ]
 
 _REASONING_CAP = 16_384
@@ -384,7 +402,17 @@ async def default_fetch_models(cfg: LlmConfig) -> list[dict[str, Any]]:
     data = body.get("data") if isinstance(body, dict) else None
     if not isinstance(data, list):
         return []
-    return [item for item in data if isinstance(item, dict) and isinstance(item.get("id"), str)]
+    rows = [item for item in data if isinstance(item, dict) and isinstance(item.get("id"), str)]
+    if detect_llm_provider(cfg) == "gemini":
+        normalized: list[dict[str, Any]] = []
+        for row in rows:
+            item = dict(row)
+            item["id"] = normalize_gemini_catalog_id(str(item["id"]))
+            if not item.get("owned_by"):
+                item["owned_by"] = "google"
+            normalized.append(item)
+        return normalized
+    return rows
 
 
 def snapshot_from_rows(

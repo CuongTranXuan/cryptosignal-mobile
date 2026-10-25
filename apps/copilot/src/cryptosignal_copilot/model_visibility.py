@@ -4,6 +4,7 @@ import re
 from typing import Any
 
 from cryptosignal_copilot.env_parse import parse_csv_env
+from cryptosignal_copilot.llm_provider import normalize_provider_model_id
 from cryptosignal_copilot.model_overrides import apply_id_prefix_aliases, match_model_override
 
 # Re-export for availability layer
@@ -36,7 +37,16 @@ def load_visibility_allowlist() -> tuple[str, ...]:
 
 
 def normalize_upstream_model_id(model_id: str) -> str:
-    return apply_id_prefix_aliases(model_id)
+    import os
+
+    out = apply_id_prefix_aliases(model_id)
+    provider = os.environ.get("LLM_PROVIDER", "").strip().lower()
+    if provider == "gemini":
+        return normalize_provider_model_id(out, "gemini")
+    base = os.environ.get("LLM_BASE_URL", "")
+    if "generativelanguage.googleapis.com" in base:
+        return normalize_provider_model_id(out, "gemini")
+    return out
 
 
 def _row_modality(row: dict[str, Any]) -> str | None:

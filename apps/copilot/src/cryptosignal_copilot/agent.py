@@ -119,6 +119,7 @@ class PydanticAiRunner:
                 provider_model_id = resolve_provider_model_id(
                     current_plan.model,
                     current_plan.reasoning_effort,
+                    cfg=cfg,
                 )
                 model = build_model(cfg, provider_model_id)
                 output_type = build_agent_output_type(current_plan.model)
