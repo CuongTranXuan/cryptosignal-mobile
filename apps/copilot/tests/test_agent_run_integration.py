@@ -8,12 +8,12 @@ from cryptosignal_copilot.agent import INSTRUCTIONS
 from cryptosignal_copilot.agent_output import build_agent_output_type, output_retries_for_model
 from cryptosignal_copilot.model_catalog import normalize_model_row
 from cryptosignal_copilot.run_settings import build_run_model_settings
-from cryptosignal_copilot.schema import AnalyzeResult
+from cryptosignal_copilot.drawing_intent import AnalyzeResultLlm
 
-_VALID_JSON = json.dumps({"summary": "Phân tích ngắn", "shapes": [], "markers": []})
+_VALID_JSON = json.dumps({"summary": "Phân tích ngắn", "drawing_intents": [], "markers": []})
 
 
-async def _run_with_test_model(catalog_model, custom_output_text: str) -> AnalyzeResult:
+async def _run_with_test_model(catalog_model, custom_output_text: str) -> AnalyzeResultLlm:
     test_model = TestModel(call_tools=[], custom_output_text=custom_output_text)
     settings, _ = build_run_model_settings(catalog_model)
     agent = Agent(
@@ -23,7 +23,7 @@ async def _run_with_test_model(catalog_model, custom_output_text: str) -> Analyz
         retries={"output": output_retries_for_model(catalog_model)},
     )
     result = await agent.run("analyze", model_settings=settings)
-    assert isinstance(result.output, AnalyzeResult)
+    assert isinstance(result.output, AnalyzeResultLlm)
     return result.output
 
 

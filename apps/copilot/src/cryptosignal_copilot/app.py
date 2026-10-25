@@ -12,6 +12,7 @@ from pydantic import ValidationError
 
 from cryptosignal_copilot.agent import AgentRunner, PydanticAiRunner
 from cryptosignal_copilot.analyze_prep import AnalyzePrepError, prepare_analyze
+from cryptosignal_copilot.chart_styles import list_styles_payload
 from cryptosignal_copilot.config import (
     LlmConfigError,
     health_payload,
@@ -19,12 +20,18 @@ from cryptosignal_copilot.config import (
     validate_llm_env_on_startup,
 )
 from cryptosignal_copilot.db.migrate import run_db_migrations
+from cryptosignal_copilot.feedback_store import FeedbackStore, get_feedback_store
 from cryptosignal_copilot.intent_prep import normalize_session_intent, resolve_analyze_intent
 from cryptosignal_copilot.logging_setup import configure_logging
 from cryptosignal_copilot.model_catalog import ModelsCatalog, get_models_catalog
 from cryptosignal_copilot.provider_errors import error_payload
 from cryptosignal_copilot.rate_limit import SlidingWindowRateLimiter, client_ip
-from cryptosignal_copilot.schema import AnalyzeRequest, CreateSessionRequest, UpdateSessionRequest
+from cryptosignal_copilot.schema import (
+    AnalyzeRequest,
+    CreateSessionRequest,
+    FeedbackAction,
+    UpdateSessionRequest,
+)
 from cryptosignal_copilot.sessions_store import (
     SessionNotFoundError,
     SessionsStore,
@@ -54,6 +61,7 @@ def create_app(
     *,
     models_catalog: ModelsCatalog | None = None,
     sessions_store: SessionsStore | None = None,
+    feedback_store: FeedbackStore | None = None,
 ) -> FastAPI:
     use_runner: AgentRunner = runner if runner is not None else PydanticAiRunner()
     app = FastAPI()
@@ -69,6 +77,7 @@ def create_app(
     rate_limiter = SlidingWindowRateLimiter()
     catalog = models_catalog if models_catalog is not None else get_models_catalog()
     store = sessions_store if sessions_store is not None else get_sessions_store()
+    feedback = feedback_store if feedback_store is not None else get_feedback_store()
 
     state_lock = asyncio.Lock()
     latest_request: dict[str, AnalyzeRequest | None] = {"value": None}
@@ -112,6 +121,26 @@ def create_app(
         body = snapshot.to_api_dict()
         body["models"] = [m.to_api_dict() for m in models]
         return body
+
+    @app.get("/v1/copilot/styles")
+    async def list_styles():
+        return list_styles_payload()
+
+    @app.post("/v1/copilot/feedback")
+    async def post_feedback(body: FeedbackAction):
+        try:
+            row_id = await asyncio.to_thread(feedback.create, body)
+        except Exception as exc:
+            return JSONResponse(
+                error_payload("feedback_failed", "Không lưu được phản hồi", str(exc)),
+                status_code=500,
+            )
+        return JSONResponse({"id": row_id}, status_code=201)
+
+    @app.get("/v1/copilot/feedback/export")
+    async def export_feedback(limit: int = Query(default=5000, ge=1, le=20000)):
+        rows = await asyncio.to_thread(feedback.export_rows, limit)
+        return {"rows": rows}
 
     @app.get("/v1/copilot/sessions")
     async def list_sessions():

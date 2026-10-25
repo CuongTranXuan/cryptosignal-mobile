@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 
+from cryptosignal_copilot.drawing_intent import AnalyzeResultLlm
 from cryptosignal_copilot.schema import AnalyzeResult
 
 _FENCE_RE = re.compile(r"```(?:json)?\s*([\s\S]*?)\s*```", re.IGNORECASE)
@@ -19,6 +20,19 @@ def extract_json_text(raw: str) -> str:
     if start != -1 and end > start:
         return text[start : end + 1]
     return text
+
+
+def parse_analyze_result_llm_text(raw: str) -> AnalyzeResultLlm:
+    """Parse id-based LLM output from plain-text (cursor text_json style)."""
+    payload = json.loads(extract_json_text(raw))
+    if "drawing_intents" in payload or "shapes" not in payload:
+        return AnalyzeResultLlm.model_validate(payload)
+    # Legacy fallback: map shapes-only payloads to empty intents (resolved elsewhere).
+    return AnalyzeResultLlm(
+        summary=str(payload.get("summary", "")),
+        drawing_intents=[],
+        markers=list(payload.get("markers") or []),
+    )
 
 
 def parse_analyze_result_text(raw: str) -> AnalyzeResult:

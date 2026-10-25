@@ -2,40 +2,20 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
+from cryptosignal_copilot.candidates import CLASSIC_PATTERNS, PATTERNS_WITH_DETECTORS, SMC_PATTERNS
+
 ChartStyleId = Literal["classic", "smc", "elliott", "wyckoff"]
 ChartBias = Literal["bullish", "bearish", "neutral"]
 
-# Patterns with an implemented or stub detector hook in this branch.
 _STYLE_PATTERNS: dict[str, tuple[str, ...]] = {
-    "classic": (
-        "head_and_shoulders",
-        "inverse_head_and_shoulders",
-        "double_top",
-        "double_bottom",
-        "ascending_triangle",
-        "descending_triangle",
-        "symmetrical_triangle",
-        "channel_up",
-        "channel_down",
-        "trendline",
-        "support_resistance",
-        "fib_retracement",
-    ),
-    "smc": (
-        "bos",
-        "choch",
-        "fvg",
-        "order_block",
-        "liquidity",
-    ),
+    "classic": tuple(sorted(CLASSIC_PATTERNS)),
+    "smc": tuple(sorted(SMC_PATTERNS)),
     "elliott": (),
     "wyckoff": (),
 }
 
 ALL_STYLES: frozenset[str] = frozenset(_STYLE_PATTERNS)
-ALL_PATTERNS: frozenset[str] = frozenset(
-    pattern for patterns in _STYLE_PATTERNS.values() for pattern in patterns
-)
+ALL_PATTERNS: frozenset[str] = PATTERNS_WITH_DETECTORS
 
 
 def list_styles_payload() -> dict[str, Any]:

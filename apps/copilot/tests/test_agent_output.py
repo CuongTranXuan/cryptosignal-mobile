@@ -1,5 +1,6 @@
 from cryptosignal_copilot.agent_output import build_agent_output_type
 from cryptosignal_copilot.model_catalog import normalize_model_row
+from cryptosignal_copilot.drawing_intent import AnalyzeResultLlm
 from pydantic_ai.output import PromptedOutput, TextOutput
 
 

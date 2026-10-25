@@ -14,6 +14,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol, assert_never
 
+from cryptosignal_copilot.features import Swing
+from cryptosignal_copilot.features import fractal_swings as _fractal_swings
+from cryptosignal_copilot.features import wilder_atr as _wilder_atr
+
 logger = logging.getLogger(__name__)
 
 IntervalName = Literal["1m", "15m", "1h", "4h", "1d"]
@@ -79,14 +83,6 @@ class DrawingWindow:
 
 
 @dataclass(frozen=True)
-class Swing:
-    index: int
-    time: int
-    price: float
-    side: SwingSide
-
-
-@dataclass(frozen=True)
 class _GateContext:
     candles: list[CandleLike]
     interval: IntervalName
@@ -113,17 +109,6 @@ def bar_seconds(interval: IntervalName) -> int:
             return 4 * 60 * 60
         case "1d":
             return 24 * 60 * 60
-        case _ as unreachable:
-            assert_never(unreachable)
-
-
-def fractal_radius(interval: IntervalName) -> int:
-    """Williams fractal radius: K=2 on 1m/15m, K=3 on 1h and higher."""
-    match interval:
-        case "1m" | "15m":
-            return 2
-        case "1h" | "4h" | "1d":
-            return 3
         case _ as unreachable:
             assert_never(unreachable)
 
@@ -655,60 +640,6 @@ def _is_ancient(touch_time: int, ctx: _GateContext) -> bool:
     return (touch_time - start) / span < ANCIENT_FRACTION
 
 
-def _fractal_swings(candles: list[CandleLike], interval: IntervalName) -> list[Swing]:
-    radius = fractal_radius(interval)
-    count = len(candles)
-    found: list[Swing] = []
-    if count < 2 * radius + 1:
-        return []
-    for index in range(radius, count - radius):
-        high = float(candles[index].high)
-        low = float(candles[index].low)
-        left = candles[index - radius : index]
-        right = candles[index + 1 : index + radius + 1]
-        if high > max(float(candle.high) for candle in left) and high > max(
-            float(candle.high) for candle in right
-        ):
-            found.append(Swing(index, int(candles[index].time), high, "high"))
-        if low < min(float(candle.low) for candle in left) and low < min(
-            float(candle.low) for candle in right
-        ):
-            found.append(Swing(index, int(candles[index].time), low, "low"))
-    found.extend(_provisional_edge_swings(candles, radius))
-    highs = _thin_swings([swing for swing in found if swing.side == "high"])
-    lows = _thin_swings([swing for swing in found if swing.side == "low"])
-    return sorted(highs + lows, key=lambda swing: (swing.index, 0 if swing.side == "high" else 1))
-
-
-def _provisional_edge_swings(candles: list[CandleLike], radius: int) -> list[Swing]:
-    """Right-edge wick extreme when K bars do not yet exist on the open side.
-
-    Full fractal confirmation is skipped only on the unfinished side. The point
-    must still be the high or the low of the bars that do exist (this candle's
-    wick versus the other edge bars and the left neighborhood). A mid-body
-    price never becomes a swing; `_anchor_swing` rejects it as non-wick.
-    """
-    count = len(candles)
-    if count < radius + 1:
-        return []
-    region_start = max(radius, count - radius)
-    if region_start >= count:
-        return []
-    region = range(region_start, count)
-    found: list[Swing] = []
-    high_index = max(region, key=lambda index: float(candles[index].high))
-    high = float(candles[high_index].high)
-    left = candles[high_index - radius : high_index]
-    if left and high > max(float(candle.high) for candle in left):
-        found.append(Swing(high_index, int(candles[high_index].time), high, "high"))
-    low_index = min(region, key=lambda index: float(candles[index].low))
-    low = float(candles[low_index].low)
-    left_low = candles[low_index - radius : low_index]
-    if left_low and low < min(float(candle.low) for candle in left_low):
-        found.append(Swing(low_index, int(candles[low_index].time), low, "low"))
-    return found
-
-
 def _price_inside_bar(price: float, candle: CandleLike) -> bool:
     return float(candle.low) - 1e-8 <= price <= float(candle.high) + 1e-8
 
@@ -720,45 +651,6 @@ def _price_on_wick(price: float, candle: CandleLike, tolerance: float) -> bool:
     band = tolerance if span <= 0 else min(tolerance, 0.35 * span)
     band = max(band, 1e-8)
     return abs(price - high) <= band or abs(price - low) <= band
-
-
-def _thin_swings(swings: list[Swing]) -> list[Swing]:
-    ordered = sorted(swings, key=lambda swing: swing.index)
-    kept: list[Swing] = []
-    for swing in ordered:
-        if not kept or swing.index - kept[-1].index >= SWING_MIN_BARS_APART:
-            kept.append(swing)
-            continue
-        if _more_extreme(swing, kept[-1]):
-            kept[-1] = swing
-    return kept
-
-
-def _more_extreme(candidate: Swing, incumbent: Swing) -> bool:
-    if candidate.side == "high":
-        return candidate.price > incumbent.price
-    return candidate.price < incumbent.price
-
-
-def _wilder_atr(candles: Sequence[CandleLike], period: int) -> float | None:
-    if len(candles) < 2:
-        return None
-    true_ranges: list[float] = []
-    for index, candle in enumerate(candles):
-        high_low = float(candle.high) - float(candle.low)
-        if index == 0:
-            true_ranges.append(high_low)
-            continue
-        prev_close = float(candles[index - 1].close)
-        true_ranges.append(
-            max(high_low, abs(float(candle.high) - prev_close), abs(float(candle.low) - prev_close))
-        )
-    if len(true_ranges) < period:
-        return sum(true_ranges) / len(true_ranges)
-    atr = sum(true_ranges[:period]) / period
-    for true_range in true_ranges[period:]:
-        atr = (atr * (period - 1) + true_range) / period
-    return atr
 
 
 def _price_tolerance(candles: Sequence[CandleLike], atr: float | None) -> float:

@@ -9,6 +9,7 @@ from pydantic_ai import Agent
 from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError, UnexpectedModelBehavior
 
 from cryptosignal_copilot.agent_output import build_agent_output_type, output_retries_for_model
+from cryptosignal_copilot.agent_validate import attach_drawing_intent_validator
 from cryptosignal_copilot.analyze_prep import AnalyzePlan, retry_plan
 from cryptosignal_copilot.chart_response import aggregate_skipped, enrich_shapes_with_guardrails
 from cryptosignal_copilot.config import load_llm_config
@@ -18,10 +19,16 @@ from cryptosignal_copilot.drawing_gate import (
     effective_project_bars,
     format_drop_note,
 )
+from cryptosignal_copilot.drawing_intent import (
+    AnalyzeResultLlm,
+    enrich_resolved_shapes,
+    resolve_drawing_intents,
+)
 from cryptosignal_copilot.env_parse import env_flag
 from cryptosignal_copilot.model_factory import build_model
 from cryptosignal_copilot.model_negative_cache import get_model_negative_cache
 from cryptosignal_copilot.model_routes import resolve_provider_model_id, strip_thinking_when_routed
+from cryptosignal_copilot.prompt_context import build_prompt_context
 from cryptosignal_copilot.provider_errors import (
     EMPTY_MODEL_OUTPUT_MSG,
     error_payload,
@@ -46,80 +53,16 @@ from cryptosignal_copilot.schema import (
 # get_klines arrives as tools[0].type=custom; agentrouter then 400s with unknown
 # variant `custom` (expected web_search_*). Keep tools:[] — analyze with closedCandles only.
 INSTRUCTIONS = (
-    "You are a crypto chart research assistant. Analyze only closed candles. "
-    "LANGUAGE: Write `summary` and chat-facing text in Vietnamese by default. "
-    "Do not reply in English unless the user explicitly asks for English. "
-    "Keep JSON/schema field names in English exactly as required "
-    "(kind, name, PatternShape, AgentMarker, points, priceLow, priceHigh, side, etc.). "
-    "Default analysis/draw window is the visible chart range reflected in request from/to and "
-    "closedCandles. If the user defines another range (full history, last N days/weeks/bars, "
-    "from–to times, earlier/previous swing, etc.), use only the provided closedCandles and "
-    "from/to for that named range when those candles cover it — do not hard-lock every "
-    "request to the viewport, and do not claim or call any klines/history tool "
-    "(none is registered). "
-    "When the prompt mentions the visible window / this window / viewport and does not name "
-    "another range, keep historical anchors inside the provided closedCandles set. "
-    "Always fill `summary` as a friendly chat reply (not a terse log): open with "
-    "what you see, name key levels/times, explain the pattern, say what you are drawing and why, "
-    "and end with a short takeaway. Use several short paragraphs. "
-    "Also return drawable PatternShape overlays (trendline/polyline/zone) whenever the "
-    "prompt asks for analysis or drawing — do not return text-only when shapes would help. "
-    "DRAW ONLY structure still in play. A swing is a fractal high or low "
-    "(K=2 on 1m and 15m, K=3 on 1h and higher), swings are at least 5 bars apart. "
-    "Pattern height (impulse A to B, or triangle high-to-low) must be at least "
-    "1.5xATR(14). A later touch on a compressing triangle may be shallower than that. "
-    "Drop anything whose last touch is in the oldest 35% of the window. "
-    "Trendline: exactly 2 points, both wick highs or both wick lows, span >= 8 bars. "
-    "Each rail is measured alone. A longer mate does not make a short rail valid. "
-    "Do not set confidence above 0.7 unless a 3rd touch exists. "
-    "Channel: two parallel trendlines. The base needs 2 touches; anchor the return "
-    "on 2 wick swings as well, because a single-touch diagonal is dropped. "
-    "Triangle: at least 2 highs and 2 lows (prefer 3 and 2), duration >= 15 bars, "
-    "and EACH rail's two defining wick anchors must themselves span >= 15 bars "
-    "(the >= 8 bars floor still applies to every rail). "
-    "A flat top whose highs are only a few bars apart is dropped as min-span — "
-    "widen it to an earlier equal high when one exists. "
-    "Drawn as TWO trendlines whose names contain 'upper' and 'lower' — not a polyline. "
-    "Ascending = flat top + rising lows; descending = flat bottom + falling highs; "
-    "symmetrical = both slopes converging. "
-    "No fib kind. Fib is one impulse trendline A to B, plus horizontal trendlines named "
-    "exactly `Fib 0.382`, `Fib 0.5`, `Fib 0.618` (equal prices on both points), "
-    "plus one zone named `Fib pocket 0.5–0.618`. "
-    "Uptrend retracement = B - (B-A)*ratio. Extensions `Fib 1.272` and `Fib 1.618` "
-    "only after a C pivot, at C + (B-A)*ratio. Mirror the ratio from B back toward A "
-    "when the impulse is down. "
-    "Emit at most 6 shapes. Minimum confidence is 0.55. "
-    "Reject single-touch lines, near-vertical slopes, completed ancient patterns, "
-    "and anchors that are not wick highs or lows. "
-    "Historical points must use the fractal candle's unix time and that candle's wick "
-    "high or low — a mid-body price is dropped as non-wick. "
-    "The active right-edge swing may skip full K confirmation on its open side, "
-    "but the anchor must be the wick high or low of the bars that exist there, "
-    "never a mid-body price. "
-    "Emit both triangle rails in the same response; a polyline whose name says triangle "
-    "is dropped, and a single triangle rail is dropped as unpaired. "
-    "Do not emit Fib 1.272 or Fib 1.618 unless the same response includes pivot C "
-    "as a wick point after impulse B. "
-    "You may describe invalidation as a close beyond the line by more than 0.25xATR(14). "
-    "When you state confidence, name the swing high/low times and prices used. "
-    "Do not claim entries, stops, or that a level will hold. "
-    "Historical anchor times MUST be exact unix seconds from closedCandles. "
-    "At most one forward endpoint per shape, and it must be the later point, "
-    "at lastClosedCandleTime + k*barSeconds for an integer k inside the stated maxProjectBars. "
-    "That forward point is geometry, not a candle. "
-    "k caps are a hard ceiling. For a triangle (upper and lower trendlines), also keep "
-    "the forward endpoint at or before the lines' intersection time plus 3*barSeconds; "
-    "the server computes that apex and drops later rays. Do not add an apexTime field. "
-    "Prefer emitting the future endpoint so the overlay can paint it. "
-    "Each shape MUST use fields id,symbol,interval,kind,name,status,source,confidence,points,priceLow,priceHigh "
-    "(kind is trendline|polyline|zone; source is agent; status is preview; priceLow/priceHigh null for lines). "
-    "Never use type/label/color instead of kind/name. Polyline needs >= 3 points and span >= 12 bars "
-    "(use trendline for 2; do not encode a triangle as a polyline). "
-    "Zones must include at least one closed-candle time point. "
-    "Optional AgentMarker point signals are a separate collection; AgentMarker.side is "
-    "signal direction (buy/sell/neutral), not an order. Never put side/quantity/apiKey on "
-    "PatternShape. Never place orders, never request API keys or secrets, never invent "
-    "OHLC or historical times — use only the OHLC in the provided closedCandles."
+    "You are a crypto chart assistant. Use ONLY closed candles and the server-built "
+    "feature sheet + candidate ids (geometry is precomputed). "
+    "LANGUAGE: Vietnamese for `summary` unless the user asks for English. "
+    "JSON field names stay English. No tools; no invented OHLC or times. "
+    "Return `summary` (friendly multi-paragraph chat) plus `drawing_intents`: "
+    "each item is {type:'candidate', candidate_id} referencing ids from the sheet "
+    "(or type:'pair' with two ids for a channel/triangle). Max 6 resolved shapes. "
+    "Optional `markers` for point signals (AgentMarker schema). "
+    "Do not emit raw PatternShape geometry — ids only. "
+    "Do not promise entries, stops, or that levels will hold."
 )
 
 logger = logging.getLogger(__name__)
@@ -139,8 +82,11 @@ class PydanticAiRunner:
         # No @agent.tool_plain tools: OmniRoute 2026-09-19 rejects custom-tool variant
         # (get_klines → type=custom → agentrouter 400). Requests must send tools:[].
 
+        step = plan.intent_step
+        catalog = plan.candidate_catalog
         prompt = _build_user_prompt(
             request,
+            plan=plan,
             structured_output_mode=plan.model.structured_output_mode,
         )
         yield (
@@ -153,83 +99,105 @@ class PydanticAiRunner:
             },
         )
 
+        if step is not None and catalog is not None and not step.use_llm:
+            summary = (
+                f"Phát hiện {request.symbol} {request.interval}: "
+                f"chế độ {catalog.regime}, chọn mẫu theo quy tắc (không gọi LLM)."
+            )
+            yield "text", {"delta": summary + "\n\n"}
+            raw_shapes = list(step.rule_shapes)
+            output_markers: list[dict] = []
+        else:
+            raw_shapes = None
+            output_markers = None
+
         current_plan = plan
-        result = None
-        for attempt in range(2):
-            provider_model_id = resolve_provider_model_id(
-                current_plan.model,
-                current_plan.reasoning_effort,
-            )
-            model = build_model(cfg, provider_model_id)
-            output_type = build_agent_output_type(current_plan.model)
-            agent = Agent(
-                model,
-                output_type=output_type,
-                instructions=INSTRUCTIONS,
-                retries={"output": output_retries_for_model(current_plan.model)},
-            )
-            run_settings = strip_thinking_when_routed(
-                current_plan.model,
-                current_plan.reasoning_effort,
-                dict(current_plan.model_settings),
-            )
-            try:
-                result = await agent.run(prompt, model_settings=run_settings)
-                break
-            except UnexpectedModelBehavior as exc:
-                if attempt == 0:
-                    next_plan = retry_plan(current_plan)
-                    if next_plan is not None:
-                        current_plan = next_plan
-                        request = current_plan.request
-                        prompt = _build_user_prompt(
-                            request,
-                            structured_output_mode=current_plan.model.structured_output_mode,
-                        )
-                        yield "meta", current_plan.meta
-                        continue
-                yield "error", unexpected_model_behavior_payload(exc)
-                yield "done", {}
-                return
-            except ModelAPIError as exc:
-                yield "error", model_api_error_payload(exc)
-                yield "done", {}
-                return
-            except ModelHTTPError as exc:
-                status = getattr(exc, "status_code", None)
-                if status in {402, 502}:
-                    cache = get_model_negative_cache()
-                    cache.mark(provider_model_id)
-                    cache.mark(current_plan.model.id)
-                yield "error", model_http_error_payload(exc)
-                yield "done", {}
-                return
-            except Exception as exc:
-                logger.exception("copilot agent run failed")
-                detail = "unexpected agent failure"
-                if env_flag("COPILOT_EXPOSE_ERROR_DETAIL"):
-                    detail = f"{type(exc).__name__}: {exc}"[:500]
-                yield (
-                    "error",
-                    error_payload(
-                        "internal_error",
-                        "Lỗi nội bộ máy chủ Copilot",
-                        detail,
-                    ),
+        llm_output: AnalyzeResultLlm | None = None
+        if raw_shapes is None:
+            for attempt in range(2):
+                provider_model_id = resolve_provider_model_id(
+                    current_plan.model,
+                    current_plan.reasoning_effort,
                 )
+                model = build_model(cfg, provider_model_id)
+                output_type = build_agent_output_type(current_plan.model)
+                agent = Agent(
+                    model,
+                    output_type=output_type,
+                    instructions=INSTRUCTIONS,
+                    retries={"output": output_retries_for_model(current_plan.model)},
+                )
+                if catalog is not None:
+                    attach_drawing_intent_validator(agent, catalog)
+                run_settings = strip_thinking_when_routed(
+                    current_plan.model,
+                    current_plan.reasoning_effort,
+                    dict(current_plan.model_settings),
+                )
+                try:
+                    result = await agent.run(prompt, model_settings=run_settings)
+                    llm_output = result.output
+                    break
+                except UnexpectedModelBehavior as exc:
+                    if attempt == 0:
+                        next_plan = retry_plan(current_plan)
+                        if next_plan is not None:
+                            current_plan = next_plan
+                            request = current_plan.request
+                            catalog = current_plan.candidate_catalog
+                            prompt = _build_user_prompt(
+                                request,
+                                plan=current_plan,
+                                structured_output_mode=current_plan.model.structured_output_mode,
+                            )
+                            yield "meta", current_plan.meta
+                            continue
+                    yield "error", unexpected_model_behavior_payload(exc)
+                    yield "done", {}
+                    return
+                except ModelAPIError as exc:
+                    yield "error", model_api_error_payload(exc)
+                    yield "done", {}
+                    return
+                except ModelHTTPError as exc:
+                    status = getattr(exc, "status_code", None)
+                    if status in {402, 502}:
+                        cache = get_model_negative_cache()
+                        cache.mark(provider_model_id)
+                        cache.mark(current_plan.model.id)
+                    yield "error", model_http_error_payload(exc)
+                    yield "done", {}
+                    return
+                except Exception as exc:
+                    logger.exception("copilot agent run failed")
+                    detail = "unexpected agent failure"
+                    if env_flag("COPILOT_EXPOSE_ERROR_DETAIL"):
+                        detail = f"{type(exc).__name__}: {exc}"[:500]
+                    yield (
+                        "error",
+                        error_payload(
+                            "internal_error",
+                            "Lỗi nội bộ máy chủ Copilot",
+                            detail,
+                        ),
+                    )
+                    yield "done", {}
+                    return
+            else:
+                yield "error", error_payload("empty_model_output", EMPTY_MODEL_OUTPUT_MSG)
                 yield "done", {}
                 return
 
-        if result is None:
-            yield "error", error_payload("empty_model_output", EMPTY_MODEL_OUTPUT_MSG)
-            yield "done", {}
-            return
-
-        yield "text", {"delta": "Mô hình đã xong. Đang dựng lớp phủ…"}
-
-        output = result.output
-        if output.summary:
-            yield "text", {"delta": "\n\n" + output.summary}
+            yield "text", {"delta": "Mô hình đã xong. Đang dựng lớp phủ…"}
+            if llm_output and llm_output.summary:
+                yield "text", {"delta": "\n\n" + llm_output.summary}
+            if catalog is not None and llm_output is not None:
+                raw_shapes, _ = resolve_drawing_intents(llm_output.drawing_intents, catalog)
+                raw_shapes = enrich_resolved_shapes(raw_shapes, catalog)
+                output_markers = list(llm_output.markers)
+            else:
+                raw_shapes = []
+                output_markers = []
 
         allowed_times = {c.time for c in request.closedCandles}
         window = DrawingWindow(
@@ -239,7 +207,7 @@ class PydanticAiRunner:
             allowed_times=allowed_times,
         )
         valid_shapes, dropped = filter_preview_details(
-            output.shapes,
+            raw_shapes or [],
             allowed_times,
             symbol=request.symbol,
             interval=request.interval,
@@ -280,7 +248,7 @@ class PydanticAiRunner:
             more = f" (+{len(valid_shapes) - 5} nữa)" if len(valid_shapes) > 5 else ""
             yield "text", {"delta": f"\n\nLớp phủ sẵn sàng: {len(valid_shapes)} — {names}{more}."}
 
-        merged_markers = list(output.markers) + drawing_anchors
+        merged_markers = list(output_markers or []) + drawing_anchors
         if merged_markers:
             valid_markers, dropped_marker_ids = filter_agent_markers(merged_markers, allowed_times)
             if dropped_marker_ids:
@@ -319,45 +287,44 @@ def _projection_note(request: AnalyzeRequest) -> str:
     )
 
 
-def compact_candle_rows(request: AnalyzeRequest) -> list[list[float]]:
-    return [[c.time, c.open, c.high, c.low, c.close, c.volume] for c in request.closedCandles]
-
-
-def request_payload_for_prompt(request: AnalyzeRequest) -> dict:
-    payload = request.model_dump(by_alias=True)
-    payload["closedCandles"] = compact_candle_rows(request)
-    return payload
-
-
 def estimate_prompt_candle_chars(request: AnalyzeRequest, *, compact: bool) -> int:
-    if compact:
-        payload = request_payload_for_prompt(request)
-    else:
-        payload = request.model_dump(by_alias=True)
-    return len(json.dumps(payload["closedCandles"], separators=(",", ":")))
+    from cryptosignal_copilot.prompt_context import estimate_prompt_candle_chars as _est
+
+    return _est(request, compact=compact)
 
 
 def _build_user_prompt(
     request: AnalyzeRequest,
     *,
+    plan: AnalyzePlan,
     structured_output_mode: str = "prompted",
 ) -> str:
-    payload = request_payload_for_prompt(request)
+    meta = plan.meta or {}
+    feature_sheet = meta.get("feature_sheet") or {}
+    candidates = meta.get("candidates") or []
+    style_slice = ""
+    if plan.intent_step is not None:
+        style_slice = plan.intent_step.prompt_slice
+    ctx = build_prompt_context(
+        request,
+        feature_sheet=feature_sheet,
+        candidates=candidates,
+        style_slice=style_slice,
+    )
     n = len(request.closedCandles)
     json_hint = ""
     if structured_output_mode == "text_json":
         json_hint = (
-            "OUTPUT: Reply with one JSON object for AnalyzeResult only "
-            "(you may wrap it in ```json fences). No tool calls.\n"
+            "OUTPUT: Reply with one JSON object for AnalyzeResultLlm "
+            "(summary, drawing_intents[], markers[]). "
+            "You may wrap it in ```json fences. No tool calls.\n"
         )
     return (
         f"{json_hint}"
         f"Symbol={request.symbol} interval={request.interval}\n"
-        f"PRIMARY ANALYSIS WINDOW: from={request.from_} to={request.to} "
-        f"({n} closed candles). Analyze this window. "
-        f"Historical anchor times MUST be exact unix seconds from this closedCandles set. "
-        f"Prefer the most recent bars in the window when the user does not name another range.\n"
+        f"WINDOW from={request.from_} to={request.to} ({n} closed candles in store; "
+        f"recent tail + feature sheet below).\n"
         f"{_projection_note(request)}\n"
         f"User prompt: {request.prompt}\n"
-        f"Request JSON: {json.dumps(payload, separators=(',', ':'))}"
+        f"Context JSON: {json.dumps(ctx, separators=(',', ':'))}"
     )
