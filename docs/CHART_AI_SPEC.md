@@ -916,3 +916,52 @@ Add per-style top-6 runs through the real path, an "intent split = 0" assertion,
 - Fixed: #1, #2 (server side; see B1 for the wire), #3, #5, #6, #7, #8, #10, #11, #12, #19, #22, #23, #28, #29, #31, D4, D5, N1–N6, R1, R2, R3.
 - Partial: #4, #9, #13, #14, #15, #16, #17 (B4), #18 (B3, no separation), #20 (8/13 channels invalid), #21, #24, #30.
 - Open: #25, #26, #27, #32, D6.
+
+### C.8 Re-check at `eecc8169` (box, 2026-10-25, no LLM — Mac offline, so the end-to-end OmniRoute call was skipped)
+"Before" = `ffe28eb1`, "after" = `eecc8169`. Same 16 Binance windows; each source tree exported with `git archive`.
+- "Harness" = `run_real_path` with budget picks.
+- "LLM-like" = `simulate_llm_top_intents`, i.e. the top 6 by score with no budget.
+- Web check = every wire shape from both paths and both styles was run through the real `apps/web/lib/pattern-shape.ts` `PatternShapeSchema`, once raw and once after `coerceAgentShape`, with zod 3.25.76 + tsx on the box.
+
+| Metric | `ffe28eb1` | `eecc8169` |
+|---|---|---|
+| **Web Zod accepted / total** | 0 / 152 | **303 / 303** (harness classic 91/91, smc 59/59; LLM-like classic 94/94, smc 59/59) |
+| Raw / pre-filter removed | 162 / 7 | 145 / 11 (double_bottom `invalidated` 7, double_top `invalidated` 1, H&S `non-wick` 2, trendline 1) |
+| Harness classic: shapes in → out / gate / cap / split | 93 → 93 / 0 / 0 / 0 | 91 → 91 / 0 / 0 / 0 |
+| Harness classic: invalidation, evidence in → out | 26 → 26, 26 → 26 | 17 → 17, 17 → 17 |
+| Harness smc: shapes / gate / cap / split / invalidation | 59 / 0 / 0 / 0 / 36 → 36 | same |
+| LLM-like classic: over-budget windows / cap drops / split | 16 / 70 / 0 | 11 / 38 / 0. These picks now fail the validator (see B2), so they never reach the cap. |
+| Triangles (valid / found) | 9 / 9 | 9 / 9 |
+| Doubles (valid / found) | 18 / 20, 9 already failed | 10 / 10, 0 failed |
+| Channels (> 10 % closes outside / found) | 8 / 13 | 0 / 2 |
+| H&S + IHS reaching the wire | 0 | **0** |
+| Prompt context o200k (median, min–max) | 1 754 (1 381–2 040) | 1 628 (1 381–1 892) |
+| pytest / ruff check / ruff format | 142 / clean / 2 files | **147 passed, 1 skipped / clean / clean** |
+
+**Verdicts**
+- **B1 fixed.** `shapes_for_wire` (`wire_shape.py`) strips `_` keys; agent `shapes` event at `agent.py:266`. All 303 shapes pass. Caveat: `tests/test_wire_schema.py:48-63` returns early (counts as *passed*, not skipped) when `npx tsx` or the web deps are missing, so in an environment without them it checks nothing. Make it `pytest.skip`, or run it in web CI.
+- **B2 fixed.** Tested with a pydantic-ai `FunctionModel` on BTC 4h:
+  - An over-budget pick list (cost 9) followed by a valid one passes on call 2 (cost 5).
+  - Always over budget → `UnexpectedModelBehavior` after 3 calls. `agent.py:146-166` then retries with fewer candles, then calls `build_deterministic_fallback`, which costs ≤ 6.
+  - The post-run check (`agent.py:203-211`) is a second safety net.
+  - Cost: an LLM that keeps ignoring the budget takes up to 6 model calls before falling back.
+- **B3 fixed for families that carry `invalidation_price`.** Of fvg 27, bos 5, choch 4, double_top 7, double_bottom 3, S/R 7, none breached after their last anchor except **2 S/R zones** (ETH 1h 2417.8, ETH 4h 2407.6). Price broke through, and the zone keeps its original support/resistance role. This needs a role flip, not a drop. **Not covered:** trendline 31, liquidity 17, fib 16, order_block 6, triangles 9, channels 2 have no `invalidation_price`, so a broken trendline or triangle is not detected. Doubles are now ≥ 12 bars apart.
+- **B4 not working.** The detector now ends the neckline at the break bar or RS+3 and labels the pattern completed or unbroken. But the two LMW-valid H&S (ETH 4h, SOL 4h) are still removed, now as `non-wick`:
+  - The neckline ends at the break candle (`candidates.py:837-858`), and a close through the line almost always puts the line's price inside that candle's *body* (ETH 4h bar 92: O 2697 / C 2611, neck 2640).
+  - The gate rejects body anchors (`drawing_gate.py:518-526`). So a broken H&S or IHS can essentially never reach the UI.
+  - No test covers an H&S reaching the wire.
+  - Both patterns completed about 108 bars ago. Even when snapped, they should be shown as "completed" or dropped once older than N bars.
+  - Fix: end at the last bar *before* the break, or at the break candle's high/low; or exempt the neckline end from the wick rule.
+- **B5 fixed.** 2 channels, 0 closes outside, scored 0.875 (top pick in both windows). BNB 1h `channel_down` in a `range` regime has a slope of −0.018·ATR/bar and is 8·ATR wide, which is effectively a range. Consider labelling |slope| < 0.03·ATR/bar as a range/rectangle. Channels are no longer filler: 2 of 59 harness picks. Top classic picks: fib 4, symmetrical_triangle 3, double_top 3, channel_down 2, descending_triangle 2, S/R 1, double_bottom 1. Trendlines make up 24 of 59 picks.
+- **Gate / splits / guardrails: as claimed** (table).
+- **SSE `regime` / `analysis` events: present but partial.**
+  - `regime` is emitted *after* the LLM run (`agent.py:247`), not before as Part B §5 requires.
+  - `analysis.bias` echoes the **user's** bias (`agent.py:286`), not the detector regime; `evidence_for` and `evidence_against` are always `[]`, and `confidence` is `None` (`:284-293`).
+  - The web client ignores both events: `isSseEvent` allows only meta, text, shapes, markers, extendRange, skipped, error and done (`apps/web/lib/use-copilot.ts:199-209`).
+  - The budget fallback emits a second `meta` event, which re-appends the intent-check note in chat (`use-copilot.ts:212-217`).
+  - `aggregate_skipped(..., extra=["cap"])` is overwritten when a `requested_pattern` is missing (`agent.py:257` vs `:264`).
+
+**Part C status at `eecc8169`**
+- Fixed: #1–3, #5–8, #10–12, #19, #22, #23, #28, #29, #31, D4, D5, N1–N6, R1–R3, B1, B2, B5.
+- Partial: #4, #9, #13, #14, #15, #16, #17 (B4), #18 (role-flip/age), #20, #21, #24, #30, #32, B3 (families with no invalidation).
+- Open: #25, #26, #27, D6.
