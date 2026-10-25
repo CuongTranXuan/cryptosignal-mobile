@@ -5,6 +5,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from cryptosignal_copilot.drawing_gate import DrawingWindow, Drop, apply_preview_gate
+from cryptosignal_copilot.shape_sidecar import attach_sidecar, extract_sidecar
 
 logger = logging.getLogger(__name__)
 
@@ -641,6 +642,7 @@ def filter_preview_details(
     """
     staged: list[dict[str, Any]] = []
     dropped: list[Drop] = []
+    sidecars_by_id: dict[str, dict[str, Any]] = {}
     closed_times: set[int] | None = None
     if window is not None and window.candles:
         closed_times = {int(candle.time) for candle in window.candles}
@@ -655,6 +657,9 @@ def filter_preview_details(
             logger.info("schema reject field=shape msg=not an object")
             dropped.append(("?", "schema:shape"))
             continue
+        sidecar = extract_sidecar(data)
+        for key in sidecar:
+            data.pop(key, None)
         data = coerce_agent_shape(
             data,
             symbol=symbol or str(data.get("symbol") or ""),
@@ -668,6 +673,10 @@ def filter_preview_details(
             dropped.append((str(data.get("id", "?")), _schema_reason(exc)))
             continue
         dumped = _dump_omit_unset_agent_id(validated)
+        if sidecar:
+            sidecars_by_id[validated.id] = sidecar
+        if sidecar.get("_candidate_id"):
+            dumped["_candidate_id"] = sidecar["_candidate_id"]
         if window is None and allowed_times is not None:
             if any(point.time not in allowed_times for point in validated.points):
                 dropped.append((validated.id, "off-candle"))
@@ -678,7 +687,10 @@ def filter_preview_details(
     if allowed_times is not None and window.allowed_times is None:
         window = replace(window, allowed_times=set(allowed_times))
     gated, gate_dropped = apply_preview_gate(staged, window)
-    return gated, dropped + gate_dropped
+    restored = [
+        attach_sidecar(shape, sidecars_by_id.get(str(shape.get("id", "")), {})) for shape in gated
+    ]
+    return restored, dropped + gate_dropped
 
 
 def filter_agent_markers(

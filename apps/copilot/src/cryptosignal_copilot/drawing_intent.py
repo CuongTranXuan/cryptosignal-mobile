@@ -9,6 +9,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from cryptosignal_copilot.candidates import CandidateCatalog, DrawingCandidate, patterns_for_style
+from cryptosignal_copilot.drawing_gate import MAX_SHAPES
 
 CANDIDATE_ID_RE = re.compile(
     r"^(tl|zn|dt|db|tri|ch|hs|ihs|fib|bos|choch|fvg|ob|liq|sr)_[a-f0-9]{12}$"
@@ -198,15 +199,42 @@ def enrich_resolved_shapes(
     return enriched
 
 
+def fit_intents_to_shape_budget(
+    catalog: CandidateCatalog,
+    style: str,
+    *,
+    max_shapes: int = MAX_SHAPES,
+    max_intents: int = MAX_DRAWING_INTENTS,
+) -> list[DrawingIntent]:
+    """Pick top-scoring candidates that fit entirely within the preview shape cap."""
+    allowed = patterns_for_style(style)
+    pool = sorted(
+        [c for c in catalog.candidates if c.pattern_id in allowed],
+        key=lambda c: c.score,
+        reverse=True,
+    )
+    intents: list[DrawingIntent] = []
+    shape_count = 0
+    for cand in pool:
+        cost = len(cand.shapes)
+        if cost <= 0:
+            continue
+        if shape_count + cost > max_shapes:
+            continue
+        if len(intents) >= max_intents:
+            break
+        intents.append(CandidateDrawingIntent(candidate_id=cand.id))
+        shape_count += cost
+    return intents
+
+
 def deterministic_top_intents(
     catalog: CandidateCatalog,
     style: str,
     *,
     limit: int = MAX_DRAWING_INTENTS,
 ) -> list[DrawingIntent]:
-    allowed = patterns_for_style(style)
-    pool = [c for c in catalog.candidates if c.pattern_id in allowed]
-    return [CandidateDrawingIntent(candidate_id=c.id) for c in pool[:limit]]
+    return fit_intents_to_shape_budget(catalog, style, max_intents=limit)
 
 
 def build_deterministic_fallback(

@@ -870,6 +870,16 @@ def _triangle_structure_reason(
     return None
 
 
+def _same_candidate_id(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    left_id = left.get("_candidate_id")
+    right_id = right.get("_candidate_id")
+    if left_id and right_id:
+        return str(left_id) == str(right_id)
+    if left_id or right_id:
+        return False
+    return True
+
+
 def _candidate_triangle_pairs(
     shapes: list[dict[str, Any]],
     ctx: _GateContext,
@@ -877,22 +887,47 @@ def _candidate_triangle_pairs(
     trendlines = _pairable_trendlines(shapes)
     used: set[str] = set()
     pairs: list[tuple[dict[str, Any], dict[str, Any]]] = []
-    uppers = [shape for shape in trendlines if _role(str(shape.get("name", ""))) == "upper"]
-    lowers = [shape for shape in trendlines if _role(str(shape.get("name", ""))) == "lower"]
-    for upper in uppers:
-        for lower in lowers:
-            if _shape_id(upper) in used or _shape_id(lower) in used:
+    has_intent_ids = any(shape.get("_candidate_id") for shape in trendlines)
+    if has_intent_ids:
+        by_intent: dict[str, list[dict[str, Any]]] = {}
+        for shape in trendlines:
+            intent_id = str(shape.get("_candidate_id") or "")
+            if not intent_id:
                 continue
-            pairs.append((upper, lower))
-            used.add(_shape_id(upper))
-            used.add(_shape_id(lower))
-            break
-    remaining = [shape for shape in trendlines if _shape_id(shape) not in used]
+            by_intent.setdefault(intent_id, []).append(shape)
+        for group in by_intent.values():
+            if len(group) < 2:
+                continue
+            uppers = [s for s in group if _role(str(s.get("name", ""))) == "upper"]
+            lowers = [s for s in group if _role(str(s.get("name", ""))) == "lower"]
+            if uppers and lowers:
+                pairs.append((uppers[0], lowers[0]))
+                used.add(_shape_id(uppers[0]))
+                used.add(_shape_id(lowers[0]))
+            elif len(group) == 2:
+                pairs.append((group[0], group[1]))
+                used.add(_shape_id(group[0]))
+                used.add(_shape_id(group[1]))
+        remaining = [shape for shape in trendlines if _shape_id(shape) not in used]
+    else:
+        uppers = [shape for shape in trendlines if _role(str(shape.get("name", ""))) == "upper"]
+        lowers = [shape for shape in trendlines if _role(str(shape.get("name", ""))) == "lower"]
+        for upper in uppers:
+            for lower in lowers:
+                if _shape_id(upper) in used or _shape_id(lower) in used:
+                    continue
+                pairs.append((upper, lower))
+                used.add(_shape_id(upper))
+                used.add(_shape_id(lower))
+                break
+        remaining = [shape for shape in trendlines if _shape_id(shape) not in used]
     for index, left in enumerate(remaining):
         if _shape_id(left) in used:
             continue
         for right in remaining[index + 1 :]:
             if _shape_id(right) in used:
+                continue
+            if not _same_candidate_id(left, right):
                 continue
             if _convergence_apex_time(left, right, ctx) is None:
                 continue

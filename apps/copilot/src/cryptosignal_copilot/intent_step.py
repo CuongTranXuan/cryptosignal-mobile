@@ -126,6 +126,7 @@ def candidate_id_list_for_prompt(
             "score": round(c.score, 3),
             "name": c.name,
             "swings": c.swing_ids,
+            "shape_cost": len(c.shapes),
         }
         for c in pool[:20]
     ]
