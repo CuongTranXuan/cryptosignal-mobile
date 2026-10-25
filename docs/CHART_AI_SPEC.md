@@ -868,3 +868,51 @@ Add per-style top-6 runs through the real path, an "intent split = 0" assertion,
 - #23 partial: leg ≥ 3·ATR in the newest half, pocket zone; levels span the full window.
 - #24 partial: `_geometry_score` (`candidates.py:103-114`), but `fit` is always the 0.5 default and `touches` is hard-coded to 4 for triangles, doubles and channels, so the score does not measure fit.
 - Unchanged: #9, #13, #14, #15, #16, #25, #26, #27, #30, #32, D6.
+
+### C.7 Re-check at `ffe28eb1` (box, 2026-10-25, no LLM)
+"Before" = `c21a9384`, "after" = `ffe28eb1`. Same 16 Binance windows. Each tree was exported with `git archive` and imported by path. "Harness" = the coder's `chart_real_path.run_real_path`, which picks under the shape budget (`fit_intents_to_shape_budget`). "LLM-like" = the real path with the 6 highest-scoring candidates of one style and **no** budget, which is what an LLM that ignores `shape_cost` would send (`agent.py:205` resolves the LLM intents as-is).
+
+| Metric | `c21a9384` | `ffe28eb1` |
+|---|---|---|
+| Raw / pre-filter removed | 171 / 3 (1.8 %) | 162 / 7 (4.3 %): double_top 3, H&S 2, double_bottom 1, trendline 1 |
+| Harness classic: intents / shapes in → out / gate / cap / split | n/a | 63 / 93 → 93 / 0 / 0 / 0 |
+| Harness classic: invalidation / evidence_against in → out | n/a | 26 → 26 / 26 → 26 |
+| Harness smc: shapes / gate / cap / split / invalidation | n/a | 59 / 0 / 0 / 0 / 36 → 36 |
+| LLM-like classic: shapes in → out / real gate / cap / split | 159 → 96 / 6 / 57 / 7 | 152 → 82 / **0** / **70 (46 %)** / **0** |
+| Shapes the web client accepts (`PatternShapeSchema.strict()`) | not tested | **0 / 152** (`unrecognized_keys: _candidate_id`) |
+| Windows with 0 classic candidates | 0 | 0 |
+| Regime | range 8, trend_down 5, trend_up 3 | same |
+| Prompt context o200k (median, min–max) | 1 791 (1 442–2 018) | 1 754 (1 381–2 040) |
+| pytest / ruff check / ruff format | 140 passed / clean / clean | 142 passed, 1 skipped / clean / **2 files would be reformatted** (`candidates.py:340`, `tests/eval/test_chart_replay.py:104`; CI runs `ruff format --check`) |
+
+**Geometry audit** (rule set from C.6)
+- **Triangles: 9 survive, and 9/9 are valid.** In each, the rails are evaluated at the same time, they do not cross before the last bar, the width shrinks, and ≤ 10 % of closes lie outside by 0.25·ATR. Triangles no longer dominate the top pick. The top classic pick per window is now: channel_down 3, symmetrical_triangle 3, descending_triangle 2, fib 2, double_top 2, double_bottom 2, S/R 2.
+- **Doubles: 20 survive.**
+  - Between E1 and E2: 19/20 have no candle beyond the extremes (the exception is SOL 4h double bottom). 18/20 necklines are flat at the opposite extreme within 0.1·ATR (exceptions: SOL 15m and SOL 4h double bottoms).
+  - **After E2: 8 of 11 double bottoms (and 1 of 9 double tops) already closed beyond their own `invalidation_price`.** These are failed patterns, and 7 of them are in the harness picks. Example, ETH 4h: bottoms 2406/2409 at bars 102/128, invalidation 2397; closes down to 2306 afterwards, last close 2359.
+  - There is no minimum E1–E2 separation. The 3 double tops removed by the pre-filter had tops 6–7 bars apart (`min-span`); LMW uses > 22 days on daily bars.
+- **H&S / inverse H&S: 0 survive.** The detector finds the same two LMW-valid H&S as in C.6 (ETH 4h, SOL 4h). Both now fail as `not-swing` because the neckline is extended to `window_end` (`candidates.py:825`, and `:901` for IHS), which is not a swing. Both patterns are also *completed and stale*:
+  - ETH 4h: the neckline broke ~120 bars ago and price is 6.7·ATR below it, past the measured move.
+  - SOL 4h: extrapolated over 140 bars, the neckline reaches 124.33, *above the head* (123.76).
+  - The "neckline-break check" (`:797`, `:873`) only adds evidence_against when the neckline is *not* broken. It never marks a pattern as completed, target reached, or invalidated.
+  - No inverse H&S found in the 16 windows.
+  - Fix: end the neckline at the break bar (first close through it after E5), or at E5 + k bars if it has not broken. Drop or flag the pattern once the measured target is reached, or when the close goes beyond the head.
+- **Channels (#20): 13 survive, and 8/13 have > 10 % of closes outside by 0.25·ATR.** Examples: BTC 4h 20/40, SOL 15m 26/96, ETH 15m 16/96. `channel_down` appears in 12 of 16 windows, including 2 `trend_up` windows (ETH 15m, SOL 15m). The fixed score of 0.725 puts it among the top picks: 11 of the 63 harness picks.
+- **Fib (#23): fixed.** Levels run from A to the window end (e.g. BTC 1h leg 188→199, lines 188→199).
+
+**Verdicts on the coder's claims**
+- Gate drop 0/92, splits 0, invalidations 25/25, evidence preserved (classic); SMC 0 splits and guardrails kept: **true for the harness** (on my data: 0/93, 0, 26/26, 26/26; SMC 0 splits, 36/36).
+- "Cap trims whole picks": **true**. The gate now groups shapes by `_candidate_id`, and the LLM-like run had 0 splits.
+- "shape_cost budget before resolve": **only in the harness and the deterministic fallback.** The LLM path has no budget. `shape_cost` is only a field in the candidate list (`intent_step.py:129`). Neither the prompt nor `agent_validate.py` limits total shapes to `MAX_SHAPES`, so an LLM picking the top 6 loses 46 % of shapes to the cap. Whole picks disappear silently.
+
+**New bugs**
+- **B1 (blocker):** `filter_preview_details` re-attaches the sidecar, *including `_candidate_id`*, to the returned shapes (`schema.py:690-692`). `enrich_shapes_with_guardrails` copies it through (`chart_response.py:138`), so every SSE shape carries `_candidate_id`. The web client parses shapes with `PatternShapeSchema.strict()` (`apps/web/lib/pattern-shape.ts:14-30`), and `coerceAgentShape` does not strip that key (`apps/web/lib/normalize-agent-shape.ts:24-27`). Result: **0 of 152 shapes pass in the web client**, so the UI would draw nothing. Fix: pop `_candidate_id` before yielding `shapes`; optionally send it as a separate `candidate_id` field added to both schemas. Add a contract test that feeds backend output into the web Zod schema.
+- **B2:** no shape budget on the LLM path (above). Fix: in the validator, `sum(shape_cost) ≤ 6` → `ModelRetry`, plus one prompt line.
+- **B3:** failed patterns are offered (doubles above; also 2/7 S/R zones closed through their invalidation). Fix: drop or flag a candidate when any close after its last anchor is beyond `invalidation_price`.
+- **B4:** H&S/IHS neckline extended to `window_end`, so the gate rejects it as `not-swing`, and there is no completed/stale state (above).
+- **B5:** formatting fails `ruff format --check` (2 files).
+
+**Part C status at `ffe28eb1`**
+- Fixed: #1, #2 (server side; see B1 for the wire), #3, #5, #6, #7, #8, #10, #11, #12, #19, #22, #23, #28, #29, #31, D4, D5, N1–N6, R1, R2, R3.
+- Partial: #4, #9, #13, #14, #15, #16, #17 (B4), #18 (B3, no separation), #20 (8/13 channels invalid), #21, #24, #30.
+- Open: #25, #26, #27, #32, D6.
