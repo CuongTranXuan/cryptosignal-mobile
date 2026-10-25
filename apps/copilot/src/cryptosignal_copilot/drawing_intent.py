@@ -167,11 +167,9 @@ def enrich_resolved_shapes(
 
     regime = catalog.regime
     by_id = catalog.by_id()
-    if last_close is None and catalog.candidates:
-        last_close = None
     enriched: list[dict[str, Any]] = []
     for shape in shapes:
-        cid = str(shape.pop("_candidate_id", "") or shape.get("candidate_id", ""))
+        cid = str(shape.get("_candidate_id", "") or shape.get("candidate_id", ""))
         match = by_id.get(cid) if cid else None
         out = dict(shape)
         if match is None:
@@ -194,6 +192,8 @@ def enrich_resolved_shapes(
             str(shape.get("id", cid)), fallback_key=cid or str(out.get("name", ""))
         )
         out["id"] = stable
+        if cid:
+            out["_candidate_id"] = cid
         enriched.append(out)
     return enriched
 

@@ -1057,12 +1057,25 @@ def _cap_shapes(
     pairs: list[tuple[str, str]],
     limit: int,
 ) -> tuple[list[dict[str, Any]], list[Drop]]:
-    """Drop lowest-confidence unrelated shapes first. A triangle pair stays together."""
+    """Drop lowest-confidence unrelated shapes first. Intent/candidate groups stay together."""
     if len(shapes) <= limit:
         return shapes, []
     id_index = {_shape_id(shape): index for index, shape in enumerate(shapes)}
     groups: list[list[int]] = []
     assigned: set[int] = set()
+    by_intent: dict[str, list[int]] = {}
+    for index, shape in enumerate(shapes):
+        intent_id = shape.get("_candidate_id")
+        if intent_id:
+            by_intent.setdefault(str(intent_id), []).append(index)
+    if by_intent and len(by_intent) < len(shapes):
+        for indexes in by_intent.values():
+            groups.append(indexes)
+            assigned.update(indexes)
+    elif by_intent:
+        for indexes in by_intent.values():
+            groups.append(indexes)
+        assigned = set(range(len(shapes)))
     for left_id, right_id in pairs:
         if left_id not in id_index or right_id not in id_index:
             continue

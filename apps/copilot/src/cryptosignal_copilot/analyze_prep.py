@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from dataclasses import dataclass
 from typing import Any
 
@@ -143,6 +144,7 @@ async def prepare_analyze(
         reasoning_effort=request.reasoning_effort,
         provider_id=provider_id,
     )
+    pf = candidate_catalog.prefilter_dropped
     meta = {
         "model": model_id,
         "provider_model_id": resolve_provider_model_id(model, effort, cfg=cfg),
@@ -158,6 +160,12 @@ async def prepare_analyze(
         "llm_provider": provider_id,
         "feature_sheet": feature_sheet,
         "candidates": candidate_id_list_for_prompt(candidate_catalog, intent),
+        "raw_candidate_count": candidate_catalog.raw_candidate_count,
+        "prefilter_dropped": [
+            {"candidate_id": d.candidate_id, "pattern_id": d.pattern_id, "reason": d.reason}
+            for d in pf
+        ],
+        "prefilter_drop_reasons": dict(Counter(d.reason for d in pf)),
         "prompt_candle_chars_legacy": legacy_chars,
         "prompt_candle_chars_compact": compact_chars,
         "prompt_candle_reduction_pct": round((1 - compact_chars / legacy_chars) * 100, 1)

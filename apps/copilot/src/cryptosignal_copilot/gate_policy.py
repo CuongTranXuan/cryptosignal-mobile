@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from cryptosignal_copilot.drawing_gate import ANCIENT_FRACTION, DrawingWindow, review_shape
+from cryptosignal_copilot.drawing_gate import (
+    ANCIENT_FRACTION,
+    DrawingWindow,
+    apply_preview_gate,
+    review_shape,
+)
 
 
 def anchor_in_play(touch_time: int, window_start: int, window_end: int) -> bool:
@@ -30,3 +35,18 @@ def candidate_passes_gate(
         if reviewed is None:
             return False
     return True
+
+
+def prefilter_candidate(
+    shapes: list[dict[str, object]],
+    window: DrawingWindow,
+) -> str | None:
+    """Per-candidate gate check (no cross-candidate batch pairing). Returns drop reason or None."""
+    if not candidate_passes_gate(shapes, window):
+        return "review_shape"
+    staged = [dict(shape) for shape in shapes]
+    _kept, batch_dropped = apply_preview_gate(staged, window)
+    for _shape_id, reason in batch_dropped:
+        if reason != "cap":
+            return reason
+    return None
