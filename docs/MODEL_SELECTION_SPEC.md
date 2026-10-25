@@ -2,6 +2,15 @@
 
 Branch `feat/copilot-actionable-drawings` (PR #5). Scope: user picks a model from their own OpenAI-compatible provider, switches mid-session, sessions persist with chart context, candle count comes from presets instead of fixed 186 × 1h.
 
+## 0. User decisions (2026-10-25, locked)
+| Topic | Decision |
+|---|---|
+| Default model | `agentrouter/deepseek-v4-flash` (`LLM_MODEL` env; also always injected into the list if healthy) |
+| Default candles | **100** (`COPILOT_DEFAULT_CANDLE_COUNT=100`, already `config.DEFAULT_CANDLE_COUNT`) |
+| Presets | **50 / 100 / 200 / 300 / custom**. Custom = any integer, clamped by the §2.2 budget formula (still **54 tok/candle**) and by the per-model hard max |
+| Reasoning level | **User-selectable.** UI shows tiers from `capabilities.effort_tiers`; default **`low`**; on empty output the server falls back one tier lower automatically |
+| Model list | **Only available models.** OmniRoute exposes only active-account models (`modelVisibilityAllowlist` + `hideAutoCombos=true`, see `docs/OMNIROUTE_CONFIG.md`) **and** the backend filters again (§3.1.1) |
+
 ## 1. Model discovery
 
 ### 1.1 OpenAI-compatible baseline
@@ -62,25 +71,30 @@ Quick win: serializing candles as compact rows `[t,o,h,l,c,v]` should cut to ~25
 reserved_output = max_tokens_sent           # covers reasoning + JSON answer
 max_candles = floor((context_window - 4000 - history_tokens - reserved_output) / 54)
 safe_max = largest preset <= min(max_candles, analysis_window_bars, 1000 /*Binance limit*/)
-presets = [50, 100, 150, 200, 300, 500]
+presets = [50, 100, 200, 300] + custom     # §0
+hard_max = min(max_candles, analysis_window_bars, 1000 /*Binance limit*/)
+custom   = clamp(requested, 1, hard_max)      # response meta.clamped=true if changed
 ```
+Presets above `hard_max` are hidden in the UI; `custom` input shows `max = hard_max`. `CANDLE_PRESETS` in `candle_budget.py` must change from `(50,100,150,200,300,500)` to `(50,100,200,300)`; `previous_preset()` (retry) uses the same tuple, and a custom value retries at the largest preset below it.
 `history_tokens`: estimate `len(text)/3` for messages actually sent (cap at 4 000, see §4).
 
 ### 2.3 max_tokens & reasoning
 | Case | `max_tokens` sent | reasoning control |
 |---|---|---|
-| reasoning model with `effort_tiers` | min(16 384, max_out) | `reasoning_effort: "low"` |
+| reasoning model with `effort_tiers` | min(16 384, max_out) | user's `reasoning_effort` (default `"low"`); must be one of `effort_tiers`, else coerced to `low` (or first tier) |
 | reasoning model, no effort control | min(16 384, max_out) | provider budget param if known (Anthropic `thinking.budget_tokens: 4096`), else none |
 | non-reasoning | min(4 096, max_out) | — |
 | unknown (defaults) | 4 096 | assume reasoning; no param |
 JSON answer itself is ≤ ~2 000 tokens (≤ 10 shapes + VI summary).
 
-Retry rule: on empty text / `UnexpectedModelBehavior` / finish_reason=`length` with no tool call → retry **once** with `candle_count = previous preset below (≥50)`, `reasoning_effort` one tier lower (`low`→`none`) if supported, `max_tokens` unchanged. Second failure → `empty_model_output` error.
+Reasoning tiers exposed to the user: exactly `capabilities.effort_tiers` (normalized `reasoning_efforts`), in provider order. Models without tiers show no picker (server sends no effort). UI labels: `none`=Tắt, `low`=Thấp (mặc định), `medium`=Vừa, `high`=Cao, `xhigh`/`max`=Rất cao/Tối đa, with a hint that high tiers are slower and may run out of output budget.
+
+Retry rule (fallback to lower tier): on empty text / `UnexpectedModelBehavior` / finish_reason=`length` with no output → retry **once** with `reasoning_effort` = next lower tier present in `effort_tiers` (`max→xhigh→high→medium→low→none`), and `candle_count` = previous preset below the current value (≥50), `max_tokens` unchanged. Second failure → `empty_model_output`. `meta` reports `reasoning_effort_requested`, `reasoning_effort_used`, `retried:true`. (`run_settings.lower_reasoning_effort` today maps high→low and has no xhigh/max step — coder should switch it to the generic "next lower tier in the list" rule.)
 
 ### 2.4 deepseek-v4-flash (agentrouter) concrete
 - ctx 1 000 000 / max_out 384 000 (provider). Context is never the bind; output is.
 - Root cause of the bug: 8 192 default output fully used by thinking at 299 candles.
-- Recommend: `max_tokens = 16 384`, `reasoning_effort = "low"`, default **200** candles, safe max **500** (500×54 ≈ 27k input; latency, not context, is the limit). Retry: 300→200 / `none`.
+- Decision: default model, `max_tokens = 16 384`, `reasoning_effort = "low"` (user may change), default **100** candles (≈5.4k candle tokens + ~4k overhead ≈ 9.8k input). Presets 50/100/200/300 all fit; custom hard max **1000** (Binance limit; 1000×54 = 54k input, fine for a 1M context — latency is the limit). Retry: e.g. 300→200 and `medium`→`low`, or 100→50 and `low`→`none`.
 - Same model via defaults path (unknown metadata, 32k/4k): (32 000−4 000−4 000−4 096)/54 = 368 → preset **300**.
 
 ## 3. API contract (all paths stay under `/v1/copilot/*`; existing fields unchanged)
@@ -101,21 +115,33 @@ Server calls `{LLM_BASE_URL}/models`, normalizes, caches 10 min.
     "reasoning_efforts": ["none","low","medium","high","xhigh","max"],
     "supports_json": true,
     "source": "provider",
+    "default_reasoning_effort": "low",
     "request_max_tokens": 16384,
-    "recommended_candles": 200,
-    "recommended_max_candles": 500,
-    "presets": [50,100,150,200,300,500]
+    "recommended_candles": 100,
+    "recommended_max_candles": 1000,
+    "presets": [50,100,200,300],
+    "allow_custom_candles": true
   }]
 }
 ```
-Filter: hide `combo`/`auto/*` only if config says so (open question). Optional `?q=` search; 1600+ entries → client needs a searchable picker.
+#### 3.1.1 Availability filter (decided: show only available models)
+Two layers; both required.
+1. **OmniRoute side** (ops): `modelVisibilityAllowlist` = models verified on active accounts, `hideAutoCombos=true` (done 2026-10-13, 1626 → 182 entries; see `docs/OMNIROUTE_CONFIG.md`). Re-run the "Reply OK" probe when accounts change.
+2. **Backend side** (`model_availability.filter_available_models`, already on the branch):
+   - drop `owned_by == "combo"` / `combo/*` / `auto/*` routes unless `COPILOT_MODEL_INCLUDE_COMBO=true` **and** the route passed a health probe;
+   - drop media models (image/video/audio by metadata or id pattern, e.g. `aihorde/*`, `veo*`, `cursor/composer-2` mislabelled as image);
+   - drop ids in the **negative cache** (`model_negative_cache`, TTL 300 s, `COPILOT_MODEL_NEGATIVE_CACHE_TTL_S`): any model that returned 402 quota / 404 not_found / "empty turn" / repeated `empty_model_output` is marked unavailable and hidden until TTL expiry;
+   - optional `COPILOT_MODEL_VISIBILITY_ALLOWLIST` / `COPILOT_MODEL_PROVIDERS` to narrow further; overrides file `hide`/`force_include`;
+   - the default model is always kept unless it is itself in the negative cache (then `default_model` falls back to the first remaining entry).
+With the filter the list is small (<20), so a plain dropdown is enough; keep `?q=` as optional.
 
 ### 3.2 `POST /v1/copilot/analyze` (additions, both optional)
 | Field | Type | Rule |
 |---|---|---|
 | `model` | string | must be in discovered list; absent → `LLM_MODEL` |
-| `candle_count` | int | clamp to `[1, recommended_max_candles]`; server keeps the **last N** of `closedCandles` (server-side trim) |
-Response/SSE adds a `meta` event first: `{"model":"…","candle_count_requested":299,"candle_count_used":200,"clamped":true,"max_tokens":16384,"reasoning_effort":"low"}`; also `retried:true` if §2.3 retry ran.
+| `candle_count` | int | preset or custom; clamp to `[1, hard_max]` (§2.2); server keeps the **last N** of `closedCandles` (server-side trim) |
+| `reasoning_effort` | string \| null | one of the model's `reasoning_efforts`; null/absent → `low`; unknown → soft-coerced (`schema.normalize_session_reasoning_effort`) |
+Response/SSE adds a `meta` event first: `{"model":"…","candle_count_requested":299,"candle_count_used":200,"clamped":true,"max_tokens":16384,"reasoning_effort_requested":"medium","reasoning_effort_used":"low"}`; also `retried:true` if §2.3 retry ran.
 `AnalyzeRequest` keeps `extra="forbid"` → add the two fields explicitly.
 
 Error codes (SSE `error` event `{code, message(VI), detail}`; HTTP 4xx before stream):
@@ -159,9 +185,9 @@ Limits: keep 50 sessions, 200 messages each, evict LRU. Candles are NOT stored; 
 - [ ] Timeouts: `/models` 10 s, analyze `LLM_TIMEOUT_S` (60 s; raise to 120 s for reasoning models).
 - [ ] No silent drops: clamps, retries, gate rejects all surfaced via `meta`/`dropped`.
 
-## 5. Open questions
-1. Hide OmniRoute `combo`/`auto/*` routes, or show them? (metadata on them is aggregated, less reliable)
-2. Allow user-chosen reasoning effort in UI, or server-fixed `low`?
-3. Should the provider (base URL/key) be user-configurable per user, or stay server env only? Spec assumes server env.
-4. Adopt compact candle serialization now (≈2× more candles) or later?
-5. Per-interval presets (e.g. 1d max 300) — needed?
+## 5. Open questions (resolved 2026-10-25)
+1. ~~Hide OmniRoute `combo`/`auto/*`?~~ **Resolved:** hidden by default (OmniRoute `hideAutoCombos=true` + backend filter); shown only with `COPILOT_MODEL_INCLUDE_COMBO=true` and a passing health probe.
+2. ~~User-chosen reasoning effort?~~ **Resolved:** user-selectable from `effort_tiers`, default `low`, auto-fallback one tier lower on empty output (§2.3).
+3. Provider per user vs server env — **still open**; spec keeps server env only.
+4. Compact candle serialization — **superseded** by `docs/CHART_AI_SPEC.md` §6 (compact input: last 20–30 candles + swing list + HTF summary). Budget formula here keeps 54 tok/candle until that ships.
+5. ~~Per-interval presets?~~ **Resolved:** no; one preset set 50/100/200/300 + custom, clamped by budget/hard max.
