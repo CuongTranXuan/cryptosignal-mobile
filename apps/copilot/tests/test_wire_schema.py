@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 from pathlib import Path
+
+import pytest
 
 from cryptosignal_copilot.candidates import build_candidate_catalog
 from cryptosignal_copilot.chart_real_path import run_real_path, simulate_llm_top_intents
@@ -46,11 +49,13 @@ def test_wire_shape_keys_match_web_contract():
 
 
 def test_wire_shapes_pass_web_zod_when_node_available():
+    if shutil.which("node") is None:
+        pytest.skip("node is not installed")
+    if not (WEB_ROOT / "package.json").exists():
+        pytest.skip("apps/web package.json not found")
     symbol, interval, candles = _load()
     catalog = build_candidate_catalog(candles, symbol=symbol, interval=interval)  # type: ignore[arg-type]
     valid, _ = run_real_path(catalog, candles, symbol=symbol, interval=interval, style="classic")
-    if not (WEB_ROOT / "package.json").exists():
-        return
     proc = subprocess.run(
         ["npx", "tsx", "-e", ZOD_SCRIPT],
         input=json.dumps(valid).encode(),
@@ -58,8 +63,10 @@ def test_wire_shapes_pass_web_zod_when_node_available():
         capture_output=True,
         timeout=120,
     )
-    if proc.returncode != 0 and b"Cannot find" in proc.stderr:
-        return
+    if proc.returncode != 0 and (
+        b"Cannot find" in proc.stderr or b"ERR_MODULE_NOT_FOUND" in proc.stderr
+    ):
+        pytest.skip(f"web deps not installed: {proc.stderr.decode()}")
     assert proc.returncode == 0, proc.stderr.decode()
 
 

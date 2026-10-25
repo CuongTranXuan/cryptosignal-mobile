@@ -13,10 +13,12 @@ from cryptosignal_copilot.candle_budget import (
     max_candles_for_context,
     previous_preset,
 )
+from cryptosignal_copilot.chart_regime import detect_regime
 from cryptosignal_copilot.config import LlmConfig, load_default_candle_count
 from cryptosignal_copilot.features import build_feature_sheet
 from cryptosignal_copilot.intent_prep import build_intent_check, validate_analyze_intent
 from cryptosignal_copilot.intent_step import candidate_id_list_for_prompt, rules_first_step
+from cryptosignal_copilot.klines import fetch_klines
 from cryptosignal_copilot.llm_provider import detect_llm_provider
 from cryptosignal_copilot.model_catalog import ModelNotFoundError, ModelsCatalog, NormalizedModel
 from cryptosignal_copilot.model_routes import resolve_provider_model_id
@@ -37,6 +39,36 @@ class AnalyzePlan:
     candle_count_used: int
     candidate_catalog: Any = None
     intent_step: Any = None
+
+
+_HTF_INTERVAL: dict[str, str] = {
+    "1m": "15m",
+    "15m": "1h",
+    "1h": "4h",
+    "4h": "1d",
+}
+
+
+async def _htf_context(symbol: str, interval: str, end_time_s: int) -> dict[str, object] | None:
+    htf = _HTF_INTERVAL.get(interval)
+    if not htf:
+        return None
+    try:
+        candles = await fetch_klines(
+            symbol,
+            htf,
+            limit=120,
+            end_time=end_time_s * 1000,
+        )
+    except Exception:
+        return None
+    if len(candles) < 10:
+        return None
+    return {
+        "interval": htf,
+        "regime": detect_regime(candles, htf),  # type: ignore[arg-type]
+        "bars": len(candles),
+    }
 
 
 def trim_request_candles(request: AnalyzeRequest, count: int) -> AnalyzeRequest:
@@ -123,6 +155,7 @@ async def prepare_analyze(
         recommended_max=model.recommended_max_candles,
     )
     trimmed = trim_request_candles(request, used)
+    htf = await _htf_context(trimmed.symbol, trimmed.interval, trimmed.to)
     candidate_catalog = build_candidate_catalog(
         trimmed.closedCandles,
         symbol=trimmed.symbol,
@@ -166,6 +199,8 @@ async def prepare_analyze(
             for d in pf
         ],
         "prefilter_drop_reasons": dict(Counter(d.reason for d in pf)),
+        "htf": htf,
+        "horizon": intent.horizon,
         "prompt_candle_chars_legacy": legacy_chars,
         "prompt_candle_chars_compact": compact_chars,
         "prompt_candle_reduction_pct": round((1 - compact_chars / legacy_chars) * 100, 1)

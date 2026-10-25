@@ -1,0 +1,36 @@
+name: web
+
+on:
+  push:
+    paths:
+      - "apps/web/**"
+      - "apps/copilot/tests/test_wire_schema.py"
+      - "apps/copilot/src/cryptosignal_copilot/wire_shape.py"
+      - ".github/workflows/web.yml"
+  pull_request:
+    paths:
+      - "apps/web/**"
+      - "apps/copilot/tests/test_wire_schema.py"
+      - "apps/copilot/src/cryptosignal_copilot/wire_shape.py"
+      - ".github/workflows/web.yml"
+
+jobs:
+  wire-zod-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install web deps
+        working-directory: apps/web
+        run: npm ci
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install copilot
+        working-directory: apps/copilot
+        run: pip install -e ".[dev]"
+      - name: Web Zod wire contract
+        working-directory: apps/copilot
+        run: pytest -q tests/test_wire_schema.py::test_wire_shapes_pass_web_zod_when_node_available

@@ -133,6 +133,7 @@ class AnalyzeIntent(BaseModel):
     style: Literal["classic", "smc", "elliott", "wyckoff"] = "classic"
     bias: Literal["bullish", "bearish", "neutral"] | None = None
     requested_pattern: str | None = None
+    horizon: Literal["scalp", "swing", "position"] | None = None
 
 
 # UI contract alias: session + analyze share this shape.

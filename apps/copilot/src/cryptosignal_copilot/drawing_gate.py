@@ -407,6 +407,24 @@ def _review_horizontal(
     return data, None
 
 
+def _hs_neckline_shape(name: str) -> bool:
+    return "H&S neckline" in name or "Inverse H&S neckline" in name
+
+
+def _anchor_hs_terminal(point: dict[str, Any], ctx: _GateContext) -> str | None:
+    time = int(point["time"])
+    price = float(point["price"])
+    candle = ctx.candle_by_time.get(time)
+    if candle is None:
+        return "no-anchor"
+    if (
+        _price_inside_bar(price, candle)
+        and not _price_on_wick(price, candle, ctx.tolerance)
+    ):
+        return "non-wick"
+    return None
+
+
 def _review_diagonal(
     data: dict[str, Any],
     points: list[Any],
@@ -415,8 +433,17 @@ def _review_diagonal(
     historical = [point for point in points if int(point["time"]) <= ctx.last_closed]
     if not historical:
         return None, "no-anchor"
+    name = str(data.get("name", ""))
+    hs_neck = _hs_neckline_shape(name)
     sides: list[SwingSide] = []
-    for point in historical:
+    for index, point in enumerate(historical):
+        if hs_neck and index == len(historical) - 1:
+            terminal_reason = _anchor_hs_terminal(point, ctx)
+            if terminal_reason:
+                return None, terminal_reason
+            if sides:
+                sides.append(sides[-1])
+            continue
         swing, reason = _anchor_swing(point, ctx)
         if swing is None:
             return None, reason or "not-swing"
@@ -435,7 +462,7 @@ def _review_diagonal(
     hit_times = [hit.time for hit in hits]
     if _span_bars(hit_times, ctx.bar_seconds) + 1e-9 < need:
         return None, "min-span"
-    if _is_ancient(max(hit_times), ctx):
+    if not hs_neck and _is_ancient(max(hit_times), ctx):
         return None, "ancient"
     if _segment_near_vertical(points, ctx):
         return None, "near-vertical"

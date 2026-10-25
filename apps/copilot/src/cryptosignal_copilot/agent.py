@@ -10,8 +10,14 @@ from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError, UnexpectedMode
 
 from cryptosignal_copilot.agent_output import build_agent_output_type, output_retries_for_model
 from cryptosignal_copilot.agent_validate import attach_drawing_intent_validator
+from cryptosignal_copilot.analysis_events import build_analysis_event, build_regime_event
 from cryptosignal_copilot.analyze_prep import AnalyzePlan, retry_plan
-from cryptosignal_copilot.chart_response import aggregate_skipped, enrich_shapes_with_guardrails
+from cryptosignal_copilot.candidates import DrawingCandidate
+from cryptosignal_copilot.chart_response import (
+    SkipReasonCode,
+    aggregate_skipped,
+    enrich_shapes_with_guardrails,
+)
 from cryptosignal_copilot.config import load_llm_config
 from cryptosignal_copilot.drawing_gate import (
     MAX_SHAPES,
@@ -104,6 +110,17 @@ class PydanticAiRunner:
                 )
             },
         )
+
+        intent_check = (plan.meta or {}).get("intent_check") or {}
+        if catalog is not None:
+            yield (
+                "regime",
+                build_regime_event(
+                    catalog,
+                    intent_check,
+                    htf=(plan.meta or {}).get("htf"),
+                ),
+            )
 
         if step is not None and catalog is not None and not step.use_llm:
             summary = (
@@ -208,7 +225,6 @@ class PydanticAiRunner:
                     meta = dict(current_plan.meta or {})
                     meta["intent_budget_fallback"] = True
                     current_plan.meta = meta
-                    yield "meta", meta
 
             yield "text", {"delta": "Mô hình đã xong. Đang dựng lớp phủ…"}
             if llm_output and llm_output.summary:
@@ -243,25 +259,28 @@ class PydanticAiRunner:
             yield "text", {"delta": format_drop_note(dropped)}
 
         intent_check = (current_plan.meta or {}).get("intent_check") or {}
-        regime = str(intent_check.get("detected_regime") or "range")
-        yield "regime", {"regime": regime, "intent_check": intent_check}
+        regime = str(
+            (catalog.regime if catalog is not None else None)
+            or intent_check.get("detected_regime")
+            or "range"
+        )
         valid_shapes, drawing_anchors = enrich_shapes_with_guardrails(
             valid_shapes,
             regime=regime,
             symbol=request.symbol,
             interval=request.interval,
         )
-        skipped, skipped_count = aggregate_skipped(dropped)
-        budget_fallback = bool((current_plan.meta or {}).get("intent_budget_fallback"))
-        if budget_fallback:
-            skipped, skipped_count = aggregate_skipped(dropped, extra=["cap"])
+        extra_skips: list[SkipReasonCode] = []
+        if bool((current_plan.meta or {}).get("intent_budget_fallback")):
+            extra_skips.append("cap")
         requested = (request.intent.requested_pattern if request.intent else None) or None
         if requested and not any(
             requested.replace("_", " ") in str(s.get("name", "")).lower()
             or requested in str(s.get("name", "")).lower()
             for s in valid_shapes
         ):
-            skipped, skipped_count = aggregate_skipped(dropped, extra=["unsupported_pattern"])
+            extra_skips.append("unsupported_pattern")
+        skipped, skipped_count = aggregate_skipped(dropped, extra=extra_skips or None)
 
         wire_shapes = shapes_for_wire(valid_shapes)
         yield (
@@ -273,22 +292,35 @@ class PydanticAiRunner:
                 "skipped_count": skipped_count,
             },
         )
-        bias = (request.intent.bias if request.intent else None) or "neutral"
-        primary_inv = None
-        for shape in valid_shapes:
-            guard = shape.get("guardrail")
-            if isinstance(guard, dict) and guard.get("invalidation"):
-                primary_inv = guard["invalidation"]
-                break
+        picked: list[DrawingCandidate] = []
+        if catalog is not None and llm_output is not None:
+            by_id = catalog.by_id()
+            for intent in llm_output.drawing_intents:
+                if intent.type == "candidate":
+                    cand = by_id.get(intent.candidate_id)
+                    if cand is not None:
+                        picked.append(cand)
+                else:
+                    for cid in intent.candidate_ids:
+                        cand = by_id.get(cid)
+                        if cand is not None:
+                            picked.append(cand)
         yield (
             "analysis",
-            {
-                "bias": bias,
+            build_analysis_event(
+                catalog,
+                valid_shapes,
+                intent_check,
+                picked=picked if catalog is not None else None,
+            )
+            if catalog is not None
+            else {
+                "bias": "neutral",
                 "no_valid_pattern": len(wire_shapes) == 0,
-                "evidence_for": [],
-                "evidence_against": [],
-                "invalidation": primary_inv,
-                "confidence": None,
+                "evidence_for": ["No candidate catalog"],
+                "evidence_against": ["No candidate catalog"],
+                "invalidation": None,
+                "confidence": 0.5,
                 "intent_check": intent_check,
             },
         )

@@ -7,7 +7,12 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from cryptosignal_copilot.chart_regime import Regime, detect_regime
-from cryptosignal_copilot.drawing_gate import DrawingWindow
+from cryptosignal_copilot.drawing_gate import (
+    DrawingWindow,
+    _price_inside_bar,
+    _price_on_wick,
+    _price_tolerance,
+)
 from cryptosignal_copilot.features import (
     ZigZagSwing,
     bar_seconds,
@@ -18,6 +23,8 @@ from cryptosignal_copilot.features import (
 )
 from cryptosignal_copilot.gate_policy import anchor_in_play, prefilter_candidate
 from cryptosignal_copilot.schema import Candle, Interval
+
+STALE_COMPLETED_BARS = 96
 
 StyleId = Literal["classic", "smc"]
 PatternId = str
@@ -169,6 +176,12 @@ def _last_anchor_time(cand: DrawingCandidate) -> int:
     return max(times) if times else 0
 
 
+def _wick_safe_price(candle: Candle, price: float, tolerance: float) -> float:
+    if not _price_inside_bar(price, candle) or _price_on_wick(price, candle, tolerance):
+        return price
+    return float(candle.low if price <= (candle.open + candle.close) / 2 else candle.high)
+
+
 def _candidate_invalidated(cand: DrawingCandidate, candles: list[Candle]) -> bool:
     if cand.invalidation_price is None or not candles:
         return False
@@ -187,6 +200,66 @@ def _candidate_invalidated(cand: DrawingCandidate, candles: list[Candle]) -> boo
         if condition == "close_above" and candle.close > inv:
             return True
     return False
+
+
+def _flip_support_resistance(
+    cand: DrawingCandidate, candles: list[Candle], atr: float | None
+) -> DrawingCandidate:
+    if cand.pattern_id != "support_resistance" or cand.invalidation_price is None or atr is None:
+        return cand
+    if not _candidate_invalidated(cand, candles):
+        return cand
+    shape = cand.shapes[0] if cand.shapes else {}
+    low = shape.get("priceLow")
+    high = shape.get("priceHigh")
+    if low is None or high is None:
+        return cand
+    was_support = float(cand.invalidation_price) <= float(low) + 1e-6
+    if was_support:
+        new_name = cand.name.replace("S/R", "S/R resistance (flipped)", 1)
+        new_inv = float(high)
+        evidence = list(cand.evidence_against) + ["role flipped: support→resistance"]
+    else:
+        new_name = cand.name.replace("S/R", "S/R support (flipped)", 1)
+        new_inv = float(low)
+        evidence = list(cand.evidence_against) + ["role flipped: resistance→support"]
+    return DrawingCandidate(
+        id=cand.id,
+        pattern_id=cand.pattern_id,
+        style=cand.style,
+        score=cand.score * 0.92,
+        swing_ids=cand.swing_ids,
+        shapes=cand.shapes,
+        evidence_against=evidence,
+        invalidation_price=new_inv,
+        name=new_name,
+    )
+
+
+def _candidate_stale(cand: DrawingCandidate, candles: list[Candle], bar_sec: int) -> bool:
+    if cand.pattern_id not in ("head_and_shoulders", "inverse_head_and_shoulders"):
+        return False
+    if "pattern completed" not in cand.evidence_against:
+        return False
+    anchor = _last_anchor_time(cand)
+    if not bar_sec or not anchor:
+        return False
+    return (candles[-1].time - anchor) / bar_sec > STALE_COMPLETED_BARS
+
+
+def _line_invalidation_at(
+    t1: int,
+    p1: float,
+    t2: int,
+    p2: float,
+    at_t: int,
+    *,
+    side: Literal["below", "above"],
+    atr: float,
+) -> float:
+    line = _line_price_at(t1, p1, t2, p2, at_t)
+    buffer = 0.25 * atr
+    return line - buffer if side == "below" else line + buffer
 
 
 def _channel_close_fit(
@@ -374,6 +447,7 @@ def _trendlines_from_swings(
     symbol: str,
     interval: Interval,
     bar_sec: int,
+    window_end: int,
 ) -> list[DrawingCandidate]:
     out: list[DrawingCandidate] = []
     highs = [z for z in zz if z.side == "high"]
@@ -403,6 +477,11 @@ def _trendlines_from_swings(
             continue
         score, a, b = best
         cid = _cand_id("tl", label, a.t, b.t)
+        atr_val = atr or 1.0
+        inv_side: Literal["below", "above"] = "below" if "Support" in label else "above"
+        inv = _line_invalidation_at(
+            a.t, a.price, b.t, b.price, window_end, side=inv_side, atr=atr_val
+        )
         out.append(
             DrawingCandidate(
                 id=cid,
@@ -421,6 +500,7 @@ def _trendlines_from_swings(
                         confidence=score,
                     )
                 ],
+                invalidation_price=inv,
             )
         )
     return out
@@ -609,6 +689,7 @@ def _liquidity_pair(
     a, b = best
     label = "Liquidity highs" if side == "high" else "Liquidity lows"
     cid = _cand_id("liq", a.t, b.t, side)
+    level = max(a.price, b.price) if side == "high" else min(a.price, b.price)
     return DrawingCandidate(
         id=cid,
         pattern_id="liquidity",
@@ -626,6 +707,7 @@ def _liquidity_pair(
                 confidence=0.61,
             )
         ],
+        invalidation_price=level,
     )
 
 
@@ -662,6 +744,7 @@ def _triangles_and_channels(
     highs = [z for z in zz if z.side == "high"]
     lows = [z for z in zz if z.side == "low"]
     atr_val = atr or 1.0
+    last_close = float(candles[-1].close) if candles else 0.0
     tri_ranked: list[tuple[float, DrawingCandidate]] = []
     if len(highs) >= 2 and len(lows) >= 2:
         for hi in range(len(highs) - 1):
@@ -720,6 +803,50 @@ def _triangles_and_channels(
                             size_atr=1.0,
                         )
                         cid = _cand_id("tri", pid, hu.t, hl.t, lu.t, ll.t)
+                        if pid == "ascending_triangle":
+                            inv = _line_invalidation_at(
+                                lu.t,
+                                lu.price,
+                                ll.t,
+                                ll.price,
+                                window_end,
+                                side="below",
+                                atr=atr_val,
+                            )
+                        elif pid == "descending_triangle":
+                            inv = _line_invalidation_at(
+                                hu.t,
+                                hu.price,
+                                hl.t,
+                                hl.price,
+                                window_end,
+                                side="above",
+                                atr=atr_val,
+                            )
+                        else:
+                            inv_low = _line_invalidation_at(
+                                lu.t,
+                                lu.price,
+                                ll.t,
+                                ll.price,
+                                window_end,
+                                side="below",
+                                atr=atr_val,
+                            )
+                            inv_high = _line_invalidation_at(
+                                hu.t,
+                                hu.price,
+                                hl.t,
+                                hl.price,
+                                window_end,
+                                side="above",
+                                atr=atr_val,
+                            )
+                            inv = (
+                                inv_low
+                                if abs(last_close - inv_low) < abs(last_close - inv_high)
+                                else inv_high
+                            )
                         upper = _trendline_shape(
                             symbol=symbol,
                             interval=interval,
@@ -747,6 +874,7 @@ def _triangles_and_channels(
                                     swing_ids=[hu.id, hl.id, lu.id, ll.id],
                                     name=label,
                                     shapes=[upper, lower],
+                                    invalidation_price=inv,
                                 ),
                             )
                         )
@@ -803,6 +931,26 @@ def _triangles_and_channels(
                     ),
                 )
                 cid = _cand_id("ch", pid, hu.t, ll.t)
+                if ch_up:
+                    ch_inv = _line_invalidation_at(
+                        lu.t,
+                        lu.price,
+                        ll.t,
+                        ll.price,
+                        window_end,
+                        side="below",
+                        atr=atr_val,
+                    )
+                else:
+                    ch_inv = _line_invalidation_at(
+                        hu.t,
+                        hu.price,
+                        hl.t,
+                        hl.price,
+                        window_end,
+                        side="above",
+                        atr=atr_val,
+                    )
                 out.append(
                     DrawingCandidate(
                         id=cid,
@@ -811,6 +959,7 @@ def _triangles_and_channels(
                         score=score,
                         swing_ids=[hu.id, hl.id, lu.id, ll.id],
                         name="Channel (high rail)" if ch_up else "Channel (low rail)",
+                        invalidation_price=ch_inv,
                         shapes=[
                             _trendline_shape(
                                 symbol=symbol,
@@ -842,22 +991,37 @@ def _neckline_end_after_break(
     shoulder_t: int,
     bar_sec: int,
     break_below: bool,
-) -> tuple[int, bool]:
+    atr: float | None,
+) -> tuple[int, float, bool]:
     end_t = shoulder_t + 3 * bar_sec if bar_sec else shoulder_t
+    end_price = _line_price_at(la.t, la.price, lb.t, lb.price, end_t)
     broken = False
+    tol = _price_tolerance(candles, atr)
+    prev_time = shoulder_t
     for candle in candles:
         if candle.time <= shoulder_t:
             continue
         neck = _line_price_at(la.t, la.price, lb.t, lb.price, candle.time)
         if break_below and candle.close < neck:
-            end_t = candle.time
             broken = True
+            if prev_time < candle.time:
+                end_t = prev_time
+                end_price = _line_price_at(la.t, la.price, lb.t, lb.price, end_t)
+            else:
+                end_t = candle.time
+                end_price = _wick_safe_price(candle, float(candle.low), tol)
             break
         if not break_below and candle.close > neck:
-            end_t = candle.time
             broken = True
+            if prev_time < candle.time:
+                end_t = prev_time
+                end_price = _line_price_at(la.t, la.price, lb.t, lb.price, end_t)
+            else:
+                end_t = candle.time
+                end_price = _wick_safe_price(candle, float(candle.high), tol)
             break
-    return end_t, broken
+        prev_time = candle.time
+    return end_t, end_price, broken
 
 
 def _head_shoulders(
@@ -895,13 +1059,14 @@ def _head_shoulders(
         if abs(la.price - lb.price) > tol:
             continue
         neck_at_right = _line_price_at(la.t, la.price, lb.t, lb.price, right.t)
-        end_t, broken = _neckline_end_after_break(
+        end_t, end_price, broken = _neckline_end_after_break(
             candles,
             la=la,
             lb=lb,
             shoulder_t=right.t,
             bar_sec=bar_sec,
             break_below=True,
+            atr=atr,
         )
         evidence: list[str] = []
         if not broken and last_close >= neck_at_right:
@@ -920,7 +1085,7 @@ def _head_shoulders(
                 recency=recency,
             ),
         )
-        neck_end = _line_price_at(la.t, la.price, lb.t, lb.price, end_t)
+        neck_end = end_price
         cid = _cand_id("hs", left.t, head.t, right.t)
         cand = DrawingCandidate(
             id=cid,
@@ -983,13 +1148,14 @@ def _inverse_head_shoulders(
         if abs(ha.price - hb.price) > tol:
             continue
         neck_at_right = _line_price_at(ha.t, ha.price, hb.t, hb.price, right.t)
-        end_t, broken = _neckline_end_after_break(
+        end_t, end_price, broken = _neckline_end_after_break(
             candles,
             la=ha,
             lb=hb,
             shoulder_t=right.t,
             bar_sec=bar_sec,
             break_below=False,
+            atr=atr,
         )
         evidence: list[str] = []
         if not broken and last_close <= neck_at_right:
@@ -1008,7 +1174,7 @@ def _inverse_head_shoulders(
                 recency=recency,
             ),
         )
-        neck_end = _line_price_at(ha.t, ha.price, hb.t, hb.price, end_t)
+        neck_end = end_price
         cid = _cand_id("ihs", left.t, head.t, right.t)
         cand = DrawingCandidate(
             id=cid,
@@ -1376,6 +1542,32 @@ def _smc_detectors(
                             confidence=0.6,
                         )
                     ],
+                    invalidation_price=prev.low - 0.25 * atr,
+                )
+            )
+        if cur.close < prev.low:
+            cid = _cand_id("ob", prev.time, "bear")
+            out.append(
+                DrawingCandidate(
+                    id=cid,
+                    pattern_id="order_block",
+                    style="smc",
+                    score=0.6,
+                    swing_ids=[],
+                    name="Bearish order block",
+                    shapes=[
+                        _zone_shape(
+                            symbol=symbol,
+                            interval=interval,
+                            name="Order block",
+                            t0=prev.time,
+                            t1=cur.time,
+                            low=prev.low,
+                            high=prev.high,
+                            confidence=0.6,
+                        )
+                    ],
+                    invalidation_price=prev.high + 0.25 * atr,
                 )
             )
     price_range = max(c.high for c in candles) - min(c.low for c in candles)
@@ -1412,12 +1604,19 @@ def build_candidate_catalog(
     if len(zz) < 3:
         zz = fractals_as_zigzag(candles, interval)
     bar_sec = bar_seconds(interval)
-    candidates: list[DrawingCandidate] = []
-    candidates.extend(
-        _trendlines_from_swings(zz, atr, symbol=symbol, interval=interval, bar_sec=bar_sec)
-    )
     window_start = candles[0].time
     window_end = candles[-1].time
+    candidates: list[DrawingCandidate] = []
+    candidates.extend(
+        _trendlines_from_swings(
+            zz,
+            atr,
+            symbol=symbol,
+            interval=interval,
+            bar_sec=bar_sec,
+            window_end=window_end,
+        )
+    )
     candidates.extend(
         _level_clusters(
             zz,
@@ -1489,17 +1688,23 @@ def build_candidate_catalog(
     )
     raw_candidate_count = len(candidates)
     prefilter_dropped: list[PrefilterDrop] = []
-    not_invalidated: list[DrawingCandidate] = []
+    processed: list[DrawingCandidate] = []
     for cand in candidates:
+        cand = _flip_support_resistance(cand, candles, atr)
+        if _candidate_stale(cand, candles, bar_sec):
+            prefilter_dropped.append(
+                PrefilterDrop(candidate_id=cand.id, pattern_id=cand.pattern_id, reason="stale")
+            )
+            continue
         if _candidate_invalidated(cand, candles):
             prefilter_dropped.append(
                 PrefilterDrop(
                     candidate_id=cand.id, pattern_id=cand.pattern_id, reason="invalidated"
                 )
             )
-        else:
-            not_invalidated.append(cand)
-    candidates = not_invalidated
+            continue
+        processed.append(cand)
+    candidates = processed
     kept: list[DrawingCandidate] = []
     for cand in candidates:
         reason = prefilter_candidate(cand.shapes, gate_window)
