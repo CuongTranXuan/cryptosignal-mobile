@@ -114,6 +114,83 @@ def _geometry_score(
     return round(0.30 * fit + 0.20 * touch + 0.15 * size + 0.15 * recency + 0.10 * span + 0.05, 3)
 
 
+def _line_price_at(t1: int, p1: float, t2: int, p2: float, t: int) -> float:
+    if t2 == t1:
+        return p1
+    return p1 + (p2 - p1) * (t - t1) / (t2 - t1)
+
+
+def _lines_apex_time(
+    t1: int,
+    p1: float,
+    t2: int,
+    p2: float,
+    u1: int,
+    q1: float,
+    u2: int,
+    q2: float,
+) -> float | None:
+    if t2 == t1 or u2 == u1:
+        return None
+    m1 = (p2 - p1) / (t2 - t1)
+    m2 = (q2 - q1) / (u2 - u1)
+    if abs(m1 - m2) < 1e-15:
+        return None
+    return (q1 - p1 + m1 * t1 - m2 * u1) / (m1 - m2)
+
+
+def _trendline_touch_count(
+    swings: list[ZigZagSwing],
+    t1: int,
+    p1: float,
+    t2: int,
+    p2: float,
+    tol: float,
+) -> int:
+    touches = 0
+    for swing in swings:
+        if swing.t < min(t1, t2) or swing.t > max(t1, t2):
+            continue
+        expected = _line_price_at(t1, p1, t2, p2, swing.t)
+        if abs(swing.price - expected) <= tol:
+            touches += 1
+    return max(touches, 2)
+
+
+def _triangle_close_fit(
+    candles: list[Candle],
+    *,
+    hu: ZigZagSwing,
+    hl: ZigZagSwing,
+    lu: ZigZagSwing,
+    ll: ZigZagSwing,
+    window_end: int,
+    atr: float,
+) -> float | None:
+    tol = 0.25 * atr
+    t_start = max(min(hu.t, hl.t), min(lu.t, ll.t))
+    outside = 0
+    total = 0
+    for candle in candles:
+        if candle.time < t_start or candle.time > window_end:
+            continue
+        upper = _line_price_at(hu.t, hu.price, hl.t, hl.price, candle.time)
+        lower = _line_price_at(lu.t, lu.price, ll.t, ll.price, candle.time)
+        if upper <= lower:
+            return None
+        total += 1
+        if candle.close > upper + tol or candle.close < lower - tol:
+            outside += 1
+    if total == 0:
+        return None
+    if outside / total > 0.10:
+        return None
+    apex = _lines_apex_time(hu.t, hu.price, hl.t, hl.price, lu.t, lu.price, ll.t, ll.price)
+    if apex is None or apex <= window_end:
+        return None
+    return 1.0 - outside / total
+
+
 def _trendline_shape(
     *,
     symbol: str,
@@ -239,6 +316,7 @@ def _level_clusters(
 
 def _trendlines_from_swings(
     zz: list[ZigZagSwing],
+    atr: float | None,
     *,
     symbol: str,
     interval: Interval,
@@ -247,6 +325,7 @@ def _trendlines_from_swings(
     out: list[DrawingCandidate] = []
     highs = [z for z in zz if z.side == "high"]
     lows = [z for z in zz if z.side == "low"]
+    touch_tol = 0.25 * (atr or 1.0)
     for side_swings, label in ((highs, "Resistance trendline"), (lows, "Support trendline")):
         if len(side_swings) < 2:
             continue
@@ -258,16 +337,16 @@ def _trendlines_from_swings(
                 span_bars = (b.t - a.t) / bar_sec if bar_sec else 0
                 if span_bars < 8:
                     continue
-                touches = 2
-                mid_price = (a.price + b.price) / 2
-                for swing in side_swings:
-                    if swing.t <= a.t or swing.t >= b.t:
-                        continue
-                    if abs(swing.price - mid_price) <= abs(b.price - a.price) * 0.15:
-                        touches += 1
+                touches = _trendline_touch_count(
+                    side_swings, a.t, a.price, b.t, b.price, touch_tol
+                )
+                fit = min(1.0, (touches - 1) / 3.0)
                 recency = (b.t - pool[0].t) / max(pool[-1].t - pool[0].t, 1)
                 score = max(
-                    0.58, _geometry_score(touches=touches, span_bars=span_bars, recency=recency)
+                    0.58,
+                    _geometry_score(
+                        fit=fit, touches=touches, span_bars=span_bars, recency=recency
+                    ),
                 )
                 if best is None or score > best[0]:
                     best = (score, a, b)
@@ -313,86 +392,114 @@ def _double_top_bottom(
     out: list[DrawingCandidate] = []
     highs = [z for z in zz if z.side == "high"]
     lows = [z for z in zz if z.side == "low"]
-    for hi in range(len(highs) - 2, -1, -1):
-        for hj in range(len(highs) - 1, hi, -1):
-            h1, h2 = highs[hi], highs[hj]
-            if abs(h1.price - h2.price) > tol:
+    for e1_idx, e1 in enumerate(highs):
+        e2: ZigZagSwing | None = None
+        for candidate in highs[e1_idx + 1 :]:
+            if abs(candidate.price - e1.price) > tol:
                 continue
-            if not anchor_in_play(h2.t, window_start, window_end):
+            middle = [h for h in highs if e1.t < h.t < candidate.t]
+            if any(h.price > max(e1.price, candidate.price) + tol for h in middle):
                 continue
-            between_lows = [z for z in zz if z.side == "low" and h1.t <= z.t <= h2.t]
-            if len(between_lows) < 2:
-                continue
-            la, lb = between_lows[0], between_lows[-1]
-            score = max(
-                0.58,
-                _geometry_score(touches=4, size_atr=abs(h1.price - la.price) / atr, span_bars=20),
-            )
-            cid = _cand_id("dt", h1.t, h2.t)
-            neck_shape = _trendline_shape(
-                symbol=symbol,
-                interval=interval,
-                name="Double top neckline",
-                p1=(la.t, la.price),
-                p2=(lb.t, lb.price),
-                confidence=score,
-            )
-            out.append(
-                DrawingCandidate(
-                    id=cid,
-                    pattern_id="double_top",
-                    style="classic",
-                    score=score,
-                    swing_ids=[h1.id, h2.id] + [z.id for z in between_lows[:2]],
-                    name="Double top",
-                    shapes=[neck_shape],
-                    invalidation_price=max(h1.price, h2.price) + 0.25 * atr,
-                    evidence_against=["only 2 swing touches on tops"],
-                )
-            )
+            e2 = candidate
             break
-        if out:
-            break
-    for li in range(len(lows) - 2, -1, -1):
-        for lj in range(len(lows) - 1, li, -1):
-            l1, l2 = lows[li], lows[lj]
-            if abs(l1.price - l2.price) > tol:
-                continue
-            if not anchor_in_play(l2.t, window_start, window_end):
-                continue
-            between_highs = [z for z in zz if z.side == "high" and l1.t <= z.t <= l2.t]
-            if len(between_highs) < 2:
-                continue
-            ha, hb = between_highs[0], between_highs[-1]
-            score = max(
-                0.58,
-                _geometry_score(touches=4, size_atr=abs(ha.price - l1.price) / atr, span_bars=20),
+        if e2 is None or not anchor_in_play(e2.t, window_start, window_end):
+            continue
+        troughs = [z for z in lows if e1.t <= z.t <= e2.t]
+        if not troughs:
+            continue
+        neck = min(t.price for t in troughs)
+        middle_highs = [h for h in highs if e1.t < h.t < e2.t]
+        if middle_highs and max(h.price for h in middle_highs) > max(e1.price, e2.price) + tol:
+            continue
+        touches = 2 + len(troughs)
+        fit = min(1.0, touches / 4.0)
+        score = max(
+            0.58,
+            _geometry_score(
+                fit=fit,
+                touches=touches,
+                size_atr=abs(e1.price - neck) / atr,
+                span_bars=(e2.t - e1.t) / max(window_end - window_start, 1) * 200,
+            ),
+        )
+        cid = _cand_id("dt", e1.t, e2.t)
+        neck_shape = _trendline_shape(
+            symbol=symbol,
+            interval=interval,
+            name="Double top neckline",
+            p1=(e1.t, neck),
+            p2=(e2.t, neck),
+            confidence=score,
+        )
+        out.append(
+            DrawingCandidate(
+                id=cid,
+                pattern_id="double_top",
+                style="classic",
+                score=score,
+                swing_ids=[e1.id, e2.id] + [t.id for t in troughs[:2]],
+                name="Double top",
+                shapes=[neck_shape],
+                invalidation_price=max(e1.price, e2.price) + 0.25 * atr,
+                evidence_against=["only 2 swing touches on tops"],
             )
-            cid = _cand_id("db", l1.t, l2.t)
-            neck_shape = _trendline_shape(
-                symbol=symbol,
-                interval=interval,
-                name="Double bottom neckline",
-                p1=(ha.t, ha.price),
-                p2=(hb.t, hb.price),
-                confidence=score,
-            )
-            out.append(
-                DrawingCandidate(
-                    id=cid,
-                    pattern_id="double_bottom",
-                    style="classic",
-                    score=score,
-                    swing_ids=[l1.id, l2.id] + [z.id for z in between_highs[:2]],
-                    name="Double bottom",
-                    shapes=[neck_shape],
-                    invalidation_price=min(l1.price, l2.price) - 0.25 * atr,
-                    evidence_against=["only 2 swing touches on bottoms"],
-                )
-            )
+        )
+        break
+    for e1_idx, e1 in enumerate(lows):
+        e2_low: ZigZagSwing | None = None
+        for candidate in lows[e1_idx + 1 :]:
+            if abs(candidate.price - e1.price) > tol:
+                continue
+            middle = [low for low in lows if e1.t < low.t < candidate.t]
+            if any(low.price < min(e1.price, candidate.price) - tol for low in middle):
+                continue
+            e2_low = candidate
             break
-        if any(c.pattern_id == "double_bottom" for c in out):
-            break
+        if e2_low is None or not anchor_in_play(e2_low.t, window_start, window_end):
+            continue
+        peaks = [z for z in highs if e1.t <= z.t <= e2_low.t]
+        if not peaks:
+            continue
+        neck = max(p.price for p in peaks)
+        middle_lows = [low for low in lows if e1.t < low.t < e2_low.t]
+        if middle_lows and min(low.price for low in middle_lows) < min(
+            e1.price, e2_low.price
+        ) - tol:
+            continue
+        touches = 2 + len(peaks)
+        fit = min(1.0, touches / 4.0)
+        score = max(
+            0.58,
+            _geometry_score(
+                fit=fit,
+                touches=touches,
+                size_atr=abs(neck - e1.price) / atr,
+                span_bars=(e2_low.t - e1.t) / max(window_end - window_start, 1) * 200,
+            ),
+        )
+        cid = _cand_id("db", e1.t, e2_low.t)
+        neck_shape = _trendline_shape(
+            symbol=symbol,
+            interval=interval,
+            name="Double bottom neckline",
+            p1=(e1.t, neck),
+            p2=(e2_low.t, neck),
+            confidence=score,
+        )
+        out.append(
+            DrawingCandidate(
+                id=cid,
+                pattern_id="double_bottom",
+                style="classic",
+                score=score,
+                swing_ids=[e1.id, e2_low.id] + [p.id for p in peaks[:2]],
+                name="Double bottom",
+                shapes=[neck_shape],
+                invalidation_price=min(e1.price, e2_low.price) - 0.25 * atr,
+                evidence_against=["only 2 swing touches on bottoms"],
+            )
+        )
+        break
     return out
 
 
@@ -485,6 +592,7 @@ def _triangle_converges(
 
 
 def _triangles_and_channels(
+    candles: list[Candle],
     zz: list[ZigZagSwing],
     atr: float | None,
     *,
@@ -530,20 +638,30 @@ def _triangles_and_channels(
                             pid, label = "symmetrical_triangle", "Symmetrical triangle"
                         if not pid:
                             continue
-                        if not _triangle_converges(hu, hl, lu, ll):
-                            continue
                         if not anchor_in_play(hl.t, window_start, window_end):
                             continue
                         if not anchor_in_play(ll.t, window_start, window_end):
+                            continue
+                        fit = _triangle_close_fit(
+                            candles,
+                            hu=hu,
+                            hl=hl,
+                            lu=lu,
+                            ll=ll,
+                            window_end=window_end,
+                            atr=atr_val,
+                        )
+                        if fit is None:
                             continue
                         recency = (max(hl.t, ll.t) - window_start) / max(
                             window_end - window_start, 1
                         )
                         score = _geometry_score(
+                            fit=fit,
                             touches=4,
                             span_bars=min(high_span, low_span),
                             recency=recency,
-                            size_atr=abs(hl.price - ll.price) / atr_val,
+                            size_atr=1.0,
                         )
                         cid = _cand_id("tri", pid, hu.t, hl.t, lu.t, ll.t)
                         upper = _trendline_shape(
@@ -647,6 +765,9 @@ def _head_shoulders(
     *,
     symbol: str,
     interval: Interval,
+    window_start: int,
+    window_end: int,
+    last_close: float,
 ) -> list[DrawingCandidate]:
     if atr is None or len(zz) < 5:
         return []
@@ -654,8 +775,6 @@ def _head_shoulders(
     if len(highs) < 3:
         return []
     tol = 0.35 * atr
-    window_start = zz[0].t if zz else 0
-    window_end = zz[-1].t if zz else 0
     best: DrawingCandidate | None = None
     best_recency = -1.0
     for idx in range(len(highs) - 2):
@@ -670,12 +789,25 @@ def _head_shoulders(
         if len(between_lows) < 2:
             continue
         la, lb = between_lows[0], between_lows[-1]
-        recency = float(right.t)
-        score = _geometry_score(
-            touches=3 + len(between_lows),
-            size_atr=(head.price - min(la.price, lb.price)) / atr,
-            recency=(right.t - window_start) / max(window_end - window_start, 1),
+        if abs(la.price - lb.price) > tol:
+            continue
+        neck_at_right = _line_price_at(la.t, la.price, lb.t, lb.price, right.t)
+        evidence: list[str] = []
+        if last_close >= neck_at_right:
+            evidence.append("neckline not broken")
+        recency = (right.t - window_start) / max(window_end - window_start, 1)
+        touches = 3 + len(between_lows)
+        fit = min(1.0, touches / 5.0)
+        score = max(
+            0.58,
+            _geometry_score(
+                fit=fit,
+                touches=touches,
+                size_atr=(head.price - min(la.price, lb.price)) / atr,
+                recency=recency,
+            ),
         )
+        neck_end = _line_price_at(la.t, la.price, lb.t, lb.price, window_end)
         cid = _cand_id("hs", left.t, head.t, right.t)
         cand = DrawingCandidate(
             id=cid,
@@ -690,11 +822,88 @@ def _head_shoulders(
                     interval=interval,
                     name="H&S neckline",
                     p1=(la.t, la.price),
-                    p2=(lb.t, lb.price),
+                    p2=(window_end, neck_end),
                     confidence=score,
                 )
             ],
             invalidation_price=head.price + 0.25 * atr,
+            evidence_against=evidence,
+        )
+        if recency > best_recency:
+            best_recency = recency
+            best = cand
+    return [best] if best is not None else []
+
+
+def _inverse_head_shoulders(
+    zz: list[ZigZagSwing],
+    atr: float | None,
+    *,
+    symbol: str,
+    interval: Interval,
+    window_start: int,
+    window_end: int,
+    last_close: float,
+) -> list[DrawingCandidate]:
+    if atr is None or len(zz) < 5:
+        return []
+    lows = [z for z in zz if z.side == "low"]
+    if len(lows) < 3:
+        return []
+    tol = 0.35 * atr
+    best: DrawingCandidate | None = None
+    best_recency = -1.0
+    for idx in range(len(lows) - 2):
+        left, head, right = lows[idx], lows[idx + 1], lows[idx + 2]
+        if head.price >= left.price or head.price >= right.price:
+            continue
+        if abs(left.price - right.price) > tol:
+            continue
+        if not anchor_in_play(right.t, window_start, window_end):
+            continue
+        between_highs = [z for z in zz if z.side == "high" and left.t <= z.t <= right.t]
+        if len(between_highs) < 2:
+            continue
+        ha, hb = between_highs[0], between_highs[-1]
+        if abs(ha.price - hb.price) > tol:
+            continue
+        neck_at_right = _line_price_at(ha.t, ha.price, hb.t, hb.price, right.t)
+        evidence: list[str] = []
+        if last_close <= neck_at_right:
+            evidence.append("neckline not broken")
+        recency = (right.t - window_start) / max(window_end - window_start, 1)
+        touches = 3 + len(between_highs)
+        fit = min(1.0, touches / 5.0)
+        score = max(
+            0.58,
+            _geometry_score(
+                fit=fit,
+                touches=touches,
+                size_atr=(max(ha.price, hb.price) - head.price) / atr,
+                recency=recency,
+            ),
+        )
+        neck_end = _line_price_at(ha.t, ha.price, hb.t, hb.price, window_end)
+        cid = _cand_id("ihs", left.t, head.t, right.t)
+        cand = DrawingCandidate(
+            id=cid,
+            pattern_id="inverse_head_and_shoulders",
+            style="classic",
+            score=score,
+            swing_ids=[left.id, head.id, right.id] + [z.id for z in between_highs[:2]],
+            name="Inverse H&S",
+            shapes=[
+                _trendline_shape(
+                    symbol=symbol,
+                    interval=interval,
+                    name="Inverse H&S neckline",
+                    p1=(ha.t, ha.price),
+                    p2=(window_end, neck_end),
+                    confidence=score,
+                )
+            ],
+            invalidation_price=head.price - 0.25 * atr,
+            evidence_against=evidence,
         )
         if recency > best_recency:
             best_recency = recency
@@ -712,7 +921,6 @@ def _fib_retracement(
 ) -> list[DrawingCandidate]:
     if atr is None or len(zz) < 2 or len(candles) < 2:
         return []
-    window_start = candles[0].time
     window_end = candles[-1].time
     half_t = candles[len(candles) // 2].time
     leg: tuple[ZigZagSwing, ZigZagSwing] | None = None
@@ -732,7 +940,7 @@ def _fib_retracement(
     score = _geometry_score(size_atr=abs(impulse) / atr, recency=0.7, touches=2)
     cid = _cand_id("fib", a.t, b.t)
     levels: list[dict[str, Any]] = []
-    t_left, t_right = window_start, window_end
+    t_left, t_right = a.t, window_end
     for ratio, label in ((0.382, "Fib 0.382"), (0.5, "Fib 0.5"), (0.618, "Fib 0.618")):
         price = b.price - impulse * ratio
         levels.append(
@@ -1081,7 +1289,9 @@ def build_candidate_catalog(
     bar_sec = bar_seconds(interval)
     candidates: list[DrawingCandidate] = []
     candidates.extend(
-        _trendlines_from_swings(zz, symbol=symbol, interval=interval, bar_sec=bar_sec)
+        _trendlines_from_swings(
+            zz, atr, symbol=symbol, interval=interval, bar_sec=bar_sec
+        )
     )
     window_start = candles[0].time
     window_end = candles[-1].time
@@ -1105,8 +1315,10 @@ def build_candidate_catalog(
             window_end=window_end,
         )
     )
+    last_close = float(candles[-1].close)
     candidates.extend(
         _triangles_and_channels(
+            candles,
             zz,
             atr,
             symbol=symbol,
@@ -1116,43 +1328,30 @@ def build_candidate_catalog(
             window_end=window_end,
         )
     )
-    candidates.extend(_head_shoulders(zz, atr, symbol=symbol, interval=interval))
+    candidates.extend(
+        _head_shoulders(
+            zz,
+            atr,
+            symbol=symbol,
+            interval=interval,
+            window_start=window_start,
+            window_end=window_end,
+            last_close=last_close,
+        )
+    )
+    candidates.extend(
+        _inverse_head_shoulders(
+            zz,
+            atr,
+            symbol=symbol,
+            interval=interval,
+            window_start=window_start,
+            window_end=window_end,
+            last_close=last_close,
+        )
+    )
     candidates.extend(_fib_retracement(candles, zz, atr, symbol=symbol, interval=interval))
     candidates.extend(_smc_detectors(candles, zz, atr, symbol=symbol, interval=interval))
-    # inverse H&S on lows
-    lows = [z for z in zz if z.side == "low"]
-    if atr and len(lows) >= 3:
-        left, head, right = lows[-3], lows[-2], lows[-1]
-        tol = 0.35 * atr
-        if (
-            head.price < left.price
-            and head.price < right.price
-            and abs(left.price - right.price) <= tol
-        ):
-            score = 0.7
-            cid = _cand_id("ihs", left.t, head.t, right.t)
-            neck = max(left.price, right.price) + atr
-            candidates.append(
-                DrawingCandidate(
-                    id=cid,
-                    pattern_id="inverse_head_and_shoulders",
-                    style="classic",
-                    score=score,
-                    swing_ids=[left.id, head.id, right.id],
-                    name="Inverse H&S",
-                    shapes=[
-                        _trendline_shape(
-                            symbol=symbol,
-                            interval=interval,
-                            name="Inverse H&S neckline",
-                            p1=(left.t, neck),
-                            p2=(right.t, neck),
-                            confidence=score,
-                        )
-                    ],
-                    invalidation_price=head.price - 0.25 * atr,
-                )
-            )
     gate_window = DrawingWindow(
         candles=candles,
         interval=interval,

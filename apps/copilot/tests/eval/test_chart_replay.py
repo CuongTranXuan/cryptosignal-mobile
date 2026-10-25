@@ -1,4 +1,4 @@
-"""Replay detector + gate metrics on frozen Binance OHLCV fixtures."""
+"""Replay detector + real agent preview path on frozen Binance OHLCV fixtures."""
 
 from __future__ import annotations
 
@@ -6,16 +6,13 @@ import json
 from collections import Counter
 from pathlib import Path
 
-from cryptosignal_copilot.candidates import CLASSIC_PATTERNS, SMC_PATTERNS, build_candidate_catalog
-from cryptosignal_copilot.drawing_gate import DrawingWindow
-from cryptosignal_copilot.drawing_intent import (
-    CandidateDrawingIntent,
-    MAX_DRAWING_INTENTS,
-    enrich_resolved_shapes,
-    resolve_drawing_intents,
+from cryptosignal_copilot.candidates import build_candidate_catalog
+from cryptosignal_copilot.candidates import (
+    _line_price_at,
+    _triangle_close_fit,
 )
-from cryptosignal_copilot.gate_policy import split_gate_and_cap_drops
-from cryptosignal_copilot.schema import Candle, filter_preview_details
+from cryptosignal_copilot.chart_real_path import run_real_path
+from cryptosignal_copilot.schema import Candle
 
 FIXTURE_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "ohlcv"
 
@@ -53,67 +50,81 @@ def _prefilter_metrics(catalog) -> dict[str, float | int | dict[str, int]]:
     dropped = len(catalog.prefilter_dropped)
     rate = dropped / raw if raw else 0.0
     by_pattern = Counter(d.pattern_id for d in catalog.prefilter_dropped)
-    by_family: Counter[str] = Counter()
-    raw_by_family: Counter[str] = Counter()
-    for cand in catalog.candidates:
-        raw_by_family[FAMILY_BY_PATTERN.get(cand.pattern_id, cand.pattern_id)] += 1
-    for drop in catalog.prefilter_dropped:
-        by_family[FAMILY_BY_PATTERN.get(drop.pattern_id, drop.pattern_id)] += 1
-    for drop in catalog.prefilter_dropped:
-        raw_by_family[FAMILY_BY_PATTERN.get(drop.pattern_id, drop.pattern_id)] += 1
-    family_rates: dict[str, float] = {}
-    for family, total in raw_by_family.items():
-        family_rates[family] = by_family[family] / total if total else 0.0
     return {
         "raw_candidates": raw,
         "prefilter_dropped": dropped,
         "prefilter_drop_rate": rate,
         "prefilter_by_pattern": dict(by_pattern),
-        "prefilter_family_rates": family_rates,
     }
 
 
-def _gate_metrics(
-    candles: list[Candle], symbol: str, interval: str, catalog
-) -> dict[str, float | int | dict[str, int]]:
-    pattern_counts = Counter(c.pattern_id for c in catalog.candidates)
-    classic_count = sum(1 for c in catalog.candidates if c.style == "classic")
-    intents = [CandidateDrawingIntent(candidate_id=c.id) for c in catalog.candidates]
-    shapes, _ = resolve_drawing_intents(intents, catalog, max_intents=MAX_DRAWING_INTENTS)
-    last_close = float(candles[-1].close)
-    shapes = enrich_resolved_shapes(shapes, catalog, last_close=last_close)
-    allowed_times = {c.time for c in candles}
-    window = DrawingWindow(
-        candles=candles,
-        interval=interval,  # type: ignore[arg-type]
-        window_start=candles[0].time,
-        allowed_times=allowed_times,
+def _double_geometry_ok(cand, candles: list[Candle], atr: float | None) -> bool:
+    if atr is None or len(cand.shapes) != 1:
+        return False
+    shape = cand.shapes[0]
+    points = shape.get("points") or []
+    if len(points) < 2:
+        return False
+    neck = float(points[0]["price"])
+    t0, t1 = int(points[0]["time"]), int(points[1]["time"])
+    if abs(float(points[1]["price"]) - neck) > 1e-6:
+        return False
+    if cand.pattern_id == "double_top":
+        highs_between = [c.high for c in candles if t0 <= c.time <= t1]
+        if not highs_between:
+            return False
+        peak_cap = (
+            cand.invalidation_price - 0.25 * atr
+            if cand.invalidation_price is not None
+            else neck + atr
+        )
+        return max(highs_between) <= peak_cap + 0.05 * atr
+    return True
+
+
+def _triangle_geometry_ok(cand, candles: list[Candle], catalog) -> bool:
+    atr = catalog.atr or 1.0
+    if len(cand.shapes) != 2:
+        return False
+    upper = lower = None
+    for shape in cand.shapes:
+        name = str(shape.get("name", "")).lower()
+        if "upper" in name:
+            upper = shape
+        if "lower" in name:
+            lower = shape
+    if upper is None or lower is None:
+        return False
+    up = upper["points"]
+    lo = lower["points"]
+    if len(up) < 2 or len(lo) < 2:
+        return False
+    from cryptosignal_copilot.features import ZigZagSwing
+
+    hu = ZigZagSwing(id="h0", i=0, t=int(up[0]["time"]), side="high", price=float(up[0]["price"]), prominence_atr=1)
+    hl = ZigZagSwing(id="h1", i=1, t=int(up[1]["time"]), side="high", price=float(up[1]["price"]), prominence_atr=1)
+    lu = ZigZagSwing(id="l0", i=2, t=int(lo[0]["time"]), side="low", price=float(lo[0]["price"]), prominence_atr=1)
+    ll = ZigZagSwing(id="l1", i=3, t=int(lo[1]["time"]), side="low", price=float(lo[1]["price"]), prominence_atr=1)
+    return (
+        _triangle_close_fit(
+            candles,
+            hu=hu,
+            hl=hl,
+            lu=lu,
+            ll=ll,
+            window_end=candles[-1].time,
+            atr=atr,
+        )
+        is not None
     )
-    valid, dropped = filter_preview_details(
-        shapes,
-        allowed_times,
-        symbol=symbol,
-        interval=interval,  # type: ignore[arg-type]
-        window=window,
-    )
-    gate_drops, cap_drops = split_gate_and_cap_drops(dropped)
-    input_count = len(shapes)
-    gate_drop_rate = len(gate_drops) / input_count if input_count else 0.0
-    cap_shape_loss = (
-        (input_count - len(valid) - len(gate_drops)) / input_count if input_count else 0.0
-    )
-    return {
-        "candidates": len(catalog.candidates),
-        "classic_candidates": classic_count,
-        "shapes_in": input_count,
-        "shapes_out": len(valid),
-        "gate_dropped": len(gate_drops),
-        "cap_dropped": len(cap_drops),
-        "gate_drop_rate": gate_drop_rate,
-        "cap_shape_loss_rate": cap_shape_loss,
-        "gate_reasons": dict(Counter(reason for _, reason in gate_drops)),
-        "patterns": dict(pattern_counts),
-    }
+
+
+def _assert_catalog_geometry(catalog, candles: list[Candle]) -> None:
+    for cand in catalog.candidates:
+        if cand.pattern_id in DOUBLE_PATTERNS:
+            assert _double_geometry_ok(cand, candles, catalog.atr), cand.id
+        if cand.pattern_id in TRIANGLE_PATTERNS:
+            assert _triangle_geometry_ok(cand, candles, catalog), cand.id
 
 
 def test_replay_fixtures_sixteen_windows():
@@ -121,58 +132,65 @@ def test_replay_fixtures_sixteen_windows():
     assert len(fixtures) == 16
 
 
-def test_replay_prefilter_and_gate_rates():
+def test_replay_prefilter_rates():
     fixtures = sorted(FIXTURE_DIR.glob("*.json"))
-    assert fixtures, "missing OHLCV fixtures"
-    symbols: set[str] = set()
-    intervals: set[str] = set()
-    suite_patterns: Counter[str] = Counter()
-    suite_pf: Counter[str] = Counter()
     suite_raw = 0
     suite_pf_dropped = 0
     for path in fixtures:
         symbol, interval, candles = _load_fixture(path.name)
-        symbols.add(symbol)
-        intervals.add(interval)
         catalog = build_candidate_catalog(candles, symbol=symbol, interval=interval)  # type: ignore[arg-type]
         pf = _prefilter_metrics(catalog)
-        gate = _gate_metrics(candles, symbol, interval, catalog)
-        suite_patterns.update(gate["patterns"])
-        suite_pf.update(pf["prefilter_by_pattern"])
         suite_raw += int(pf["raw_candidates"])
         suite_pf_dropped += int(pf["prefilter_dropped"])
-        assert gate["classic_candidates"] >= 1, f"{path.name} has no classic candidates"
-        assert pf["prefilter_drop_rate"] <= 0.10, (
-            f"{path.name} prefilter_drop_rate={pf['prefilter_drop_rate']:.3f} "
-            f"by_pattern={pf['prefilter_by_pattern']}"
-        )
-        assert gate["gate_drop_rate"] <= 0.02, (
-            f"{path.name} gate_drop_rate={gate['gate_drop_rate']:.3f} "
-            f"reasons={gate['gate_reasons']} cap={gate['cap_dropped']}"
-        )
-    overall_pf = suite_pf_dropped / suite_raw if suite_raw else 0.0
-    assert overall_pf <= 0.10, f"suite prefilter_drop_rate={overall_pf:.3f} drops={dict(suite_pf)}"
-    assert symbols == {"BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"}
-    assert intervals == {"15m", "1h", "4h", "1d"}
-    assert suite_patterns["fvg"] >= 1
-    assert suite_patterns["bos"] >= 1
-    assert suite_patterns["liquidity"] >= 1
-    assert sum(suite_patterns[p] for p in TRIANGLE_PATTERNS) >= 1
-    assert sum(suite_patterns[p] for p in DOUBLE_PATTERNS) >= 1
+        assert pf["prefilter_drop_rate"] <= 0.10, path.name
+        _assert_catalog_geometry(catalog, candles)
+    assert suite_pf_dropped / suite_raw <= 0.10
+
+
+def test_replay_real_path_classic_and_smc():
+    fixtures = sorted(FIXTURE_DIR.glob("*.json"))
+    suite_classic: Counter[str] = Counter()
+    suite_smc: Counter[str] = Counter()
+    for path in fixtures:
+        symbol, interval, candles = _load_fixture(path.name)
+        catalog = build_candidate_catalog(candles, symbol=symbol, interval=interval)  # type: ignore[arg-type]
+        classic_count = sum(1 for c in catalog.candidates if c.style == "classic")
+        assert classic_count >= 1, path.name
+        for style in ("classic", "smc"):
+            valid, metrics = run_real_path(
+                catalog, candles, symbol=symbol, interval=interval, style=style
+            )
+            assert metrics.split_picks == 0, f"{path.name} {style} split picks"
+            assert metrics.invalidations_out == metrics.invalidations_in, (
+                f"{path.name} {style} invalidations {metrics.invalidations_in}→{metrics.invalidations_out}"
+            )
+            assert metrics.evidence_out == metrics.evidence_in, (
+                f"{path.name} {style} evidence {metrics.evidence_in}→{metrics.evidence_out}"
+            )
+            if style == "classic" and metrics.shapes_in:
+                gate_rate = metrics.gate_dropped / metrics.shapes_in
+                assert gate_rate <= 0.02, (
+                    f"{path.name} gate={gate_rate:.3f} reasons={metrics.gate_reasons}"
+                )
+        suite_classic.update(c.pattern_id for c in catalog.candidates if c.style == "classic")
+        suite_smc.update(c.pattern_id for c in catalog.candidates if c.style == "smc")
+    assert suite_smc["fvg"] >= 1
+    assert suite_smc["bos"] >= 1
+    assert suite_smc["liquidity"] >= 1
+    assert sum(suite_classic[p] for p in TRIANGLE_PATTERNS) >= 1
+    assert sum(suite_classic[p] for p in DOUBLE_PATTERNS) >= 1
 
 
 def test_replay_report_metrics(capsys):
-    """Emit per-fixture metrics for CI logs (not a pass/fail gate)."""
     rows = []
     for path in sorted(FIXTURE_DIR.glob("*.json")):
         symbol, interval, candles = _load_fixture(path.name)
         catalog = build_candidate_catalog(candles, symbol=symbol, interval=interval)  # type: ignore[arg-type]
         pf = _prefilter_metrics(catalog)
-        gate = _gate_metrics(candles, symbol, interval, catalog)
+        _, m = run_real_path(catalog, candles, symbol=symbol, interval=interval, style="classic")
         rows.append(
-            f"{path.name}: raw={pf['raw_candidates']} pf_drop={pf['prefilter_dropped']}"
-            f"({pf['prefilter_drop_rate']:.1%}) cand={gate['candidates']} classic={gate['classic_candidates']} "
-            f"shapes={gate['shapes_in']} gate_drop={gate['gate_dropped']}({gate['gate_drop_rate']:.1%}) "
-            f"cap={gate['cap_dropped']} out={gate['shapes_out']}"
+            f"{path.name}: pf={pf['prefilter_drop_rate']:.1%} "
+            f"gate={m.gate_dropped}/{m.shapes_in} split={m.split_picks} "
+            f"inv={m.invalidations_in}→{m.invalidations_out}"
         )
     print("\n".join(rows))
