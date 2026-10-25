@@ -13,6 +13,7 @@ SkipReasonCode = Literal[
     "invalid_geometry",
     "no_candidate",
     "unsupported_pattern",
+    "cap",
 ]
 
 _GATE_REASON_TO_SKIP: dict[str, SkipReasonCode] = {
@@ -30,7 +31,7 @@ _GATE_REASON_TO_SKIP: dict[str, SkipReasonCode] = {
     "unpaired-triangle": "invalid_geometry",
     "triangle-structure": "invalid_geometry",
     "fib-no-C": "invalid_geometry",
-    "cap": "invalid_geometry",
+    "cap": "cap",
 }
 
 

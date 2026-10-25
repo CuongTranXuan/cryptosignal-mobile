@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from cryptosignal_copilot.chart_regime import Regime, detect_regime
+from cryptosignal_copilot.drawing_gate import DrawingWindow, apply_preview_gate
+from cryptosignal_copilot.gate_policy import anchor_in_play, candidate_passes_gate
 from cryptosignal_copilot.features import (
     ZigZagSwing,
     bar_seconds,
@@ -139,13 +141,6 @@ def _zone_shape(
     }
 
 
-def _touch_in_play(touch_t: int, window_start: int, window_end: int) -> bool:
-    if window_end <= window_start:
-        return True
-    fraction = (touch_t - window_start) / (window_end - window_start)
-    return fraction >= 0.35
-
-
 def _level_clusters(
     zz: list[ZigZagSwing],
     atr: float | None,
@@ -184,7 +179,7 @@ def _level_clusters(
             ]
             if gaps and min(gaps) < 5:
                 continue
-            if not _touch_in_play(cluster[-1].t, window_start, window_end):
+            if not anchor_in_play(cluster[-1].t, window_start, window_end):
                 continue
             price = sum(s.price for s in cluster) / len(cluster)
             t0, t1 = cluster[0].t, window_end
@@ -278,27 +273,39 @@ def _double_top_bottom(
         h1, h2 = highs[-2], highs[-1]
         if abs(h1.price - h2.price) <= tol:
             between_lows = [z for z in zz if z.side == "low" and h1.t <= z.t <= h2.t]
-            neck_price = min((z.price for z in between_lows), default=min(h1.price, h2.price) - atr)
+            if len(between_lows) < 2:
+                between_lows = lows[-2:] if len(lows) >= 2 else []
             score = 0.72
             cid = _cand_id("dt", h1.t, h2.t)
+            if len(between_lows) >= 2:
+                la, lb = between_lows[0], between_lows[-1]
+                neck_shape = _trendline_shape(
+                    symbol=symbol,
+                    interval=interval,
+                    name="Double top neckline",
+                    p1=(la.t, la.price),
+                    p2=(lb.t, lb.price),
+                    confidence=score,
+                )
+            else:
+                neck_price = min(h1.price, h2.price) - atr
+                neck_shape = _trendline_shape(
+                    symbol=symbol,
+                    interval=interval,
+                    name="Double top neckline",
+                    p1=(h1.t, neck_price),
+                    p2=(h2.t, neck_price),
+                    confidence=score,
+                )
             out.append(
                 DrawingCandidate(
                     id=cid,
                     pattern_id="double_top",
                     style="classic",
                     score=score,
-                    swing_ids=[h1.id, h2.id],
+                    swing_ids=[h1.id, h2.id] + [z.id for z in between_lows[:2]],
                     name="Double top",
-                    shapes=[
-                        _trendline_shape(
-                            symbol=symbol,
-                            interval=interval,
-                            name="Double top neckline",
-                            p1=(h1.t, neck_price),
-                            p2=(h2.t, neck_price),
-                            confidence=score,
-                        )
-                    ],
+                    shapes=[neck_shape],
                     invalidation_price=max(h1.price, h2.price) + 0.25 * atr,
                     evidence_against=["only 2 swing touches on tops"],
                 )
@@ -307,29 +314,39 @@ def _double_top_bottom(
         l1, l2 = lows[-2], lows[-1]
         if abs(l1.price - l2.price) <= tol:
             between_highs = [z for z in zz if z.side == "high" and l1.t <= z.t <= l2.t]
-            neck_price = max(
-                (z.price for z in between_highs), default=max(l1.price, l2.price) + atr
-            )
+            if len(between_highs) < 2:
+                between_highs = highs[-2:] if len(highs) >= 2 else []
             score = 0.72
             cid = _cand_id("db", l1.t, l2.t)
+            if len(between_highs) >= 2:
+                ha, hb = between_highs[0], between_highs[-1]
+                neck_shape = _trendline_shape(
+                    symbol=symbol,
+                    interval=interval,
+                    name="Double bottom neckline",
+                    p1=(ha.t, ha.price),
+                    p2=(hb.t, hb.price),
+                    confidence=score,
+                )
+            else:
+                neck_price = max(l1.price, l2.price) + atr
+                neck_shape = _trendline_shape(
+                    symbol=symbol,
+                    interval=interval,
+                    name="Double bottom neckline",
+                    p1=(l1.t, neck_price),
+                    p2=(l2.t, neck_price),
+                    confidence=score,
+                )
             out.append(
                 DrawingCandidate(
                     id=cid,
                     pattern_id="double_bottom",
                     style="classic",
                     score=score,
-                    swing_ids=[l1.id, l2.id],
+                    swing_ids=[l1.id, l2.id] + [z.id for z in between_highs[:2]],
                     name="Double bottom",
-                    shapes=[
-                        _trendline_shape(
-                            symbol=symbol,
-                            interval=interval,
-                            name="Double bottom neckline",
-                            p1=(l1.t, neck_price),
-                            p2=(l2.t, neck_price),
-                            confidence=score,
-                        )
-                    ],
+                    shapes=[neck_shape],
                     invalidation_price=min(l1.price, l2.price) - 0.25 * atr,
                     evidence_against=["only 2 swing touches on bottoms"],
                 )
@@ -337,8 +354,60 @@ def _double_top_bottom(
     return out
 
 
+def _rail_is_flat(
+    a: ZigZagSwing, b: ZigZagSwing, *, bar_sec: int, atr: float
+) -> bool:
+    span_bars = abs(b.t - a.t) / bar_sec if bar_sec else 0.0
+    if span_bars < 1:
+        return True
+    slope = (b.price - a.price) / span_bars
+    return abs(slope) * span_bars <= 0.5 * atr
+
+
+def _liquidity_pair(
+    swings: list[ZigZagSwing],
+    tol: float,
+    *,
+    symbol: str,
+    interval: Interval,
+    side: str,
+) -> DrawingCandidate | None:
+    best: tuple[ZigZagSwing, ZigZagSwing] | None = None
+    for i in range(len(swings)):
+        for j in range(i + 1, len(swings)):
+            a, b = swings[i], swings[j]
+            if abs(a.price - b.price) > tol:
+                continue
+            if best is None or max(a.t, b.t) > max(best[0].t, best[1].t):
+                best = (a, b)
+    if best is None:
+        return None
+    a, b = best
+    label = "Liquidity highs" if side == "high" else "Liquidity lows"
+    cid = _cand_id("liq", a.t, b.t, side)
+    return DrawingCandidate(
+        id=cid,
+        pattern_id="liquidity",
+        style="smc",
+        score=0.61,
+        swing_ids=[a.id, b.id],
+        name=label,
+        shapes=[
+            _trendline_shape(
+                symbol=symbol,
+                interval=interval,
+                name=label,
+                p1=(a.t, a.price),
+                p2=(b.t, b.price),
+                confidence=0.61,
+            )
+        ],
+    )
+
+
 def _triangles_and_channels(
     zz: list[ZigZagSwing],
+    atr: float | None,
     *,
     symbol: str,
     interval: Interval,
@@ -347,55 +416,77 @@ def _triangles_and_channels(
     out: list[DrawingCandidate] = []
     highs = [z for z in zz if z.side == "high"]
     lows = [z for z in zz if z.side == "low"]
+    atr_val = atr or 1.0
+    best_tri: tuple[float, str, str, ZigZagSwing, ZigZagSwing, ZigZagSwing, ZigZagSwing] | None = (
+        None
+    )
+    if len(highs) >= 2 and len(lows) >= 2:
+        for hi in range(len(highs) - 1):
+            for hj in range(hi + 1, len(highs)):
+                hu, hl = highs[hi], highs[hj]
+                high_span = (hl.t - hu.t) / bar_sec if bar_sec else 0
+                if high_span < 15:
+                    continue
+                for li in range(len(lows) - 1):
+                    for lj in range(li + 1, len(lows)):
+                        lu, ll = lows[li], lows[lj]
+                        low_span = (ll.t - lu.t) / bar_sec if bar_sec else 0
+                        if low_span < 15:
+                            continue
+                        flat_top = _rail_is_flat(hu, hl, bar_sec=bar_sec, atr=atr_val)
+                        flat_bottom = _rail_is_flat(lu, ll, bar_sec=bar_sec, atr=atr_val)
+                        rising_lows = ll.price > lu.price
+                        falling_highs = hl.price < hu.price
+                        pid = ""
+                        score = 0.0
+                        label = ""
+                        if flat_top and rising_lows:
+                            pid, label, score = "ascending_triangle", "Ascending triangle", 0.68
+                        elif flat_bottom and falling_highs:
+                            pid, label, score = "descending_triangle", "Descending triangle", 0.68
+                        elif rising_lows and falling_highs:
+                            pid, label, score = (
+                                "symmetrical_triangle",
+                                "Symmetrical triangle",
+                                0.65,
+                            )
+                        if pid and (best_tri is None or score > best_tri[0]):
+                            best_tri = (score, pid, label, hu, hl, lu, ll)
+        if best_tri is not None:
+            score, pid, type_label, hu, hl, lu, ll = best_tri
+            cid = _cand_id("tri", pid, hu.t, ll.t)
+            upper = _trendline_shape(
+                symbol=symbol,
+                interval=interval,
+                name=f"{type_label} upper",
+                p1=(hu.t, hu.price),
+                p2=(hl.t, hl.price),
+                confidence=score,
+            )
+            lower = _trendline_shape(
+                symbol=symbol,
+                interval=interval,
+                name=f"{type_label} lower",
+                p1=(lu.t, lu.price),
+                p2=(ll.t, ll.price),
+                confidence=score,
+            )
+            out.append(
+                DrawingCandidate(
+                    id=cid,
+                    pattern_id=pid,
+                    style="classic",
+                    score=score,
+                    swing_ids=[hu.id, hl.id, lu.id, ll.id],
+                    name=type_label,
+                    shapes=[upper, lower],
+                )
+            )
     if len(highs) >= 2 and len(lows) >= 2:
         hu, hl = highs[-2], highs[-1]
         lu, ll = lows[-2], lows[-1]
-        flat_top = abs(hu.price - hl.price) / max(hl.price, 1e-9) < 0.004
-        flat_bottom = abs(lu.price - ll.price) / max(ll.price, 1e-9) < 0.004
         rising_lows = ll.price > lu.price
         falling_highs = hl.price < hu.price
-        span = (ll.t - lu.t) / bar_sec if bar_sec else 0
-        if span >= 15:
-            if flat_top and rising_lows:
-                pid, type_label = "ascending_triangle", "Ascending triangle"
-                score = 0.68
-            elif flat_bottom and falling_highs:
-                pid, type_label = "descending_triangle", "Descending triangle"
-                score = 0.68
-            elif rising_lows and falling_highs:
-                pid, type_label = "symmetrical_triangle", "Symmetrical triangle"
-                score = 0.65
-            else:
-                pid = ""
-            if pid:
-                cid = _cand_id("tri", pid, hu.t, ll.t)
-                upper = _trendline_shape(
-                    symbol=symbol,
-                    interval=interval,
-                    name=f"{type_label} upper",
-                    p1=(hu.t, hu.price),
-                    p2=(hl.t, hl.price),
-                    confidence=score,
-                )
-                lower = _trendline_shape(
-                    symbol=symbol,
-                    interval=interval,
-                    name=f"{type_label} lower",
-                    p1=(lu.t, lu.price),
-                    p2=(ll.t, ll.price),
-                    confidence=score,
-                )
-                out.append(
-                    DrawingCandidate(
-                        id=cid,
-                        pattern_id=pid,
-                        style="classic",
-                        score=score,
-                        swing_ids=[hu.id, hl.id, lu.id, ll.id],
-                        name=type_label,
-                        shapes=[upper, lower],
-                    )
-                )
         if len(highs) >= 2 and len(lows) >= 2:
             ch_up = rising_lows and hu.price < hl.price and lu.price < ll.price
             ch_down = falling_highs and hu.price > hl.price and lu.price > ll.price
@@ -410,12 +501,12 @@ def _triangles_and_channels(
                         style="classic",
                         score=score,
                         swing_ids=[hu.id, hl.id, lu.id, ll.id],
-                        name="Channel upper" if ch_up else "Channel lower",
+                        name="Channel (high rail)" if ch_up else "Channel (low rail)",
                         shapes=[
                             _trendline_shape(
                                 symbol=symbol,
                                 interval=interval,
-                                name="Channel upper",
+                                name="Channel high rail",
                                 p1=(hu.t, hu.price),
                                 p2=(hl.t, hl.price),
                                 confidence=score,
@@ -423,7 +514,7 @@ def _triangles_and_channels(
                             _trendline_shape(
                                 symbol=symbol,
                                 interval=interval,
-                                name="Channel lower",
+                                name="Channel low rail",
                                 p1=(lu.t, lu.price),
                                 p2=(ll.t, ll.price),
                                 confidence=score,
@@ -782,51 +873,13 @@ def _smc_detectors(
                 )
             )
     price_range = max(c.high for c in candles) - min(c.low for c in candles)
-    liq_tol = 0.01 * price_range
-    if len(highs) >= 2 and abs(highs[-1].price - highs[-2].price) <= liq_tol:
-        cid = _cand_id("liq", highs[-1].t, "high")
-        out.append(
-            DrawingCandidate(
-                id=cid,
-                pattern_id="liquidity",
-                style="smc",
-                score=0.61,
-                swing_ids=[highs[-1].id, highs[-2].id],
-                name="Liquidity highs",
-                shapes=[
-                    _trendline_shape(
-                        symbol=symbol,
-                        interval=interval,
-                        name="Liquidity highs",
-                        p1=(highs[-2].t, highs[-2].price),
-                        p2=(highs[-1].t, highs[-1].price),
-                        confidence=0.61,
-                    )
-                ],
-            )
-        )
-    if len(lows) >= 2 and abs(lows[-1].price - lows[-2].price) <= liq_tol:
-        cid = _cand_id("liq", lows[-1].t, "low")
-        out.append(
-            DrawingCandidate(
-                id=cid,
-                pattern_id="liquidity",
-                style="smc",
-                score=0.61,
-                swing_ids=[lows[-1].id, lows[-2].id],
-                name="Liquidity lows",
-                shapes=[
-                    _trendline_shape(
-                        symbol=symbol,
-                        interval=interval,
-                        name="Liquidity lows",
-                        p1=(lows[-2].t, lows[-2].price),
-                        p2=(lows[-1].t, lows[-1].price),
-                        confidence=0.61,
-                    )
-                ],
-            )
-        )
+    liq_tol = max(0.01 * price_range, 0.15 * atr)
+    liq_high = _liquidity_pair(highs, liq_tol, symbol=symbol, interval=interval, side="high")
+    if liq_high is not None:
+        out.append(liq_high)
+    liq_low = _liquidity_pair(lows, liq_tol, symbol=symbol, interval=interval, side="low")
+    if liq_low is not None:
+        out.append(liq_low)
     return out
 
 
@@ -860,7 +913,7 @@ def build_candidate_catalog(
     )
     candidates.extend(_double_top_bottom(zz, atr, symbol=symbol, interval=interval))
     candidates.extend(
-        _triangles_and_channels(zz, symbol=symbol, interval=interval, bar_sec=bar_sec)
+        _triangles_and_channels(zz, atr, symbol=symbol, interval=interval, bar_sec=bar_sec)
     )
     candidates.extend(_head_shoulders(zz, atr, symbol=symbol, interval=interval))
     candidates.extend(_fib_retracement(zz, atr, symbol=symbol, interval=interval))
@@ -899,7 +952,29 @@ def build_candidate_catalog(
                     invalidation_price=head.price - 0.25 * atr,
                 )
             )
+    gate_window = DrawingWindow(
+        candles=candles,
+        interval=interval,
+        window_start=window_start,
+        allowed_times={c.time for c in candles},
+    )
+    candidates = [c for c in candidates if candidate_passes_gate(c.shapes, gate_window)]
     candidates.sort(key=lambda c: c.score, reverse=True)
+    # Drop shapes that fail when all catalog shapes are gated together (e.g. false triangle pairing).
+    staged = [dict(shape) for cand in candidates for shape in cand.shapes]
+    if staged:
+        kept, batch_dropped = apply_preview_gate(staged, gate_window)
+        drop_ids = {shape_id for shape_id, reason in batch_dropped if reason != "cap"}
+        if drop_ids:
+            filtered: list[DrawingCandidate] = []
+            for cand in candidates:
+                shape_ids = {
+                    str(shape.get("id", "")) for shape in cand.shapes if str(shape.get("id", ""))
+                }
+                if shape_ids & drop_ids:
+                    continue
+                filtered.append(cand)
+            candidates = filtered
     return CandidateCatalog(
         symbol=symbol,
         interval=interval,
