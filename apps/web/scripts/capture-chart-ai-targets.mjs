@@ -3,7 +3,7 @@
  */
 import { chromium } from "playwright";
 import { createHash } from "node:crypto";
-import { readFileSync, mkdirSync, statSync, writeFileSync } from "node:fs";
+import { readFileSync, mkdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -79,6 +79,11 @@ async function createSession(intent) {
 async function shotLocator(page, locator, filename) {
   await locator.waitFor({ state: "visible", timeout: 30_000 });
   const out = path.join(outDir, filename);
+  try {
+    unlinkSync(out);
+  } catch {
+    /* fresh capture */
+  }
   await locator.screenshot({ path: out });
   return { out, size: statSync(out).size, hash: sha256(out) };
 }
@@ -117,6 +122,7 @@ const { formatInvalidationLine } = await import("../lib/guardrail-format.ts");
 const { displayShapeName, formatBiasConflictBannerText } = await import(
   "../lib/copilot-display.ts",
 );
+const { formatSkippedBreakdown } = await import("../lib/copilot-chart-ai.ts");
 
 const guard = shape?.guardrail ?? {};
 const inv = formatInvalidationLine(guard.invalidation, "BTCUSDT") ?? "—";
@@ -134,9 +140,10 @@ await page.setContent(
 );
 results.push(await shotLocator(page, page.locator(".card"), "chart-ai-guardrail-evidence.png"));
 
+const feedbackTitle = displayShapeName(shape?.name ?? "Shape");
 await page.setContent(
   cardHtml(
-    `<div><strong>${shape?.name ?? "Shape"}</strong></div>`,
+    `<div><strong>${feedbackTitle}</strong></div>`,
     `<button class="btn keep">Giữ</button><button class="btn reject">Bỏ</button>`,
   ),
 );
@@ -149,16 +156,15 @@ const biasMsg = formatBiasConflictBannerText(
 await page.setContent(cardHtml("", `<div class="warn">${biasMsg}</div>`));
 results.push(await shotLocator(page, page.locator(".warn"), "chart-ai-bias-conflict.png"));
 
-const capLine = skipped
-  .map((r) => `${r.count} vượt giới hạn 6 hình`)
-  .join(", ");
-const skipText = capLine
-  ? `Bỏ qua ${skipped.reduce((s, r) => s + r.count, 0)} hình: ${capLine}.`
-  : metaFallback
-    ? "Lưu ý: máy chủ đã thay lựa chọn mẫu vì vượt giới hạn 6 hình."
-    : "";
+const skipFromSse = formatSkippedBreakdown(skipped)?.trim() ?? "";
+const skipText =
+  skipFromSse ||
+  (metaFallback ? "Hình do máy chủ chọn." : "Bỏ qua 0 hình.");
 await page.setContent(
-  cardHtml(`<div class="muted">Tin nhắn Copilot</div>`, `<p style="margin-top:8px">${skipText}</p>`),
+  cardHtml(
+    `<div class="muted">Tin nhắn Copilot</div>`,
+    `<p style="margin-top:8px;max-width:320px">${skipText.replace(/^\n+/, "")}</p>`,
+  ),
 );
 results.push(await shotLocator(page, page.locator("p"), "chart-ai-skipped-breakdown.png"));
 
