@@ -1233,3 +1233,56 @@ Before = `30618743`. 16 windows + full 80-series scan; extra low-price set (DOGE
 **Readiness:**
 - (a) **Internal alpha — ready** with the disclaimer, ideally after the one-line N21 mitigation (drop model markers or force neutral, no label).
 - (b) **General user testing — not ready:** N21 lets the model draw a labelled green BUY arrow under a bearish regime, and N22/N23 produce wrong UI notes on every run.
+
+### C.14 Re-check at `7bf69181` (box, 2026-10-25, scripted model only — Mac offline, OmniRoute e2e skipped)
+
+Before = `ff320d76`. 16 windows + 80-series scan + low-price set (DOGE/PEPE/SHIB/XRP). Web replay via `createCopilotClient` (vitest, Node 22, tip `apps/web`).
+
+| Metric | ff320d76 | 7bf69181 |
+|---|---|---|
+| Picks / gate drop / splits | 48/84/0/0 | unchanged |
+| Web Zod: shapes all paths | 286/286 + 12/12 | 286/286 + 12/12 |
+| Web Zod: server anchor markers | 0/6 | **6/6**; rendered as chart markers: **0** (`isChartVisibleAgentMarker` hides `drawing_id` anchors) |
+| Model marker / extra-field injection (55 probes × 9 payload kinds = 495 runs) | BUY arrow rendered | **0 model strings in any SSE event**. The only hit was the server disclaimer containing "vào lệnh". All 2,970 SSE markers were server anchors `neutral/circle/inBar/"Neo"` |
+| Broken lines / broken-out triangles / HTF SOL 4h | 0/0/0 s | 0/0/0 s |
+| S/R "(flipped)" without a prior close on the other side | 10/228 | 10/228 (unchanged, see N10) |
+| Invariance to user bias | 72/72 | 72/72 |
+| ruff / format | clean | clean (106 files) |
+| pytest | 201 / 2 skip | 202 passed / 3 skipped; Zod wire 5/5 with `CI=true` |
+| web tsc / vitest (Node 22) | 0 / 156 | 0 / **163/163** |
+
+**Model-controlled fields now (complete list)**
+1. `drawing_intents[].type/candidate_id(s)`: regex + catalog + style + budget (ModelRetry). Resolved to server shapes, never rendered as text.
+2. `pick_assessments[].candidate_id`: must be in intents.
+3. `quality`: enum.
+4. `confluence[]`: 7-value enum.
+5. `touch_ack`: bool.
+
+Items 3-5 are rendered via template, now prefixed "AI đánh giá:". Nothing else: `AnalyzeResultLlm` is `extra="forbid"`, and `markers`/`summary`/`pick_notes` are dropped in text mode (`output_parsing.py:33`).
+
+**Verdicts**
+1. **N21 — fixed.**
+   - Any model `markers`, extra top-level keys, extra keys inside assessments/intents, non-enum values or fake IDs cause a ModelRetry. After 6 calls the run falls back to server picks; nothing model-authored streams.
+   - Side effect (low/medium): in PromptedOutput mode even a harmless `"markers": []` from a model trained on the old prompt is a hard validation failure. That costs 6 calls (≈ 6× latency/cost) and ends in fallback, while text mode silently strips it. Make the two modes consistent: strip unknown legacy keys before validation, or keep `extra="forbid"` but strip `markers` in a `model_validator(mode="before")`.
+2. **N22 — fixed.** Anchors carry `drawing_id` + wire guardrail, pass web Zod, sit in the marker store linked to shapes, and are not drawn. The chat still says "Đã đặt 6 đánh dấu trên biểu đồ." even though 0 are visible (copy nit).
+3. **N23 — fixed.** Same client, fallback run → normal run → normal run: "Hình do máy chủ chọn." only on run 1, no dropped-marker note, no glued text, one overlay list per run.
+4. **Web pending items (UI developer):** `marker-map.ts colorForSide` still maps buy→green/sell→red, and `normalize-agent-shape.ts coerceAgentMarker` still maps `long→buy`/`short→sell` with arrowUp/arrowDown defaults. **Not switched yet.** Harmless now that the server never emits non-anchor markers, but switch them as planned for defence in depth.
+5. **N24 (new, medium, web): duplicate shapes on re-analysis.** Two analyses of the same window on one client give 12 shapes / 6 unique IDs, because stable hashed IDs plus append-on-commit stack identical overlays. React key collisions follow, and `remove(id)` is ambiguous. Replace the previous AI overlay set on a new run, or upsert by ID.
+6. **Tick formatting — fixed.**
+   - exchangeInfo ticks PEPE 1e-8, DOGE 1e-5, BTC 0.01; the magnitude fallback works for unknown symbols.
+   - Names: "S/R 0.00000376" (PEPE), "S/R resistance (flipped) 0.00000494" (SHIB), "S/R 0.08380" (DOGE), "0.5709" (XRP); ATR is no longer "0.00".
+   - **N25 (medium, perf):** `symbol_tick._load_exchange_info` does a synchronous `urllib` fetch of the full exchangeInfo (**17.8 MB, 4.3 s** from the box) inside `build_candidate_catalog`, on the async request path. It blocks the event loop on the first request after every cold start (Render free tier sleeps), and on failure it sets `_FETCHED_ALL=True` permanently. Use `exchangeInfo?symbol=X` (or `symbols=[…]`) per symbol with async httpx, a TTL cache, and retry after failure.
+7. **Summary.**
+   - The invalidation line is present ("Vô hiệu hóa (detector): close_above tại 87,299.13"), but the condition is the **raw enum `close_above`**. Translate it to "đóng cửa trên".
+   - `evidence_i18n` maps only 3 strings. Across 80 series + low-price windows, these remain English in the summary: "only 2 swing touches on tops" (102), "on bottoms" (68), "neckline not broken" (3), "pattern completed" (2).
+   - The `analysis` event (analysis panel) is **not translated at all**: "only N touches" (108), "role from close: resistance/support" (68), and the strings above.
+   - Candidate names in the summary are English ("Fib retracement", "Resistance trendline", "Double top"…). The web translates names via `displayShapeName`, but the server summary does not.
+   - Fix: translate by key at the source (detector emits codes, i18n table renders) instead of string matching.
+8. **N10 — not fixed (10/228 unchanged).** Example: SOLUSDT 4h "S/R resistance (flipped) 83.33" (zone 83.20–83.46 built from two swing highs; every close after bar 108 is below). A close dipping back to ≥ low and then below low counts as `_sr_crossed_below` (`candidates.py:209-216`), so a **rejection from resistance is labelled a flip**. A flip needs a prior close on the *opposite* side: above `high` before crossing below `low`, and vice versa.
+9. Invariance, Zod, broken lines, triangles, H&S, HTF: all hold.
+
+**Remaining (priority):** N24 (duplicate overlays on re-analysis) → N25 (17.8 MB sync exchangeInfo on request path) → i18n at source (analysis panel + summary evidence + `close_above`) → N10 rejection-vs-flip → strip legacy `markers` before validation (avoid 6-call fallback) → web defence-in-depth (neutral colorForSide / no long→buy coercion) → marker chat copy. Earlier opens: #13, #21, #24, #27. Real OmniRoute e2e still pending (Mac offline).
+
+**Readiness:**
+- (a) **Internal alpha — ready.**
+- (b) **General user testing — close; not yet.** No model text or signal reaches the user any more (the anti-sycophancy and safety blockers are closed). The remaining blockers are UX/perf rather than safety: N24 stacks duplicate overlays on every re-run, N25 can stall the first request after a cold start by ~4 s+ (worse on Render), and the analysis panel shows English evidence. Fix N24/N25 + i18n and run the real OmniRoute e2e once the Mac is online, then it is ready.
