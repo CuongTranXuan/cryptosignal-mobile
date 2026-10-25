@@ -283,8 +283,9 @@ describe("use-copilot / createCopilotClient", () => {
       interval: "1h",
       time: c1.time,
       side: "neutral",
-      position: "aboveBar",
+      position: "inBar",
       shape: "circle",
+      label: "Neo",
       confidence: 0.8,
       source: "agent",
       drawing_id: "drw_test",
@@ -306,9 +307,9 @@ describe("use-copilot / createCopilotClient", () => {
       getClosedTimes: () => new Set([c0.time, c1.time, c2.time]),
     });
     await client.analyze("markers");
-    expect(useMarkerStore.getState().markers).toHaveLength(1);
-    expect(useMarkerStore.getState().markers[0]?.drawing_id).toBe("drw_test");
+    expect(useMarkerStore.getState().markers).toHaveLength(0);
     const content = useAiStore.getState().messages.find((m) => m.role === "agent")?.content ?? "";
+    expect(content).not.toContain("điểm neo");
     expect(content).not.toContain("đánh dấu không hợp lệ");
   });
 
@@ -361,21 +362,29 @@ describe("use-copilot / createCopilotClient", () => {
     useShapeStore.setState({ shapes: [committed], selectedId: null });
 
     const marker: AgentMarker = {
-      id: "mrk-1",
+      id: "anchor-drw_test",
       symbol: "BTCUSDT",
       interval: "1h",
       time: c1.time,
-      side: "buy",
-      position: "belowBar",
-      shape: "arrowUp",
+      side: "neutral",
+      position: "inBar",
+      shape: "circle",
+      label: "Neo",
       confidence: 0.7,
       source: "agent",
+      drawing_id: "tri-1",
     };
 
     const fetchMock = vi.fn(async () =>
       streamResponse([
         sseChunk("shapes", { shapes: [validShape("tri-1")] }),
-        sseChunk("markers", { markers: [marker, { ...marker, id: "off", time: 999 }] }),
+        sseChunk("markers", {
+          markers: [
+            marker,
+            { ...marker, id: "off", time: 999 },
+            { ...marker, id: "orphan", drawing_id: "not-on-chart" },
+          ],
+        }),
         sseChunk("done", {}),
       ]),
     );
@@ -391,10 +400,10 @@ describe("use-copilot / createCopilotClient", () => {
     expect(useShapeStore.getState().committed().map((s) => s.id).sort()).toEqual(
       ["keep", "tri-1"].sort(),
     );
-    expect(useMarkerStore.getState().markers.map((m) => m.id)).toEqual(["mrk-1"]);
+    expect(useMarkerStore.getState().markers.map((m) => m.id)).toEqual(["anchor-drw_test"]);
     const agentMsg = useAiStore.getState().messages.find((m) => m.role === "agent");
     expect(agentMsg?.content).toContain("Đã vẽ 1 hình trên biểu đồ");
-    expect(agentMsg?.content).toContain("Đã đặt 1 đánh dấu trên biểu đồ.");
+    expect(agentMsg?.content).toContain("Đã đặt 1 điểm neo.");
     expect(useAiStore.getState().messages.find((m) => m.role === "agent")?.content).toContain("Bỏ qua");
   });
 
@@ -720,15 +729,17 @@ describe("use-copilot / createCopilotClient", () => {
     useShapeStore.getState().setPreview([validShape("gone")]);
     useMarkerStore.getState().setMarkers([
       {
-        id: "mrk-gone",
+        id: "anchor-gone",
         symbol: "BTCUSDT",
         interval: "1h",
         time: c1.time,
-        side: "buy",
-        position: "belowBar",
-        shape: "arrowUp",
+        side: "neutral",
+        position: "inBar",
+        shape: "circle",
+        label: "Neo",
         confidence: 0.5,
         source: "agent",
+        drawing_id: "drw_gone",
       },
     ]);
     const client = createCopilotClient({

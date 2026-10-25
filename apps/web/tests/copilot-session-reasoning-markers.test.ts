@@ -15,15 +15,17 @@ import { resetCopilotModelsStoreForTests } from "../components/copilot/use-copil
 import type { AgentMarker } from "../lib/pattern-shape";
 
 const sampleMarker: AgentMarker = {
-  id: "mk1",
+  id: "anchor-mk1",
   symbol: "BTCUSDT",
   interval: "1h",
   time: 1,
-  side: "buy",
-  position: "belowBar",
-  shape: "arrowUp",
+  side: "neutral",
+  position: "inBar",
+  shape: "circle",
+  label: "Neo",
   confidence: 0.9,
   source: "agent",
+  drawing_id: "drw_mk1",
 };
 
 describe("session reasoning_effort and markers", () => {

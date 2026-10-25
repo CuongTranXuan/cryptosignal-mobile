@@ -35,6 +35,17 @@ def main() -> int:
     assert shapes_ev is not None, "missing shapes event"
     raw = shapes_ev.get("shapes") or []
     assert len(raw) > 0, "expected non-zero shapes"
+
+    markers_ev = next((d for e, d in events if e == "markers"), None)
+    assert markers_ev is not None, "missing markers event (C.13 anchors)"
+    wire_markers = markers_ev.get("markers") or []
+    assert len(wire_markers) == len(raw), (len(wire_markers), len(raw))
+    for mk in wire_markers:
+        assert mk.get("side") == "neutral", mk
+        assert mk.get("position") == "inBar", mk
+        assert mk.get("shape") == "circle", mk
+        assert mk.get("label") == "Neo", mk
+        assert mk.get("drawing_id"), mk
     assert len(raw) <= 6, len(raw)
     for sh in raw:
         assert sh.get("id", "").startswith("drw_"), sh.get("id")

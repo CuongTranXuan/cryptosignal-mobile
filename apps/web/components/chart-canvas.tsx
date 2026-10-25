@@ -323,7 +323,7 @@ export function ChartCanvas({ coordApiRef }: ChartCanvasProps) {
           {symbol} · {connection}
         </div>
       </div>
-      <div className="relative min-h-0 flex-1">
+      <div className="relative min-h-0 flex-1" data-testid="chart-canvas">
         <div ref={containerRef} className="absolute inset-0" />
         <div ref={overlayBoxRef} className="absolute inset-x-0 top-0" style={{ pointerEvents: "none" }}>
           <ShapeOverlay coordApiRef={coordApiRef} overlayTick={overlayTick} />

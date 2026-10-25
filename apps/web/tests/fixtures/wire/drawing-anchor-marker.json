@@ -1,18 +1,22 @@
 {
-  "id": "anchor-drw_abc123",
+  "id": "anchor-drw_069d5f9c22e48577",
   "symbol": "BTCUSDT",
   "interval": "1h",
-  "time": 1709996400,
+  "time": 1792598400,
   "side": "neutral",
-  "position": "aboveBar",
+  "position": "inBar",
   "shape": "circle",
-  "confidence": 0.72,
+  "label": "Neo",
+  "confidence": 0.88,
   "source": "agent",
-  "drawing_id": "drw_abc123",
+  "drawing_id": "drw_069d5f9c22e48577",
   "guardrail": {
-    "regime": "trend_up",
-    "confidence": 0.72,
-    "evidence_against": ["Volume divergence on last swing"],
-    "invalidation": { "price": 82500, "condition": "close_below" }
+    "regime": "range",
+    "confidence": 0.88,
+    "evidence_against": [],
+    "invalidation": {
+      "price": 81025.83623634193,
+      "condition": "close_above"
+    }
   }
 }

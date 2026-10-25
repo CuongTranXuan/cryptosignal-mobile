@@ -31,6 +31,7 @@ import {
 } from "./copilot-strings";
 import { useCopilotSessionStore } from "./stores/copilot-session-store";
 import { fetchKlines as defaultFetchKlines, type FetchKlines } from "./market-client";
+import { filterRenderableAnchorMarkers } from "./marker-map";
 import { coerceAgentMarker, coerceAgentShape } from "./normalize-agent-shape";
 import {
   AgentMarkerSchema,
@@ -130,6 +131,18 @@ export function filterMarkersToClosedTimes(
   return { valid, droppedIds };
 }
 
+function shapeIdsOnChart(): Set<string> {
+  return new Set(useShapeStore.getState().shapes.map((shape) => shape.id));
+}
+
+function applyRenderableStreamMarkers(
+  timeValidMarkers: AgentMarker[],
+): { renderable: AgentMarker[]; renderableCount: number } {
+  const renderable = filterRenderableAnchorMarkers(timeValidMarkers, shapeIdsOnChart());
+  useMarkerStore.getState().setMarkers(renderable);
+  return { renderable, renderableCount: renderable.length };
+}
+
 function isSuperseded(data: Record<string, unknown>): boolean {
   return data.superseded === true || data.note === "superseded";
 }
@@ -225,6 +238,8 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
   let streamNotesFinalized = false;
   let streamSawServerOverlayText = false;
   let pendingDrewShapesNotice: { count: number; lines: string[] } | null = null;
+  let streamTimeValidMarkers: AgentMarker[] = [];
+  let streamRenderableAnchorCount = 0;
 
   const applyStreamMergedMeta = (merged: AnalyzeMetaEvent): void => {
     streamMergedMeta = merged;
@@ -256,6 +271,8 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
     if (streamNotesFinalized) return;
     streamNotesFinalized = true;
     flushPendingDrewShapesNotice();
+    const anchorNote = copilotPlacedMarkers(streamRenderableAnchorCount);
+    if (anchorNote) appendAgentChatLine(anchorNote);
     if (!streamMergedMeta) return;
     appendMetaFallbackNote(streamMergedMeta);
   };
@@ -265,6 +282,8 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
     streamNotesFinalized = false;
     streamSawServerOverlayText = false;
     pendingDrewShapesNotice = null;
+    streamTimeValidMarkers = [];
+    streamRenderableAnchorCount = 0;
   };
 
   const runQueuedIfAny = async () => {
@@ -404,6 +423,9 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
         }
         noteDroppedShapes(droppedIds);
         appendServerSkippedNote(data);
+        if (streamTimeValidMarkers.length > 0) {
+          streamRenderableAnchorCount = applyRenderableStreamMarkers(streamTimeValidMarkers).renderableCount;
+        }
         return "ok";
       }
       case "markers": {
@@ -433,10 +455,8 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
           allowedTimes,
         );
         droppedIds.push(...outOfWindow);
-        useMarkerStore.getState().setMarkers(valid);
-        if (valid.length > 0) {
-          appendAgentChatLine(copilotPlacedMarkers(valid.length));
-        }
+        streamTimeValidMarkers = valid;
+        streamRenderableAnchorCount = applyRenderableStreamMarkers(valid).renderableCount;
         noteDroppedMarkers(droppedIds);
         return "ok";
       }

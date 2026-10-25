@@ -1,11 +1,13 @@
 {
-  "id": "mrk_sweep_1",
+  "id": "anchor-drw_fixture",
   "symbol": "BTCUSDT",
   "interval": "1h",
   "time": 1710000000,
-  "side": "buy",
-  "position": "belowBar",
-  "shape": "arrowUp",
+  "side": "neutral",
+  "position": "inBar",
+  "shape": "circle",
+  "label": "Neo",
   "confidence": 0.81,
-  "source": "agent"
+  "source": "agent",
+  "drawing_id": "drw_fixture"
 }

@@ -45,7 +45,7 @@ export const PatternShapeSchema = z
 export type PatternShape = z.infer<typeof PatternShapeSchema>;
 export const parsePatternShape = (input: unknown): PatternShape => PatternShapeSchema.parse(input);
 
-/** Signal direction for series markers — not a trading order field. PatternShape still forbids `side`. */
+/** Server-built drawing anchors (C.13). `side` is wire metadata only; chart uses neutral styling. */
 export const AgentMarkerSchema = z
   .object({
     id: z.string().min(1),

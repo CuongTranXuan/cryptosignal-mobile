@@ -89,12 +89,12 @@ export function coerceAgentMarker(
   if (out.position == null && typeof out.placement === "string") out.position = out.placement;
   if (out.shape == null && typeof out.marker === "string") out.shape = out.marker;
   if (out.side == null && typeof out.direction === "string") out.side = out.direction;
-  if (out.side === "long") out.side = "buy";
-  if (out.side === "short") out.side = "sell";
-  if (out.position == null) out.position = out.side === "sell" ? "aboveBar" : "belowBar";
-  if (out.shape == null) {
-    out.shape = out.side === "sell" ? "arrowDown" : out.side === "buy" ? "arrowUp" : "circle";
+  if (out.side === "long" || out.side === "short") out.side = "neutral";
+  if (out.side !== "buy" && out.side !== "sell" && out.side !== "neutral") {
+    out.side = "neutral";
   }
+  if (out.position == null) out.position = "inBar";
+  if (out.shape == null) out.shape = "circle";
   for (const key of ["color", "placement", "marker", "direction", "label"]) {
     // keep label if present as optional
     if (key === "label") continue;

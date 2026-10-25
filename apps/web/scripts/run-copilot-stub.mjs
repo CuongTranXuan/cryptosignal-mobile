@@ -140,6 +140,32 @@ class FakeRunner:
                 "delta": f"\\n\\nLớp phủ sẵn sàng: {len(wire_shapes)} — {names}{more}.",
             }
 
+        anchor_markers = []
+        for s in wire_shapes:
+            sid = str(s.get("id") or "")
+            if not sid:
+                continue
+            pts = s.get("points") or []
+            time_val = int(pts[0]["time"]) if pts else 0
+            anchor_markers.append(
+                {
+                    "id": f"anchor-{sid}",
+                    "symbol": request.symbol,
+                    "interval": request.interval,
+                    "time": time_val,
+                    "side": "neutral",
+                    "position": "inBar",
+                    "shape": "circle",
+                    "label": "Neo",
+                    "confidence": float(s.get("confidence", 0.7)),
+                    "source": "agent",
+                    "drawing_id": sid,
+                    "guardrail": s.get("guardrail"),
+                }
+            )
+        if anchor_markers:
+            yield "markers", {"markers": anchor_markers}
+
         final_meta = dict(meta)
         final_meta["intent_budget_fallback"] = True
         final_meta["preview_shape_budget"] = 6

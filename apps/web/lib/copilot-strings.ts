@@ -137,7 +137,8 @@ export function copilotDrewShapes(count: number, lines: string[]): string {
 export const COPILOT_SCROLLED_TO_OVERLAYS = "\nĐã cuộn biểu đồ để hiển thị các lớp phủ.";
 
 export function copilotPlacedMarkers(count: number): string {
-  return `\n\nĐã đặt ${count} đánh dấu trên biểu đồ.`;
+  if (count <= 0) return "";
+  return `\n\nĐã đặt ${count} điểm neo.`;
 }
 
 export function copilotSkippedShapes(count: number): string {
