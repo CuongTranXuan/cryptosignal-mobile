@@ -81,7 +81,6 @@ async def test_stream_uses_server_bias_not_model_story(llm_env, monkeypatch):
                         )
                     ],
                     drawing_intents=[CandidateDrawingIntent(candidate_id=top_id)],
-                    markers=[],
                 )
             },
         )()

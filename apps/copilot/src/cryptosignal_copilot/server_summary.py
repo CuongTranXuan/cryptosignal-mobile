@@ -8,6 +8,7 @@ from cryptosignal_copilot.analysis_events import build_analysis_event, regime_to
 from cryptosignal_copilot.candidates import CandidateCatalog, DrawingCandidate
 from cryptosignal_copilot.chart_regime import Regime
 from cryptosignal_copilot.drawing_intent import AnalyzeResultLlm, DrawingIntent, PickAssessment
+from cryptosignal_copilot.evidence_i18n import evidence_to_vietnamese
 from cryptosignal_copilot.market_price import format_market_price
 
 SummaryDirection = Literal["bullish", "bearish", "neutral", "conditional"]
@@ -106,7 +107,7 @@ def _render_assessment(assessment: PickAssessment) -> str:
         parts.append("hội tụ: " + ", ".join(labels))
     if assessment.touch_ack:
         parts.append("đã xác nhận chạm")
-    return "; ".join(parts)
+    return "AI đánh giá: " + "; ".join(parts)
 
 
 def _pick_lines(
@@ -155,6 +156,12 @@ def compose_stream_summary(
     else:
         parts.append(_bias_line(bias))
 
+    inv = analysis.get("invalidation")
+    if isinstance(inv, dict) and inv.get("price") is not None:
+        inv_price = format_market_price(float(inv["price"]), symbol)
+        cond = str(inv.get("condition") or "close beyond")
+        parts.append(f"Vô hiệu hóa (detector): {cond} tại {inv_price}.")
+
     if bool(intent_check.get("bias_conflict")):
         message = intent_check.get("message")
         conflict_line = (
@@ -172,12 +179,13 @@ def compose_stream_summary(
             parts.append("Ủng hộ: " + "; ".join(str(x) for x in ev_for[:3]) + ".")
         ev_against = analysis.get("evidence_against") or []
         if ev_against:
-            parts.append("Lưu ý kỹ thuật: " + "; ".join(str(x) for x in ev_against[:4]) + ".")
+            vi = [evidence_to_vietnamese(str(x)) for x in ev_against[:4]]
+            parts.append("Lưu ý kỹ thuật: " + "; ".join(vi) + ".")
 
     assessments_by_id = {a.candidate_id: a for a in llm_output.pick_assessments}
     pick_lines = _pick_lines(catalog, llm_output.drawing_intents, assessments_by_id)
     if pick_lines:
-        parts.append("Đánh giá theo pick (máy chủ dựng từ trường có cấu trúc):")
+        parts.append("Chi tiết pick:")
         parts.extend(pick_lines)
 
     parts.append("Đây không phải tín hiệu vào lệnh; chỉ mô tả geometry trên nến đã đóng.")

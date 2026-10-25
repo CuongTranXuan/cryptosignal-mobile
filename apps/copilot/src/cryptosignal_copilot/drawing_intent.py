@@ -92,7 +92,6 @@ class AnalyzeResultLlm(BaseModel):
     drawing_intents: list[DrawingIntent] = Field(
         default_factory=list, max_length=MAX_DRAWING_INTENTS
     )
-    markers: list[dict[str, Any]] = Field(default_factory=list)
 
 
 def touch_count_for_candidate(cand: DrawingCandidate) -> int:
@@ -292,5 +291,4 @@ def build_deterministic_fallback(
     return AnalyzeResultLlm(
         pick_assessments=[],
         drawing_intents=deterministic_top_intents(catalog, style),
-        markers=[],
     )

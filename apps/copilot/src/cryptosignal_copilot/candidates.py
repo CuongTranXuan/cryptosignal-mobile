@@ -195,25 +195,31 @@ def _sr_zone_start_time(cand: DrawingCandidate) -> int:
     return int(cand.break_time or 0)
 
 
+def _sr_crossed_above(candles: list[Candle], high_f: float, start_t: int) -> bool:
+    """Bar-to-bar close cross above the zone high (break-through, not mere bounce inside)."""
+    after = [float(c.close) for c in candles if c.time > start_t]
+    prev: float | None = None
+    for close in after:
+        if prev is not None and prev <= high_f and close > high_f:
+            return True
+        prev = close
+    return False
+
+
+def _sr_crossed_below(candles: list[Candle], low_f: float, start_t: int) -> bool:
+    after = [float(c.close) for c in candles if c.time > start_t]
+    prev: float | None = None
+    for close in after:
+        if prev is not None and prev >= low_f and close < low_f:
+            return True
+        prev = close
+    return False
+
+
 def _sr_price_crossed_zone(
     candles: list[Candle], low_f: float, high_f: float, start_t: int
 ) -> bool:
-    """True when a close after zone formation leaves the band from a not-yet-outside side."""
-    after = [float(c.close) for c in candles if c.time > start_t]
-    if not after:
-        return False
-    had_at_or_below_high = False
-    had_at_or_above_low = False
-    for close in after:
-        if close > high_f and had_at_or_below_high:
-            return True
-        if close < low_f and had_at_or_above_low:
-            return True
-        if close <= high_f:
-            had_at_or_below_high = True
-        if close >= low_f:
-            had_at_or_above_low = True
-    return False
+    return _sr_crossed_above(candles, high_f, start_t) or _sr_crossed_below(candles, low_f, start_t)
 
 
 def _sr_role_from_last_close(cand: DrawingCandidate, candles: list[Candle]) -> DrawingCandidate:
@@ -227,12 +233,17 @@ def _sr_role_from_last_close(cand: DrawingCandidate, candles: list[Candle]) -> D
     low_f, high_f = float(low), float(high)
     close = float(candles[-1].close)
     base_price = (low_f + high_f) / 2.0
+    from cryptosignal_copilot.market_price import format_market_price
+
+    sym = str(shape.get("symbol") or "BTCUSDT")
+    price_label = format_market_price(base_price, sym)
     start_t = _sr_zone_start_time(cand)
-    flipped = _sr_price_crossed_zone(candles, low_f, high_f, start_t)
     if close > high_f:
+        flipped = _sr_crossed_above(candles, high_f, start_t)
         role = "support"
         inv = low_f
     elif close < low_f:
+        flipped = _sr_crossed_below(candles, low_f, start_t)
         role = "resistance"
         inv = high_f
     else:
@@ -246,14 +257,14 @@ def _sr_role_from_last_close(cand: DrawingCandidate, candles: list[Candle]) -> D
             evidence_against=list(cand.evidence_against),
             invalidation_price=cand.invalidation_price,
             break_time=cand.break_time,
-            name=f"S/R {base_price:.2f}",
+            name=f"S/R {price_label}",
         )
     score = cand.score * 0.95 if flipped else cand.score
     if flipped:
         side = "support" if role == "support" else "resistance"
-        name = f"S/R {side} (flipped) {base_price:.2f}"
+        name = f"S/R {side} (flipped) {price_label}"
     else:
-        name = f"S/R {base_price:.2f}"
+        name = f"S/R {price_label}"
     evidence = list(cand.evidence_against)
     if flipped:
         evidence.append(f"role from close: {role}")

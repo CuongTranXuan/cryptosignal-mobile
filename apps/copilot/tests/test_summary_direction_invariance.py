@@ -48,7 +48,6 @@ async def test_summary_direction_same_for_bullish_vs_bearish_user_bias(llm_env, 
                 "output": AnalyzeResultLlm(
                     pick_assessments=[],
                     drawing_intents=[CandidateDrawingIntent(candidate_id=cid)],
-                    markers=[],
                 )
             },
         )()

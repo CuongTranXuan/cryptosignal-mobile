@@ -14,7 +14,6 @@ _VALID_JSON = json.dumps(
     {
         "pick_assessments": [],
         "drawing_intents": [],
-        "markers": [],
     }
 )
 

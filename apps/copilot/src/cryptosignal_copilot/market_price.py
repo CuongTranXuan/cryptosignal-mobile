@@ -1,25 +1,14 @@
-"""Chart-aligned price formatting (mirrors apps/web/lib/format-market-price.ts)."""
+"""Chart-aligned price formatting with exchange tick sizes."""
 
 from __future__ import annotations
 
-_TICK_SIZE_BY_SYMBOL: dict[str, float] = {
-    "BTCUSDT": 0.01,
-    "ETHUSDT": 0.01,
-    "BNBUSDT": 0.01,
-    "SOLUSDT": 0.01,
-    "XRPUSDT": 0.0001,
-}
-
-
-def tick_size_for_symbol(symbol: str) -> float:
-    key = symbol.replace("/", "").upper()
-    return _TICK_SIZE_BY_SYMBOL.get(key, 0.01)
+from cryptosignal_copilot.symbol_tick import tick_size_for_symbol
 
 
 def _decimal_places(tick_size: float) -> int:
     if tick_size <= 0:
-        return 2
-    text = f"{tick_size:.10f}".rstrip("0").rstrip(".")
+        return 8
+    text = f"{tick_size:.16f}".rstrip("0").rstrip(".")
     if "." not in text:
         return 0
     frac = text.split(".", 1)[1]
@@ -27,7 +16,22 @@ def _decimal_places(tick_size: float) -> int:
 
 
 def format_market_price(price: float, symbol: str) -> str:
-    tick = tick_size_for_symbol(symbol)
+    tick = tick_size_for_symbol(symbol, reference_price=abs(price))
     decimals = _decimal_places(tick)
     rounded = round(price / tick) * tick if tick > 0 else price
-    return f"{rounded:,.{decimals}f}"
+    if rounded == 0 and price != 0:
+        rounded = price
+        decimals = max(decimals, _decimal_places(_tick_from_display(price)))
+    formatted = f"{rounded:,.{decimals}f}"
+    if formatted in {"0.00", "0.0000", "0"} and price != 0:
+        sig = f"{price:.8g}"
+        return sig
+    return formatted
+
+
+def _tick_from_display(price: float) -> float:
+    import math
+
+    if price <= 0:
+        return 0.01
+    return 10 ** max(math.floor(math.log10(abs(price))) - 2, -8)

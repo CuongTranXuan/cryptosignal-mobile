@@ -15,13 +15,15 @@ from cryptosignal_copilot.chart_real_path import run_real_path, simulate_llm_top
 from cryptosignal_copilot.drawing_intent import resolve_drawing_intents, enrich_resolved_shapes
 from cryptosignal_copilot.schema import Candle, filter_preview_details
 from cryptosignal_copilot.drawing_gate import DrawingWindow
+from cryptosignal_copilot.chart_response import enrich_shapes_with_guardrails
+from cryptosignal_copilot.wire_marker import WIRE_MARKER_TOP_KEYS, markers_for_wire
 from cryptosignal_copilot.wire_shape import WIRE_SHAPE_TOP_KEYS, shapes_for_wire
 
 FIXTURE = (
     Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "ohlcv" / "btcusdt_1h_200.json"
 )
 WEB_ROOT = Path(__file__).resolve().parents[2] / "web"
-ZOD_SCRIPT = """
+ZOD_SHAPE_SCRIPT = """
 import { readFileSync } from "node:fs";
 import { PatternShapeSchema } from "./lib/pattern-shape.ts";
 
@@ -30,6 +32,24 @@ for (const shape of shapes) {
   PatternShapeSchema.parse(shape);
 }
 console.log("ok", shapes.length);
+"""
+
+ZOD_MARKER_SCRIPT = """
+import { readFileSync } from "node:fs";
+import { z } from "zod";
+import { AgentMarkerSchema } from "./lib/pattern-shape.ts";
+import { DrawingGuardrailSchema } from "./lib/copilot-schema.ts";
+
+const WireAgentMarkerSchema = AgentMarkerSchema.extend({
+  drawing_id: z.string().min(1).optional(),
+  guardrail: DrawingGuardrailSchema.optional(),
+}).strict();
+
+const markers = JSON.parse(readFileSync(0, "utf8"));
+for (const marker of markers) {
+  WireAgentMarkerSchema.parse(marker);
+}
+console.log("ok", markers.length);
 """
 
 
@@ -63,8 +83,56 @@ def test_wire_shapes_pass_web_zod_when_node_available():
     catalog = build_candidate_catalog(candles, symbol=symbol, interval=interval)  # type: ignore[arg-type]
     valid, _ = run_real_path(catalog, candles, symbol=symbol, interval=interval, style="classic")
     proc = subprocess.run(
-        ["npx", "tsx", "-e", ZOD_SCRIPT],
-        input=json.dumps(valid).encode(),
+        ["npx", "tsx", "-e", ZOD_SHAPE_SCRIPT],
+        input=json.dumps(shapes_for_wire(valid)).encode(),
+        cwd=WEB_ROOT,
+        capture_output=True,
+        timeout=120,
+    )
+    if proc.returncode != 0 and (
+        b"Cannot find" in proc.stderr or b"ERR_MODULE_NOT_FOUND" in proc.stderr
+    ):
+        msg = f"web deps not installed: {proc.stderr.decode()}"
+        if ci:
+            raise AssertionError(msg)
+        pytest.skip(msg)
+    assert proc.returncode == 0, proc.stderr.decode()
+
+
+def test_wire_marker_keys_match_contract():
+    symbol, interval, candles = _load()
+    catalog = build_candidate_catalog(candles, symbol=symbol, interval=interval)  # type: ignore[arg-type]
+    valid, _ = run_real_path(catalog, candles, symbol=symbol, interval=interval, style="classic")
+    assert valid
+    enriched, anchors = enrich_shapes_with_guardrails(
+        valid, regime=str(catalog.regime), symbol=symbol, interval=interval
+    )
+    assert anchors
+    wire = markers_for_wire(anchors)
+    for marker in wire:
+        assert set(marker.keys()) <= WIRE_MARKER_TOP_KEYS
+
+
+def test_wire_markers_pass_web_zod_when_node_available():
+    ci = os.environ.get("CI", "").lower() in {"1", "true", "yes"}
+    if shutil.which("node") is None:
+        if ci:
+            raise AssertionError("node is required in CI for wire Zod contract test")
+        pytest.skip("node is not installed")
+    if not (WEB_ROOT / "package.json").exists():
+        if ci:
+            raise AssertionError("apps/web package.json not found in CI")
+        pytest.skip("apps/web package.json not found")
+    symbol, interval, candles = _load()
+    catalog = build_candidate_catalog(candles, symbol=symbol, interval=interval)  # type: ignore[arg-type]
+    valid, _ = run_real_path(catalog, candles, symbol=symbol, interval=interval, style="classic")
+    enriched, anchors = enrich_shapes_with_guardrails(
+        valid, regime=str(catalog.regime), symbol=symbol, interval=interval
+    )
+    wire = markers_for_wire(anchors)
+    proc = subprocess.run(
+        ["npx", "tsx", "-e", ZOD_MARKER_SCRIPT],
+        input=json.dumps(wire).encode(),
         cwd=WEB_ROOT,
         capture_output=True,
         timeout=120,

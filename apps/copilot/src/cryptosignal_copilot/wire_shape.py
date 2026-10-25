@@ -32,8 +32,23 @@ def strip_internal_shape_fields(shape: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in shape.items() if not str(key).startswith("_")}
 
 
+def guardrail_for_wire(guard: dict[str, Any]) -> dict[str, Any]:
+    g_extra = set(guard.keys()) - WIRE_GUARDRAIL_KEYS
+    if g_extra:
+        raise ValueError(f"non-wire guardrail keys: {sorted(g_extra)}")
+    inv = guard.get("invalidation")
+    if isinstance(inv, dict):
+        i_extra = set(inv.keys()) - WIRE_INVALIDATION_KEYS
+        if i_extra:
+            raise ValueError(f"non-wire invalidation keys: {sorted(i_extra)}")
+    return guard
+
+
 def shape_for_wire(shape: dict[str, Any]) -> dict[str, Any]:
     out = strip_internal_shape_fields(shape)
+    guard = out.get("guardrail")
+    if isinstance(guard, dict):
+        out["guardrail"] = guardrail_for_wire(guard)
     _assert_wire_keys(out)
     return out
 
@@ -55,11 +70,4 @@ def _assert_wire_keys(shape: dict[str, Any]) -> None:
                     raise ValueError(f"non-wire point keys: {sorted(pt_extra)}")
     guard = shape.get("guardrail")
     if isinstance(guard, dict):
-        g_extra = set(guard.keys()) - WIRE_GUARDRAIL_KEYS
-        if g_extra:
-            raise ValueError(f"non-wire guardrail keys: {sorted(g_extra)}")
-        inv = guard.get("invalidation")
-        if isinstance(inv, dict):
-            i_extra = set(inv.keys()) - WIRE_INVALIDATION_KEYS
-            if i_extra:
-                raise ValueError(f"non-wire invalidation keys: {sorted(i_extra)}")
+        guardrail_for_wire(guard)

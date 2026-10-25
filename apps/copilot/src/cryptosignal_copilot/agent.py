@@ -52,7 +52,7 @@ from cryptosignal_copilot.schema import (
     filter_preview_details,
 )
 from cryptosignal_copilot.server_summary import compose_stream_summary
-from cryptosignal_copilot.text_leak import sanitize_free_text
+from cryptosignal_copilot.wire_marker import markers_for_wire
 from cryptosignal_copilot.wire_shape import shapes_for_wire
 
 # LANGUAGE: require Vietnamese for `summary` and chat-facing text the user sees.
@@ -74,8 +74,7 @@ INSTRUCTIONS = (
     "order_block|structure], touch_ack: bool}. No free-text notes; server renders Vietnamese. "
     "Hard limits: Max 6 drawing_intents and total shape_cost across picks <= 6 "
     "(use shape_cost on each candidate row). "
-    "Optional `markers` for point signals (AgentMarker schema). "
-    "Do not emit raw PatternShape geometry — ids only."
+    "Do not emit markers or raw PatternShape geometry — ids only."
 )
 
 logger = logging.getLogger(__name__)
@@ -130,10 +129,8 @@ class PydanticAiRunner:
             )
             yield "text", {"delta": summary + "\n\n"}
             raw_shapes = list(step.rule_shapes)
-            output_markers: list[dict] = []
         else:
             raw_shapes = None
-            output_markers = None
 
         current_plan = plan
         llm_output: AnalyzeResultLlm | None = None
@@ -254,16 +251,6 @@ class PydanticAiRunner:
                 )
                 raw_shapes, _ = resolve_drawing_intents(llm_output.drawing_intents, catalog)
                 raw_shapes = enrich_resolved_shapes(raw_shapes, catalog, last_close=last_close)
-                output_markers = []
-                for raw in llm_output.markers:
-                    if not isinstance(raw, dict):
-                        continue
-                    cleaned = dict(raw)
-                    if "label" in cleaned:
-                        cleaned["label"] = sanitize_free_text(
-                            cleaned.get("label") if isinstance(cleaned.get("label"), str) else None
-                        )
-                    output_markers.append(cleaned)
                 intent_check_pre = (current_plan.meta or {}).get("intent_check") or {}
                 by_id = catalog.by_id()
                 picked_pre: list[DrawingCandidate] = []
@@ -288,7 +275,6 @@ class PydanticAiRunner:
                 )
             else:
                 raw_shapes = []
-                output_markers = []
                 stream_text = None
 
             yield "text", {"delta": "Mô hình đã xong. Đang dựng lớp phủ…"}
@@ -401,15 +387,15 @@ class PydanticAiRunner:
             more = f" (+{len(valid_shapes) - 5} nữa)" if len(valid_shapes) > 5 else ""
             yield "text", {"delta": f"\n\nLớp phủ sẵn sàng: {len(valid_shapes)} — {names}{more}."}
 
-        merged_markers = list(output_markers or []) + drawing_anchors
-        if merged_markers:
-            valid_markers, dropped_marker_ids = filter_agent_markers(merged_markers, allowed_times)
+        if drawing_anchors:
+            valid_markers, dropped_marker_ids = filter_agent_markers(drawing_anchors, allowed_times)
             if dropped_marker_ids:
                 yield (
                     "text",
                     {"delta": f"\n\nĐã bỏ qua {len(dropped_marker_ids)} marker không hợp lệ."},
                 )
-            yield "markers", {"markers": valid_markers}
+            if valid_markers:
+                yield "markers", {"markers": markers_for_wire(valid_markers)}
 
         final_meta = dict(current_plan.meta or {})
         if final_meta.get("validator_fallback") or final_meta.get("intent_budget_fallback"):
@@ -473,7 +459,7 @@ def _build_user_prompt(
     if structured_output_mode == "text_json":
         json_hint = (
             "OUTPUT: Reply with one JSON object for AnalyzeResultLlm "
-            "(pick_assessments[], drawing_intents[], markers[]). "
+            "(pick_assessments[], drawing_intents[]). "
             "You may wrap it in ```json fences. No tool calls.\n"
         )
     return (
