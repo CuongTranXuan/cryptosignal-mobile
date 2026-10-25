@@ -50,6 +50,61 @@ def swing_anchor_time(cand: DrawingCandidate, zigzag: list[ZigZagSwing]) -> int:
     return 0
 
 
+def _line_breach_above(
+    candles: list[Candle],
+    anchor_t: int,
+    t1: int,
+    p1: float,
+    t2: int,
+    p2: float,
+    buffer: float,
+) -> bool:
+    for candle in candles:
+        if candle.time <= anchor_t:
+            continue
+        level = _line_price_at(t1, p1, t2, p2, candle.time)
+        if candle.close > level + buffer:
+            return True
+    return False
+
+
+def triangle_breakout_completed(
+    cand: DrawingCandidate,
+    candles: list[Candle],
+    atr: float | None,
+    zigzag: list[ZigZagSwing],
+) -> bool:
+    pid = cand.pattern_id
+    if pid not in {"ascending_triangle", "descending_triangle", "symmetrical_triangle"}:
+        return False
+    buffer = 0.25 * (atr or 1.0)
+    anchor = swing_anchor_time(cand, zigzag)
+    upper = lower = None
+    for shape in cand.shapes:
+        name = str(shape.get("name", "")).lower()
+        pts = _trendline_points(shape)
+        if pts is None:
+            continue
+        if "upper" in name:
+            upper = pts
+        if "lower" in name:
+            lower = pts
+    if upper is None or lower is None:
+        shapes_with_pts = [_trendline_points(s) for s in cand.shapes if _trendline_points(s)]
+        shapes_with_pts = [s for s in shapes_with_pts if s is not None]
+        if len(shapes_with_pts) >= 2:
+            upper, lower = shapes_with_pts[0], shapes_with_pts[1]
+    if not upper or not lower:
+        return False
+    if pid == "ascending_triangle":
+        return _line_breach_above(candles, anchor, *upper, buffer)
+    if pid == "descending_triangle":
+        return _line_violated(candles, anchor, *lower, "below", buffer)
+    return _line_breach_above(candles, anchor, *upper, buffer) or _line_violated(
+        candles, anchor, *lower, "below", buffer
+    )
+
+
 def _line_violated(
     candles: list[Candle],
     anchor_t: int,

@@ -1,59 +1,69 @@
-"""Regime-aware summary checks (anti-sycophancy, no trade calls)."""
+"""Structured summary direction + narrow imperative trade-call blocklist."""
 
 from __future__ import annotations
 
 import re
+from typing import Literal
 
 from pydantic_ai import ModelRetry
 
 from cryptosignal_copilot.chart_regime import Regime
 
-_FORBIDDEN_TRADE = re.compile(
-    r"\b("
-    r"mua ngay|bán ngay|đặt lệnh|vào lệnh|chốt lời|cắt lỗ|"
-    r"buy now|sell now|enter (?:here|now)|take profit|stop loss|"
-    r"entry|target price|giá mục tiêu"
-    r")\b",
-    re.IGNORECASE,
+SummaryDirection = Literal["bullish", "bearish", "neutral", "conditional"]
+
+# Imperative trade instructions only — not descriptive geometry/volatility/invalidation prose.
+_IMPERATIVE_BLOCKLIST: tuple[re.Pattern[str], ...] = (
+    re.compile(r"\blong\s+ở\b", re.IGNORECASE),
+    re.compile(r"\bshort\s+tại\b", re.IGNORECASE),
+    re.compile(r"\bnên\s+bán\b", re.IGNORECASE),
+    re.compile(r"\bhãy\s+mua\s+vào\b", re.IGNORECASE),
+    re.compile(r"\bBuy the dip\b", re.IGNORECASE),
+    re.compile(r"\bgo long\b", re.IGNORECASE),
+    re.compile(r"\bSL\s+[\d,.]+", re.IGNORECASE),
+    re.compile(r"\bstop at\s+[\d,.]+", re.IGNORECASE),
+    re.compile(r"\bTP\s+[\d,.]+", re.IGNORECASE),
+    re.compile(r"\bstop at\s+[\d,.]+,\s*TP\s+[\d,.]+", re.IGNORECASE),
+    re.compile(r"\bmua ngay\b", re.IGNORECASE),
+    re.compile(r"\bbán ngay\b", re.IGNORECASE),
+    re.compile(r"\bđặt lệnh\b", re.IGNORECASE),
+    re.compile(r"\bvào lệnh\b", re.IGNORECASE),
+    re.compile(r"\bbuy now\b", re.IGNORECASE),
+    re.compile(r"\bsell now\b", re.IGNORECASE),
 )
 
-_REGIME_ACK: dict[str, re.Pattern[str]] = {
-    "trend_up": re.compile(
-        r"tăng|xu hướng tăng|uptrend|bullish|thị trường tăng|regime.*tăng",
-        re.IGNORECASE,
-    ),
-    "trend_down": re.compile(
-        r"giảm|xu hướng giảm|downtrend|bearish|thị trường giảm|regime.*giảm",
-        re.IGNORECASE,
-    ),
-    "range": re.compile(r"đi ngang|range|sideways|tích lũy|biên độ", re.IGNORECASE),
-    "volatile": re.compile(r"biến động|volatile|atr cao", re.IGNORECASE),
-}
 
-_CONTRADICT: dict[str, re.Pattern[str]] = {
-    "trend_down": re.compile(r"tăng mạnh|bull run|mua ngay|breakout up", re.IGNORECASE),
-    "trend_up": re.compile(r"giảm mạnh|bear market|bán ngay|breakdown", re.IGNORECASE),
-}
-
-
-def validate_summary_language(summary: str, regime: Regime | str) -> None:
+def validate_summary_imperatives(summary: str) -> None:
     text = summary.strip()
     if not text:
         return
-    if _FORBIDDEN_TRADE.search(text):
-        raise ModelRetry(
-            "Summary must not include entry/exit/stop/target calls (mua/bán/entry/stop). "
-            "Describe geometry and regime only."
-        )
+    for pattern in _IMPERATIVE_BLOCKLIST:
+        if pattern.search(text):
+            raise ModelRetry(
+                "Summary must not give trade instructions (long/short/mua/bán/SL/TP as orders). "
+                "Use summary_direction for bias; describe geometry only."
+            )
+
+
+def validate_summary_direction(
+    direction: SummaryDirection,
+    regime: Regime | str,
+) -> None:
     reg = str(regime)
-    ack = _REGIME_ACK.get(reg)
-    if ack is not None and not ack.search(text):
+    if direction == "conditional":
+        return
+    if reg == "trend_down" and direction == "bullish":
         raise ModelRetry(
-            f"Summary must acknowledge detector regime={reg} (e.g. xu hướng tăng/giảm/đi ngang). "
-            "Do not contradict the server regime."
+            "summary_direction=bullish contradicts detector regime=trend_down. "
+            "Use bearish, neutral, or conditional with explicit if/then framing."
         )
-    contradict = _CONTRADICT.get(reg)
-    if contradict is not None and contradict.search(text):
+    if reg == "trend_up" and direction == "bearish":
         raise ModelRetry(
-            f"Summary contradicts detector regime={reg}. Align wording with the regime event."
+            "summary_direction=bearish contradicts detector regime=trend_up. "
+            "Use bullish, neutral, or conditional with explicit if/then framing."
         )
+    if reg == "volatile" and direction in ("bullish", "bearish"):
+        raise ModelRetry("summary_direction should be neutral or conditional when regime=volatile.")
+
+
+def imperative_patterns() -> tuple[re.Pattern[str], ...]:
+    return _IMPERATIVE_BLOCKLIST

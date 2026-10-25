@@ -10,7 +10,14 @@ from cryptosignal_copilot.model_catalog import normalize_model_row
 from cryptosignal_copilot.run_settings import build_run_model_settings
 from cryptosignal_copilot.drawing_intent import AnalyzeResultLlm
 
-_VALID_JSON = json.dumps({"summary": "Phân tích ngắn", "drawing_intents": [], "markers": []})
+_VALID_JSON = json.dumps(
+    {
+        "summary": "Phân tích ngắn",
+        "summary_direction": "neutral",
+        "drawing_intents": [],
+        "markers": [],
+    }
+)
 
 
 async def _run_with_test_model(catalog_model, custom_output_text: str) -> AnalyzeResultLlm:

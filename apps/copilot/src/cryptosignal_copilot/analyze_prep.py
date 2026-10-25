@@ -17,6 +17,7 @@ from cryptosignal_copilot.candle_budget import (
 )
 from cryptosignal_copilot.chart_regime import detect_regime
 from cryptosignal_copilot.config import LlmConfig, load_default_candle_count
+from cryptosignal_copilot.drawing_gate import bar_seconds
 from cryptosignal_copilot.features import build_feature_sheet
 from cryptosignal_copilot.intent_prep import build_intent_check, validate_analyze_intent
 from cryptosignal_copilot.intent_step import candidate_id_list_for_prompt, rules_first_step
@@ -53,7 +54,9 @@ _HTF_INTERVAL: dict[str, str] = {
 }
 
 
-async def _htf_context(symbol: str, interval: str, end_time_s: int) -> dict[str, object] | None:
+async def _htf_context(
+    symbol: str, interval: str, end_time_s: int, *, ltf_interval: str
+) -> dict[str, object] | None:
     htf = _HTF_INTERVAL.get(interval)
     if not htf:
         return None
@@ -67,7 +70,10 @@ async def _htf_context(symbol: str, interval: str, end_time_s: int) -> dict[str,
     except Exception as exc:
         logger.warning("htf klines fetch failed for %s %s: %s", symbol, htf, exc)
         return None
-    closed = [c for c in candles if c.time <= end_time_s]
+    ltf_sec = bar_seconds(ltf_interval)  # type: ignore[arg-type]
+    htf_sec = bar_seconds(htf)  # type: ignore[arg-type]
+    ltf_close = end_time_s + ltf_sec
+    closed = [c for c in candles if c.time + htf_sec <= ltf_close]
     if len(closed) < 10:
         logger.info(
             "htf klines insufficient closed bars for %s %s at %s: got %d",
@@ -77,11 +83,13 @@ async def _htf_context(symbol: str, interval: str, end_time_s: int) -> dict[str,
             len(closed),
         )
         return None
+    last = closed[-1]
     return {
         "interval": htf,
         "regime": detect_regime(closed, htf),  # type: ignore[arg-type]
         "bars": len(closed),
-        "last_closed_time": closed[-1].time,
+        "last_closed_time": last.time + htf_sec,
+        "last_closed_open_time": last.time,
     }
 
 
@@ -171,7 +179,9 @@ async def prepare_analyze(
     trimmed = trim_request_candles(request, used)
     htf = None
     if os.environ.get("COPILOT_SKIP_HTF", "").strip() not in {"1", "true", "yes"}:
-        htf = await _htf_context(trimmed.symbol, trimmed.interval, trimmed.to)
+        htf = await _htf_context(
+            trimmed.symbol, trimmed.interval, trimmed.to, ltf_interval=trimmed.interval
+        )
     candidate_catalog = build_candidate_catalog(
         trimmed.closedCandles,
         symbol=trimmed.symbol,
@@ -259,6 +269,31 @@ def retry_plan(plan: AnalyzePlan) -> AnalyzePlan | None:
             "retried": True,
         }
     )
+    intent = validate_analyze_intent(trimmed.intent)
+    trimmed = trimmed.model_copy(update={"intent": intent}, deep=True)
+    candidate_catalog = build_candidate_catalog(
+        trimmed.closedCandles,
+        symbol=trimmed.symbol,
+        interval=trimmed.interval,
+    )
+    step = rules_first_step(trimmed, candidate_catalog, intent)
+    feature_sheet = build_feature_sheet(
+        trimmed.closedCandles, trimmed.interval, zigzag=candidate_catalog.zigzag
+    )
+    pf = candidate_catalog.prefilter_dropped
+    meta.update(
+        {
+            "feature_sheet": feature_sheet,
+            "candidates": candidate_id_list_for_prompt(candidate_catalog, intent),
+            "raw_candidate_count": candidate_catalog.raw_candidate_count,
+            "prefilter_dropped": [
+                {"candidate_id": d.candidate_id, "pattern_id": d.pattern_id, "reason": d.reason}
+                for d in pf
+            ],
+            "prefilter_drop_reasons": dict(Counter(d.reason for d in pf)),
+            "intent_check": build_intent_check(trimmed, intent),
+        }
+    )
     return AnalyzePlan(
         model_id=plan.model_id,
         model=plan.model,
@@ -268,4 +303,6 @@ def retry_plan(plan: AnalyzePlan) -> AnalyzePlan | None:
         reasoning_effort=resolved_effort,
         candle_count_requested=plan.candle_count_requested,
         candle_count_used=prev,
+        candidate_catalog=candidate_catalog,
+        intent_step=step,
     )

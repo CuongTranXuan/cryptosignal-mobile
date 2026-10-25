@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from typing import Protocol
 
 from pydantic_ai import Agent
@@ -72,6 +73,8 @@ INSTRUCTIONS = (
     "(or type:'pair' with two ids for a channel/triangle). "
     "Hard limits: Max 6 drawing_intents and total shape_cost across picks <= 6 "
     "(use shape_cost on each candidate row). "
+    "Set summary_direction to bullish|bearish|neutral|conditional aligned with detector "
+    "regime (use conditional when describing if/then invalidation). "
     "Optional `markers` for point signals (AgentMarker schema). "
     "Do not emit raw PatternShape geometry — ids only. "
     "Do not promise entries, stops, or that levels will hold."
@@ -152,8 +155,9 @@ class PydanticAiRunner:
                     retries={"output": output_retries_for_model(current_plan.model)},
                 )
                 intent_style = (request.intent.style if request.intent else "classic") or "classic"
-                if catalog is not None:
-                    attach_drawing_intent_validator(agent, catalog, style=intent_style)
+                attempt_catalog = current_plan.candidate_catalog
+                if attempt_catalog is not None:
+                    attach_drawing_intent_validator(agent, attempt_catalog, style=intent_style)
                 run_settings = strip_thinking_when_routed(
                     current_plan.model,
                     current_plan.reasoning_effort,
@@ -162,6 +166,7 @@ class PydanticAiRunner:
                 try:
                     result = await agent.run(prompt, model_settings=run_settings)
                     llm_output = result.output
+                    catalog = current_plan.candidate_catalog or catalog
                     break
                 except UnexpectedModelBehavior as exc:
                     if attempt == 0:
@@ -177,9 +182,24 @@ class PydanticAiRunner:
                             )
                             yield "meta", current_plan.meta
                             continue
-                    if catalog is not None:
+                    fallback_catalog = current_plan.candidate_catalog or catalog
+                    if fallback_catalog is not None:
                         style = (request.intent.style if request.intent else "classic") or "classic"
-                        llm_output = build_deterministic_fallback(catalog, style)
+                        regime_label = str(fallback_catalog.regime)
+                        llm_output = build_deterministic_fallback(
+                            fallback_catalog,
+                            style,
+                            summary=(
+                                f"Chế độ detector: {regime_label}. "
+                                "Mô hình không trả về lựa chọn hợp lệ; "
+                                "lớp phủ dùng pick máy chủ theo điểm (fallback)."
+                            ),
+                        )
+                        meta = dict(current_plan.meta or {})
+                        meta["intent_budget_fallback"] = True
+                        meta["validator_fallback"] = True
+                        current_plan = replace(current_plan, meta=meta)
+                        catalog = fallback_catalog
                         break
                     yield "error", unexpected_model_behavior_payload(exc)
                     yield "done", {}
@@ -224,7 +244,7 @@ class PydanticAiRunner:
                     llm_output = build_deterministic_fallback(catalog, style)
                     meta = dict(current_plan.meta or {})
                     meta["intent_budget_fallback"] = True
-                    current_plan.meta = meta
+                    current_plan = replace(current_plan, meta=meta)
 
             yield "text", {"delta": "Mô hình đã xong. Đang dựng lớp phủ…"}
             if llm_output and llm_output.summary:
@@ -316,8 +336,7 @@ class PydanticAiRunner:
                         cand = by_id.get(cid)
                         if cand is not None:
                             picked.append(cand)
-        yield (
-            "analysis",
+        analysis_payload = (
             build_analysis_event(
                 catalog,
                 valid_shapes,
@@ -328,13 +347,16 @@ class PydanticAiRunner:
             else {
                 "bias": "neutral",
                 "no_valid_pattern": len(wire_shapes) == 0,
-                "evidence_for": ["No candidate catalog"],
-                "evidence_against": ["No candidate catalog"],
+                "evidence_for": ["Không có catalog ứng viên"],
+                "evidence_against": ["Không có catalog ứng viên"],
                 "invalidation": None,
                 "confidence": 0.5,
                 "intent_check": intent_check,
-            },
+            }
         )
+        if llm_output is not None:
+            analysis_payload["summary_direction"] = llm_output.summary_direction
+        yield "analysis", analysis_payload
         if valid_shapes:
             names = ", ".join(str(s.get("name", "?")) for s in valid_shapes[:5])
             more = f" (+{len(valid_shapes) - 5} nữa)" if len(valid_shapes) > 5 else ""

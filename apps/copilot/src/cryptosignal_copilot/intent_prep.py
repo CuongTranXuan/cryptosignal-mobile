@@ -58,7 +58,7 @@ def build_intent_check(request: AnalyzeRequest, intent: AnalyzeIntent) -> dict[s
     conflict = bias_conflicts_regime(intent.bias, regime)
     message: str | None = None
     if conflict:
-        message = "User bias conflicts with detector regime; shapes follow detector regime."
+        message = "Thiên kiến người dùng không khớp chế độ detector; lớp phủ theo chế độ detector."
     elif intent.style in ("elliott", "wyckoff"):
         message = (
             f"Style {intent.style} has no live v1 detectors; use classic/SMC candidates or "

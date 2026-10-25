@@ -60,6 +60,7 @@ class AnalyzeResultLlm(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     summary: str
+    summary_direction: Literal["bullish", "bearish", "neutral", "conditional"] = "neutral"
     drawing_intents: list[DrawingIntent] = Field(
         default_factory=list, max_length=MAX_DRAWING_INTENTS
     )
@@ -261,8 +262,15 @@ def build_deterministic_fallback(
     style: str,
     summary: str = "Chọn mẫu hình từ danh sách điểm số cao nhất (fallback máy chủ).",
 ) -> AnalyzeResultLlm:
+    from cryptosignal_copilot.analysis_events import regime_to_bias
+
+    bias = regime_to_bias(str(catalog.regime))
+    direction: Literal["bullish", "bearish", "neutral", "conditional"] = (
+        "bullish" if bias == "bullish" else "bearish" if bias == "bearish" else "neutral"
+    )
     return AnalyzeResultLlm(
         summary=summary,
+        summary_direction=direction,
         drawing_intents=deterministic_top_intents(catalog, style),
         markers=[],
     )

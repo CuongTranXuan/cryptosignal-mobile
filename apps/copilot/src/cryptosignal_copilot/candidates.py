@@ -181,42 +181,49 @@ def _wick_safe_price(candle: Candle, price: float, tolerance: float) -> float:
     return float(candle.low if price <= (candle.open + candle.close) / 2 else candle.high)
 
 
-def _flip_support_resistance(
-    cand: DrawingCandidate,
-    candles: list[Candle],
-    atr: float | None,
-    zigzag: list[ZigZagSwing],
-) -> DrawingCandidate:
-    from cryptosignal_copilot.pattern_invalidation import pattern_broken
-
-    if cand.pattern_id != "support_resistance" or cand.invalidation_price is None or atr is None:
-        return cand
-    if not pattern_broken(cand, candles, atr, zigzag).broken:
+def _sr_role_from_last_close(cand: DrawingCandidate, candles: list[Candle]) -> DrawingCandidate:
+    if cand.pattern_id != "support_resistance" or not candles:
         return cand
     shape = cand.shapes[0] if cand.shapes else {}
     low = shape.get("priceLow")
     high = shape.get("priceHigh")
     if low is None or high is None:
         return cand
-    was_support = float(cand.invalidation_price) <= float(low) + 1e-6
-    if was_support:
-        new_name = cand.name.replace("S/R", "S/R resistance (flipped)", 1)
-        new_inv = float(high)
-        evidence = list(cand.evidence_against) + ["role flipped: support→resistance"]
+    low_f, high_f = float(low), float(high)
+    close = float(candles[-1].close)
+    base_price = (low_f + high_f) / 2.0
+    if close > high_f:
+        role = "support"
+        inv = low_f
+        tag = "S/R support (flipped)"
+    elif close < low_f:
+        role = "resistance"
+        inv = high_f
+        tag = "S/R resistance (flipped)"
     else:
-        new_name = cand.name.replace("S/R", "S/R support (flipped)", 1)
-        new_inv = float(low)
-        evidence = list(cand.evidence_against) + ["role flipped: resistance→support"]
+        return DrawingCandidate(
+            id=cand.id,
+            pattern_id=cand.pattern_id,
+            style=cand.style,
+            score=cand.score,
+            swing_ids=cand.swing_ids,
+            shapes=cand.shapes,
+            evidence_against=list(cand.evidence_against),
+            invalidation_price=cand.invalidation_price,
+            break_time=cand.break_time,
+            name=f"S/R {base_price:.2f}",
+        )
     return DrawingCandidate(
         id=cand.id,
         pattern_id=cand.pattern_id,
         style=cand.style,
-        score=cand.score * 0.92,
+        score=cand.score * 0.95,
         swing_ids=cand.swing_ids,
         shapes=cand.shapes,
-        evidence_against=evidence,
-        invalidation_price=new_inv,
-        name=new_name,
+        evidence_against=list(cand.evidence_against) + [f"role from close: {role}"],
+        invalidation_price=inv,
+        break_time=cand.break_time,
+        name=f"{tag} {base_price:.2f}",
     )
 
 
@@ -1719,13 +1726,21 @@ def build_candidate_catalog(
     raw_candidate_count = len(candidates)
     prefilter_dropped: list[PrefilterDrop] = []
     processed: list[DrawingCandidate] = []
-    from cryptosignal_copilot.pattern_invalidation import pattern_broken
+    from cryptosignal_copilot.pattern_invalidation import (
+        pattern_broken,
+        triangle_breakout_completed,
+    )
 
     for cand in candidates:
-        cand = _flip_support_resistance(cand, candles, atr, zz)
+        cand = _sr_role_from_last_close(cand, candles)
         if _candidate_stale(cand, candles, bar_sec, atr):
             prefilter_dropped.append(
                 PrefilterDrop(candidate_id=cand.id, pattern_id=cand.pattern_id, reason="stale")
+            )
+            continue
+        if triangle_breakout_completed(cand, candles, atr, zz):
+            prefilter_dropped.append(
+                PrefilterDrop(candidate_id=cand.id, pattern_id=cand.pattern_id, reason="completed")
             )
             continue
         if (

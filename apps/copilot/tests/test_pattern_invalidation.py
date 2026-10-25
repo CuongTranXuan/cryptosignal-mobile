@@ -23,10 +23,9 @@ def test_sr_flip_on_broken_eth_zone():
 
 
 def test_trendline_uses_swing_anchor_not_window_end():
-    catalog, candles = _catalog("btcusdt_1h_200.json")
+    catalog, candles = _catalog("solusdt_4h_200.json")
     tls = [c for c in catalog.candidates if c.pattern_id == "trendline"]
-    if not tls:
-        pytest.skip("no trendlines in fixture catalog after health filters")
+    assert tls, "solusdt_4h fixture should retain at least one trendline"
     anchor = swing_anchor_time(tls[0], catalog.zigzag)
     assert anchor < candles[-1].time
 
