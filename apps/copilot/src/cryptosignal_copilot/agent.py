@@ -52,6 +52,7 @@ from cryptosignal_copilot.schema import (
     filter_preview_details,
 )
 from cryptosignal_copilot.server_summary import compose_stream_summary
+from cryptosignal_copilot.text_leak import sanitize_free_text
 from cryptosignal_copilot.wire_shape import shapes_for_wire
 
 # LANGUAGE: require Vietnamese for `summary` and chat-facing text the user sees.
@@ -68,10 +69,9 @@ INSTRUCTIONS = (
     "You are a crypto chart assistant. Use ONLY closed candles and the server-built "
     "feature sheet + candidate ids (geometry is precomputed). "
     "JSON field names stay English. No tools; no invented OHLC or times. "
-    "Return `drawing_intents` (candidate ids from the sheet) and optional `pick_notes`: "
-    "short Vietnamese notes per picked id ({candidate_id, note}) — geometry/touches only, "
-    "no bias, no trade verbs, no SL/TP, no directional forecasts. "
-    "The server writes the user-facing bias paragraph. "
+    "Return `drawing_intents` (candidate ids from the sheet) and optional `pick_assessments`: "
+    "{candidate_id, quality: strong|ok|weak, confluence: [htf_level|fib|volume|liquidity|ema|"
+    "order_block|structure], touch_ack: bool}. No free-text notes; server renders Vietnamese. "
     "Hard limits: Max 6 drawing_intents and total shape_cost across picks <= 6 "
     "(use shape_cost on each candidate row). "
     "Optional `markers` for point signals (AgentMarker schema). "
@@ -254,7 +254,16 @@ class PydanticAiRunner:
                 )
                 raw_shapes, _ = resolve_drawing_intents(llm_output.drawing_intents, catalog)
                 raw_shapes = enrich_resolved_shapes(raw_shapes, catalog, last_close=last_close)
-                output_markers = list(llm_output.markers)
+                output_markers = []
+                for raw in llm_output.markers:
+                    if not isinstance(raw, dict):
+                        continue
+                    cleaned = dict(raw)
+                    if "label" in cleaned:
+                        cleaned["label"] = sanitize_free_text(
+                            cleaned.get("label") if isinstance(cleaned.get("label"), str) else None
+                        )
+                    output_markers.append(cleaned)
                 intent_check_pre = (current_plan.meta or {}).get("intent_check") or {}
                 by_id = catalog.by_id()
                 picked_pre: list[DrawingCandidate] = []
@@ -371,6 +380,7 @@ class PydanticAiRunner:
                 valid_shapes,
                 intent_check,
                 picked=picked if catalog is not None else None,
+                symbol=request.symbol,
             )
             if catalog is not None
             else {
@@ -463,7 +473,7 @@ def _build_user_prompt(
     if structured_output_mode == "text_json":
         json_hint = (
             "OUTPUT: Reply with one JSON object for AnalyzeResultLlm "
-            "(pick_notes[], drawing_intents[], markers[]). "
+            "(pick_assessments[], drawing_intents[], markers[]). "
             "You may wrap it in ```json fences. No tool calls.\n"
         )
     return (

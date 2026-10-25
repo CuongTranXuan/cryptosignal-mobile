@@ -27,13 +27,13 @@ def parse_analyze_result_llm_text(raw: str) -> AnalyzeResultLlm:
     payload = json.loads(extract_json_text(raw))
     if "shapes" in payload and "drawing_intents" not in payload:
         return AnalyzeResultLlm(
-            pick_notes=[],
+            pick_assessments=[],
             drawing_intents=[],
             markers=list(payload.get("markers") or []),
         )
-    if "summary" in payload and "pick_notes" not in payload:
+    if "pick_notes" in payload or "summary" in payload:
         payload = {
-            "pick_notes": [],
+            "pick_assessments": list(payload.get("pick_assessments") or []),
             "drawing_intents": list(payload.get("drawing_intents") or []),
             "markers": list(payload.get("markers") or []),
         }

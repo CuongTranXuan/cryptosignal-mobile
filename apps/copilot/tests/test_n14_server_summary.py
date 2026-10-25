@@ -1,4 +1,4 @@
-"""N14: server-authored bias text; model directional story must not stream."""
+"""N14: server-authored bias text; model cannot stream directional free text."""
 
 from __future__ import annotations
 
@@ -9,14 +9,16 @@ from pydantic_ai.exceptions import UnexpectedModelBehavior
 from cryptosignal_copilot.agent import PydanticAiRunner
 from cryptosignal_copilot.analyze_prep import AnalyzePlan
 from cryptosignal_copilot.candidates import build_candidate_catalog
-from cryptosignal_copilot.drawing_intent import AnalyzeResultLlm, CandidateDrawingIntent, PickNote
+from cryptosignal_copilot.drawing_intent import (
+    AnalyzeResultLlm,
+    CandidateDrawingIntent,
+    PickAssessment,
+)
 from cryptosignal_copilot.intent_prep import build_intent_check, validate_analyze_intent
 from cryptosignal_copilot.intent_step import rules_first_step
 from cryptosignal_copilot.model_catalog import normalize_model_row
 from cryptosignal_copilot.schema import AnalyzeRequest
 from tests.eval.test_chart_replay import _load_fixture
-
-GAMING_STORY = "phe mua đã kiểm soát; giá sẽ sớm đảo chiều lên và vượt đỉnh cũ"
 
 
 def _plan_from_fixture(fixture: str, *, candle_count: int) -> AnalyzePlan:
@@ -60,18 +62,23 @@ def _plan_from_fixture(fixture: str, *, candle_count: int) -> AnalyzePlan:
 
 
 @pytest.mark.asyncio
-async def test_bullish_story_not_in_stream_under_trend_down(llm_env, monkeypatch):
+async def test_stream_uses_server_bias_not_model_story(llm_env, monkeypatch):
     plan = _plan_from_fixture("btcusdt_1h_200.json", candle_count=200)
     top_id = plan.candidate_catalog.candidates[0].id
 
-    async def gaming_model(self, prompt, model_settings=None):
+    async def structured_model(self, prompt, model_settings=None):
         return type(
             "RunResult",
             (),
             {
                 "output": AnalyzeResultLlm(
-                    pick_notes=[
-                        PickNote(candidate_id=top_id, note=GAMING_STORY),
+                    pick_assessments=[
+                        PickAssessment(
+                            candidate_id=top_id,
+                            quality="ok",
+                            confluence=["structure"],
+                            touch_ack=True,
+                        )
                     ],
                     drawing_intents=[CandidateDrawingIntent(candidate_id=top_id)],
                     markers=[],
@@ -79,55 +86,28 @@ async def test_bullish_story_not_in_stream_under_trend_down(llm_env, monkeypatch
             },
         )()
 
-    monkeypatch.setattr(Agent, "run", gaming_model)
-
+    monkeypatch.setattr(Agent, "run", structured_model)
     events: list[tuple[str, dict]] = []
     runner = PydanticAiRunner()
     async for ev in runner.run(plan):
         events.append(ev)
 
     text = "".join(d["delta"] for kind, d in events if kind == "text")
-    assert "vượt đỉnh cũ" not in text
-    assert "phe mua đã kiểm soát" not in text
-    assert "Bias overlay (server)" in text or "chế độ detector" in text.lower()
-
-    analysis = next(d for kind, d in events if kind == "analysis")
-    assert analysis.get("summary_direction") in ("bearish", "neutral", "conditional", "bullish")
-    # Server direction follows detector regime, not model story.
-    if plan.candidate_catalog.regime == "trend_down":
-        assert analysis["summary_direction"] != "bullish"
+    assert "chất lượng" in text or "Thiên hướng overlay" in text
+    assert "mua ngay" not in text.lower()
 
 
 @pytest.mark.asyncio
-async def test_gaming_pick_note_triggers_validator_retry_or_fallback(llm_env, monkeypatch):
+async def test_validator_exhaustion_still_safe(llm_env, monkeypatch):
     plan = _plan_from_fixture("btcusdt_1h_200.json", candle_count=200)
-    top_id = plan.candidate_catalog.candidates[0].id
 
     async def always_exhausted(self, prompt, model_settings=None):
-        raise UnexpectedModelBehavior("validator blocked gaming note")
+        raise UnexpectedModelBehavior("exhausted")
 
-    async def return_gaming_once(self, prompt, model_settings=None):
-        return type(
-            "RunResult",
-            (),
-            {
-                "output": AnalyzeResultLlm(
-                    pick_notes=[PickNote(candidate_id=top_id, note=GAMING_STORY)],
-                    drawing_intents=[CandidateDrawingIntent(candidate_id=top_id)],
-                    markers=[],
-                )
-            },
-        )()
-
-    monkeypatch.setattr(Agent, "run", return_gaming_once)
-
-    # Real Agent.run would retry; mocked path returns gaming output — stream must still
-    # not contain the gaming phrase because compose only includes validated notes.
-    # Force validator path by using real attach — mock bypasses validator, so use always_exhausted.
     monkeypatch.setattr(Agent, "run", always_exhausted)
     events: list[tuple[str, dict]] = []
     runner = PydanticAiRunner()
     async for ev in runner.run(plan):
         events.append(ev)
     text = "".join(d["delta"] for kind, d in events if kind == "text")
-    assert GAMING_STORY not in text
+    assert "mua ngay" not in text.lower()

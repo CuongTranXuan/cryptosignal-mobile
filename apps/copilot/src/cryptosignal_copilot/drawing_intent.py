@@ -54,15 +54,28 @@ DrawingIntent = Annotated[
 ]
 
 
-class PickNote(BaseModel):
+ConfluenceTag = Literal[
+    "htf_level",
+    "fib",
+    "volume",
+    "liquidity",
+    "ema",
+    "order_block",
+    "structure",
+]
+
+
+class PickAssessment(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     candidate_id: str = Field(min_length=3, max_length=64)
-    note: str = Field(default="", max_length=240)
+    quality: Literal["strong", "ok", "weak"] = "ok"
+    confluence: list[ConfluenceTag] = Field(default_factory=list, max_length=8)
+    touch_ack: bool = False
 
     @field_validator("candidate_id")
     @classmethod
-    def _valid_pick_note_id(cls, value: str) -> str:
+    def _valid_pick_id(cls, value: str) -> str:
         if not CANDIDATE_ID_RE.match(value):
             raise ValueError(f"candidate_id must match {CANDIDATE_ID_RE.pattern}")
         return value
@@ -73,7 +86,9 @@ class AnalyzeResultLlm(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    pick_notes: list[PickNote] = Field(default_factory=list, max_length=MAX_DRAWING_INTENTS)
+    pick_assessments: list[PickAssessment] = Field(
+        default_factory=list, max_length=MAX_DRAWING_INTENTS
+    )
     drawing_intents: list[DrawingIntent] = Field(
         default_factory=list, max_length=MAX_DRAWING_INTENTS
     )
@@ -275,7 +290,7 @@ def build_deterministic_fallback(
     style: str,
 ) -> AnalyzeResultLlm:
     return AnalyzeResultLlm(
-        pick_notes=[],
+        pick_assessments=[],
         drawing_intents=deterministic_top_intents(catalog, style),
         markers=[],
     )

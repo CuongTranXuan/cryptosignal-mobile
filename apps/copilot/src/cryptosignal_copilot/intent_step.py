@@ -133,4 +133,4 @@ def candidate_id_list_for_prompt(
 
 
 def build_rules_only_result(summary: str, shapes: list[dict[str, Any]]) -> AnalyzeResultLlm:
-    return AnalyzeResultLlm(pick_notes=[], drawing_intents=[], markers=[])
+    return AnalyzeResultLlm(pick_assessments=[], drawing_intents=[], markers=[])

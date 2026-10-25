@@ -1,31 +1,38 @@
-"""Server-authored Vietnamese stream summary (N14): regime bias from detector, not LLM prose."""
+"""Server-authored Vietnamese stream summary (N14/N18): no model free text."""
 
 from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic_ai import ModelRetry
-
 from cryptosignal_copilot.analysis_events import build_analysis_event, regime_to_bias
 from cryptosignal_copilot.candidates import CandidateCatalog, DrawingCandidate
 from cryptosignal_copilot.chart_regime import Regime
-from cryptosignal_copilot.drawing_intent import AnalyzeResultLlm, DrawingIntent
-from cryptosignal_copilot.output_language_validate import validate_pick_note
+from cryptosignal_copilot.drawing_intent import AnalyzeResultLlm, DrawingIntent, PickAssessment
+from cryptosignal_copilot.market_price import format_market_price
 
 SummaryDirection = Literal["bullish", "bearish", "neutral", "conditional"]
+
+_QUALITY_VI = {"strong": "mạnh", "ok": "ổn", "weak": "yếu"}
+_CONFLUENCE_VI: dict[str, str] = {
+    "htf_level": "mức HTF",
+    "fib": "Fib",
+    "volume": "khối lượng",
+    "liquidity": "thanh khoản",
+    "ema": "EMA",
+    "order_block": "order block",
+    "structure": "cấu trúc",
+}
 
 
 def summary_direction_from_regime(
     regime: Regime | str,
     *,
-    bias_conflict: bool = False,
     has_invalidation: bool = False,
 ) -> SummaryDirection:
-    if bias_conflict and has_invalidation:
+    reg = str(regime)
+    if reg == "range" and has_invalidation:
         return "conditional"
-    if bias_conflict:
-        return "neutral"
-    bias = regime_to_bias(str(regime))
+    bias = regime_to_bias(reg)
     if bias == "bullish":
         return "bullish"
     if bias == "bearish":
@@ -37,7 +44,7 @@ def _regime_lead(regime: str, symbol: str, interval: str) -> str:
     if regime == "trend_up":
         return (
             f"{symbol} {interval}: chế độ detector là xu hướng tăng — "
-            "cấu trúng đỉnh/đáy cao hơn trên các nến đã đóng."
+            "cấu trúc đỉnh/đáy cao hơn trên các nến đã đóng."
         )
     if regime == "trend_down":
         return (
@@ -55,13 +62,26 @@ def _regime_lead(regime: str, symbol: str, interval: str) -> str:
     )
 
 
-def _conditional_clause(invalidation: dict[str, Any] | None) -> str:
+def _bias_line(bias: str) -> str:
+    if bias == "bullish":
+        return "Thiên hướng overlay (máy chủ): tăng theo detector."
+    if bias == "bearish":
+        return "Thiên hướng overlay (máy chủ): giảm theo detector."
+    return "Thiên hướng overlay (máy chủ): trung tính / range theo detector."
+
+
+def _conditional_clause(
+    invalidation: dict[str, Any] | None,
+    *,
+    symbol: str,
+) -> str:
     if not invalidation or invalidation.get("price") is None:
         return (
-            "Kịch bản hai phía: nếu giá phá vượt vùng invalidation thì bias theo hướng phá; "
+            "Kịch bản hai phía: nếu giá phá vượt vùng vô hiệu thì bias theo hướng phá; "
             "nếu giữ trong vùng thì coi là range."
         )
-    price = invalidation.get("price")
+    raw_price = float(invalidation["price"])
+    price = format_market_price(raw_price, symbol)
     cond = str(invalidation.get("condition") or "close beyond")
     if cond == "close_below":
         return (
@@ -79,10 +99,20 @@ def _conditional_clause(invalidation: dict[str, Any] | None) -> str:
     )
 
 
+def _render_assessment(assessment: PickAssessment) -> str:
+    parts = [f"chất lượng {_QUALITY_VI.get(assessment.quality, assessment.quality)}"]
+    if assessment.confluence:
+        labels = [_CONFLUENCE_VI.get(c, c) for c in assessment.confluence]
+        parts.append("hội tụ: " + ", ".join(labels))
+    if assessment.touch_ack:
+        parts.append("đã xác nhận chạm")
+    return "; ".join(parts)
+
+
 def _pick_lines(
     catalog: CandidateCatalog,
     intents: list[DrawingIntent],
-    notes_by_id: dict[str, str],
+    assessments_by_id: dict[str, PickAssessment],
 ) -> list[str]:
     by_id = catalog.by_id()
     lines: list[str] = []
@@ -91,14 +121,9 @@ def _pick_lines(
         for cid in ids:
             cand = by_id.get(cid)
             label = cand.name if cand is not None else cid
-            note = (notes_by_id.get(cid) or "").strip()
-            if note:
-                try:
-                    validate_pick_note(note)
-                except ModelRetry:
-                    note = ""
-            if note:
-                lines.append(f"• {label}: {note}")
+            assessment = assessments_by_id.get(cid)
+            if assessment is not None:
+                lines.append(f"• {label}: {_render_assessment(assessment)}")
             else:
                 lines.append(f"• {label}")
     return lines
@@ -114,41 +139,46 @@ def compose_stream_summary(
     shapes: list[dict[str, Any]],
     picked: list[DrawingCandidate],
 ) -> tuple[str, SummaryDirection]:
-    analysis = build_analysis_event(catalog, shapes, intent_check, picked=picked or None)
+    analysis = build_analysis_event(
+        catalog, shapes, intent_check, picked=picked or None, symbol=symbol
+    )
     regime = str(catalog.regime)
     direction = summary_direction_from_regime(
         regime,
-        bias_conflict=bool(intent_check.get("bias_conflict")),
         has_invalidation=analysis.get("invalidation") is not None,
     )
     parts = [_regime_lead(regime, symbol, interval)]
 
     bias = str(analysis.get("bias") or regime_to_bias(regime))
     if direction == "conditional":
-        parts.append(_conditional_clause(analysis.get("invalidation")))
-    elif bias == "bullish":
-        parts.append("Bias overlay (server): thiên hướng tăng theo detector.")
-    elif bias == "bearish":
-        parts.append("Bias overlay (server): thiên hướng giảm theo detector.")
+        parts.append(_conditional_clause(analysis.get("invalidation"), symbol=symbol))
     else:
-        parts.append("Bias overlay (server): trung tính / range theo detector.")
+        parts.append(_bias_line(bias))
 
-    ev_for = analysis.get("evidence_for") or []
-    if ev_for:
-        parts.append("Ủng hộ: " + "; ".join(str(x) for x in ev_for[:3]) + ".")
-    ev_against = analysis.get("evidence_against") or []
-    if ev_against:
-        parts.append("Lưu ý: " + "; ".join(str(x) for x in ev_against[:4]) + ".")
+    if bool(intent_check.get("bias_conflict")):
+        message = intent_check.get("message")
+        conflict_line = (
+            message
+            if isinstance(message, str) and message
+            else "Thiên kiến người dùng không khớp chế độ detector; lớp phủ theo chế độ detector."
+        )
+        parts.append(f"Lưu ý: {conflict_line}")
 
-    notes_by_id = {n.candidate_id: n.note for n in llm_output.pick_notes}
-    pick_lines = _pick_lines(catalog, llm_output.drawing_intents, notes_by_id)
+    if not shapes:
+        parts.append("Không có mô hình hợp lệ trên cửa sổ này.")
+    else:
+        ev_for = analysis.get("evidence_for") or []
+        if ev_for:
+            parts.append("Ủng hộ: " + "; ".join(str(x) for x in ev_for[:3]) + ".")
+        ev_against = analysis.get("evidence_against") or []
+        if ev_against:
+            parts.append("Lưu ý kỹ thuật: " + "; ".join(str(x) for x in ev_against[:4]) + ".")
+
+    assessments_by_id = {a.candidate_id: a for a in llm_output.pick_assessments}
+    pick_lines = _pick_lines(catalog, llm_output.drawing_intents, assessments_by_id)
     if pick_lines:
-        parts.append("Ghi chú theo pick (mô hình, không phải khuyến nghị giao dịch):")
+        parts.append("Đánh giá theo pick (máy chủ dựng từ trường có cấu trúc):")
         parts.extend(pick_lines)
 
     parts.append("Đây không phải tín hiệu vào lệnh; chỉ mô tả geometry trên nến đã đóng.")
     return "\n\n".join(parts), direction
-
-
-def notes_by_id(llm_output: AnalyzeResultLlm) -> dict[str, str]:
-    return {n.candidate_id: n.note for n in llm_output.pick_notes}

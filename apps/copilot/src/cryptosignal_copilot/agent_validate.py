@@ -12,7 +12,6 @@ from cryptosignal_copilot.drawing_intent import (
     resolve_drawing_intents,
     total_shape_cost,
 )
-from cryptosignal_copilot.output_language_validate import validate_pick_note
 
 
 def attach_drawing_intent_validator(
@@ -67,10 +66,7 @@ def attach_drawing_intent_validator(
                 f"Per pick: {detail}. Replace or drop candidates so shape_cost sums to "
                 f"<={MAX_SHAPES} (see shape_cost on the candidate sheet)."
             )
-        for note in output.pick_notes:
-            if note.candidate_id not in intent_ids:
-                raise ModelRetry(
-                    f"pick_notes candidate_id {note.candidate_id} must match a drawing_intent id."
-                )
-            validate_pick_note(note.note)
+        for assessment in output.pick_assessments:
+            if assessment.candidate_id not in intent_ids:
+                raise ModelRetry("pick_assessments candidate_id must match a drawing_intent id.")
         return output

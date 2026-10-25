@@ -6,6 +6,7 @@ from typing import Any
 
 from cryptosignal_copilot.candidates import CandidateCatalog, DrawingCandidate
 from cryptosignal_copilot.chart_regime import Regime
+from cryptosignal_copilot.market_price import format_market_price
 
 
 def regime_to_bias(regime: Regime | str) -> str:
@@ -32,21 +33,21 @@ def build_regime_event(
     }
 
 
-def _evidence_for_regime(catalog: CandidateCatalog) -> list[str]:
+def _evidence_for_regime(catalog: CandidateCatalog, *, symbol: str) -> list[str]:
     regime = str(catalog.regime)
     lines: list[str] = []
     if regime == "trend_up":
-        lines.append("Higher highs and higher lows on recent swings")
-        lines.append("Price above EMA50 with positive EMA20 slope")
+        lines.append("Đỉnh/đáy cao hơn trên các swing gần đây")
+        lines.append("Giá trên EMA50, độ dốc EMA20 dương")
     elif regime == "trend_down":
-        lines.append("Lower highs and lower lows on recent swings")
-        lines.append("Price below EMA50 with negative EMA20 slope")
+        lines.append("Đỉnh/đáy thấp hơn trên các swing gần đây")
+        lines.append("Giá dưới EMA50, độ dốc EMA20 âm")
     elif regime == "volatile":
-        lines.append("ATR elevated versus recent median")
+        lines.append("ATR cao so với trung vị gần đây")
     else:
-        lines.append("Mixed swing structure without clear trend")
+        lines.append("Cấu trúc swing hỗn hợp, chưa rõ xu hướng")
     if catalog.atr is not None:
-        lines.append(f"ATR14 ≈ {catalog.atr:.2f}")
+        lines.append(f"ATR14 ≈ {format_market_price(float(catalog.atr), symbol)}")
     return lines
 
 
@@ -56,9 +57,10 @@ def build_analysis_event(
     intent_check: dict[str, Any],
     *,
     picked: list[DrawingCandidate] | None = None,
+    symbol: str = "BTCUSDT",
 ) -> dict[str, Any]:
     bias = regime_to_bias(catalog.regime)
-    evidence_for = _evidence_for_regime(catalog)
+    evidence_for = _evidence_for_regime(catalog, symbol=symbol)
     evidence_against: list[str] = []
     confidences: list[float] = []
     primary_inv: dict[str, Any] | None = None
@@ -79,14 +81,6 @@ def build_analysis_event(
         if primary_inv is None and isinstance(inv, dict) and inv.get("price") is not None:
             primary_inv = inv
 
-    bias_conflict = bool(intent_check.get("bias_conflict"))
-    if bias_conflict:
-        message = intent_check.get("message")
-        if isinstance(message, str) and message:
-            evidence_against.append(message)
-        else:
-            evidence_against.append("User bias conflicts with detector regime")
-
     if picked:
         for cand in picked:
             for item in cand.evidence_against:
@@ -95,8 +89,8 @@ def build_analysis_event(
 
     confidence = round(sum(confidences) / len(confidences), 3) if confidences else 0.55
     if not evidence_for:
-        evidence_for = ["Detector regime from closed candles"]
-    if not evidence_against and not bias_conflict:
+        evidence_for = ["Chế độ detector từ nến đã đóng"]
+    if shapes and not evidence_against:
         evidence_against = ["Không có cảnh báo cấu trúc trên các hình đã chọn"]
 
     return {

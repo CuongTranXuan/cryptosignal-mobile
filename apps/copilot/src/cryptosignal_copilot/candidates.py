@@ -182,36 +182,38 @@ def _wick_safe_price(candle: Candle, price: float, tolerance: float) -> float:
 
 
 def _sr_zone_start_time(cand: DrawingCandidate) -> int:
+    """Last anchor time of the zone (zone is active after this bar)."""
     shape = cand.shapes[0] if cand.shapes else {}
     points = shape.get("points")
-    if isinstance(points, list) and points:
-        return int(points[0].get("time", 0))
-    return cand.break_time or 0
+    times: list[int] = []
+    if isinstance(points, list):
+        for point in points:
+            if isinstance(point, dict) and "time" in point:
+                times.append(int(point["time"]))
+    if times:
+        return min(times)
+    return int(cand.break_time or 0)
 
 
 def _sr_price_crossed_zone(
     candles: list[Candle], low_f: float, high_f: float, start_t: int
 ) -> bool:
-    """True when closes traded from inside/below the band to above high, or inside/above to below low."""
-    after = [float(c.close) for c in candles if c.time >= start_t]
+    """True when a close after zone formation leaves the band from a not-yet-outside side."""
+    after = [float(c.close) for c in candles if c.time > start_t]
     if not after:
         return False
-    saw_at_or_below_high = False
-    saw_at_or_above_low = False
-    saw_above_high = False
-    saw_below_low = False
+    had_at_or_below_high = False
+    had_at_or_above_low = False
     for close in after:
+        if close > high_f and had_at_or_below_high:
+            return True
+        if close < low_f and had_at_or_above_low:
+            return True
         if close <= high_f:
-            saw_at_or_below_high = True
+            had_at_or_below_high = True
         if close >= low_f:
-            saw_at_or_above_low = True
-        if close > high_f:
-            saw_above_high = True
-        if close < low_f:
-            saw_below_low = True
-    crossed_up = saw_at_or_below_high and saw_above_high
-    crossed_down = saw_at_or_above_low and saw_below_low
-    return crossed_up or crossed_down
+            had_at_or_above_low = True
+    return False
 
 
 def _sr_role_from_last_close(cand: DrawingCandidate, candles: list[Candle]) -> DrawingCandidate:
