@@ -1169,3 +1169,67 @@ Before = `7c03c618`. 16 windows + full 80-series scan (200-bar step 100, 100-bar
 **Readiness:**
 - (a) **Internal alpha — ready**, with the disclaimer. Server-authored summary, validated fallback, correct geometry/HTF/invalidation, 100% Zod.
 - (b) **General user testing — not ready** until N18 is closed: a model can still put a trade instruction or bullish forecast into a pick note that streams verbatim. N19 should also be fixed first, because repeated warnings look broken.
+
+### C.13 Re-check at `ff320d76` (box, 2026-10-25, scripted model only — Mac offline, OmniRoute e2e skipped)
+
+Before = `30618743`. 16 windows + full 80-series scan; extra low-price set (DOGE/PEPE/SHIB/XRP 1h+4h, data-api.binance.vision). Web client replayed with real event sequences (vitest, Node 22).
+
+| Metric | 30618743 | ff320d76 |
+|---|---|---|
+| Harness / LLM-like picks, gate drop, splits | 48/84/0/0; 114→90 | unchanged |
+| Web Zod strict, shapes (harness + LLM-like + SSE) | 286/286 + 30/30 | 286/286 + 12/12 |
+| Web Zod, **server anchor markers** (`drawing_id`/`guardrail`) | — | **0/6 accepted** (`unrecognized_keys`) → "(Bỏ qua 6 đánh dấu không hợp lệ.)" on every run |
+| Web Zod, **model marker** side=buy arrowUp label "BUY 61k — Entry 61k, TP 72k" | — | **accepted, rendered** |
+| Broken lines / broken-out triangles / HTF SOL 4h | 0 / 0 / 0 s | 0 / 0 / 0 s |
+| "(flipped)" on zones never closed on both sides | 14/232 | 10/228 |
+| `summary_direction`, analysis bias/confidence/invalidation invariant to user bias | no | **72/72 windows** (16 symbols-intervals × 3 window sizes + low-price set; bullish/bearish/neutral/none) |
+| ruff / format | clean | clean (103 files) |
+| pytest (box) | 197 / 2 skip | 201 passed / 2 skipped; Zod wire 3/3 with `CI=true` |
+| web `tsc --noEmit` / vitest (Node 22) | — | exit 0 / **156/156** |
+
+**Every model-controlled field and where it goes**
+
+| Field | Constraint | Reaches |
+|---|---|---|
+| `drawing_intents[].type`, `candidate_id(s)` | regex `CANDIDATE_ID_RE` + must exist in catalog + style + shape budget (ModelRetry) | resolved to server shapes; never shown as text ✓ |
+| `pick_assessments[].candidate_id` | regex + must be in `drawing_intents` | template label (server candidate name) ✓ |
+| `pick_assessments[].quality` | enum strong/ok/weak | template "chất lượng mạnh/…" ✓ |
+| `pick_assessments[].confluence[]` | enum (7 values) | template "hội tụ: Fib, mức HTF". **Unverified model claim shown under "máy chủ dựng"** |
+| `pick_assessments[].touch_ack` | bool | template "đã xác nhận chạm". **Same: model assertion presented as server fact** |
+| `markers[].label` | `sanitize_free_text` (phrase list) | **chart text** |
+| `markers[].side` / `shape` / `position` | enum buy/sell/neutral, arrowUp/… | **green/red arrow on chart** (`marker-map.ts` colorForSide) |
+| `markers[].time`, `confidence` | int in closed times, 0..1 | arrow position |
+| `markers[].id`, `agentId` | any string | not rendered (id used as key); dropped ids only counted ✓ |
+| `markers[].drawing_id`, `guardrail` | any | rejected by web strict schema |
+| legacy `summary`/`pick_notes`/`shapes` | stripped in `output_parsing.py` | ✓ |
+
+**Verdicts**
+1. **N18 (pick notes) — fixed by design.** Stream copy is server-templated. A note-style trade call can no longer appear in text.
+2. **N21 (critical): markers are an open trade-signal channel.**
+   - The prompt still offers "Optional `markers` for point signals" (`agent.py:77`). The output validator does not check markers.
+   - `text_leak.py` is a 23-entry list of my C.12 probe strings: 39/55 trade/forecast labels survive. Changing a single digit is enough ("Nên mua ở 61k", "Entry 61k", "Target $71,000", "TP 70k", "SL 58k").
+   - Other labels that survive: "BUY", "LONG", "Strong buy", "Long here", "Vào lệnh", "Hãy mua vào", "Chốt lời 70k", "Cắt lỗ 58k", "Sắp tăng mạnh", "Gia se tang manh", "🚀 70k", "ＢＵＹ ６０ｋ", "Ⓑⓤⓨ", soft-hyphen/U+2060 variants.
+   - End-to-end, a scripted model on the bearish BTCUSDT 4h window (1 call, no retry) put a **green `buy` arrowUp at the last candle labelled "BUY 61k — Entry 61k, TP 72k"** into the marker store. Even without a label, a model-chosen green buy arrow is a trade signal.
+   - Fix:
+     - Drop model markers from the schema, or allow only `side="neutral"` + `shape="circle"`, with `label` from a server enum or omitted.
+     - Generate any buy/sell marker server-side from detector events only.
+     - Remove the prompt line.
+3. **N22 (medium, web): server anchor markers are always rejected.** Every server anchor marker carries `drawing_id`/`guardrail`; `AgentMarkerSchema.strict()` rejects them, and `coerceAgentMarker` doesn't strip them. Every run shows "(Bỏ qua N đánh dấu không hợp lệ.)", and the guardrail join never reaches the client. Strip at the wire (as `shapes_for_wire` does) or extend the web schema.
+4. **N23 (medium, web): fallback note leaks across runs.** Same client, run 1 = validator fallback, run 2 = normal run with no fallback flags: run 2 also shows "Hình do máy chủ chọn." `streamMergedMeta`/`lastAnalyzeMeta` keeps `validator_fallback` from the previous run. Reset the flags at the start of each `analyze()`.
+5. **Invariance — fixed.** 72/72 windows give identical `summary_direction`, `analysis.bias`, confidence and invalidation across bullish/bearish/neutral/no-bias. The conflict note "Lưu ý: Thiên kiến…" is now the only difference, as intended.
+6. **Summary quality.**
+   - Vietnamese is clean, the typo is fixed, there is no-pick text ("Không có mô hình hợp lệ trên cửa sổ này."), and the disclaimer is present.
+   - **Low-price coins broken:**
+     - `market_price.py` defaults unknown symbols to tick 0.01, so DOGE/PEPE/SHIB print "ATR14 ≈ 0.00".
+     - Candidate names are formatted with `:.2f` in `candidates.py` ("S/R 0.00" on PEPE). These names reach the chart and the patterns table.
+     - Use the exchange tick size (exchangeInfo `PRICE_FILTER.tickSize`, cached) or significant-figure formatting.
+   - Some `evidence_against` strings are still English ("only 2 touches; only 2 swing touches on bottoms").
+   - The summary no longer mentions invalidation at all; it only appears in `analysis.invalidation`. Add one server line, e.g. "Vô hiệu nếu đóng cửa trên X".
+7. **N10 — mostly fixed.** 10/228 remain. `_sr_price_crossed_zone` (`candidates.py:198-216`) counts "close inside zone → close above" as a cross, so a dip into support followed by a bounce is labelled "(flipped)". Require a close strictly on the opposite side, not "inside".
+8. **N19/N20 (UI) — fixed.** There is a single bias line (server "Lưu ý"), and the client "⚠" line is gone. Text blocks are joined with a blank line, with no glued text except one single-newline join before "Đã cuộn biểu đồ…". There is a single overlay list. The second regime event and the final meta are handled. CI now runs tsc + vitest on Node 22.
+
+**Remaining (priority):** N21 (model markers: buy/sell arrows + label; phrase-list sanitizer) → N22 (anchor markers rejected by web) → N23 (fallback note across runs) → low-price formatting (tick size, candidate names) → invalidation line in summary + Vietnamese evidence strings → confluence/touch_ack labelled as model assessment, not server fact → N10 residual 10. Earlier opens: #13, #21, #24, #27. Real OmniRoute e2e still pending (Mac offline).
+
+**Readiness:**
+- (a) **Internal alpha — ready** with the disclaimer, ideally after the one-line N21 mitigation (drop model markers or force neutral, no label).
+- (b) **General user testing — not ready:** N21 lets the model draw a labelled green BUY arrow under a bearish regime, and N22/N23 produce wrong UI notes on every run.
