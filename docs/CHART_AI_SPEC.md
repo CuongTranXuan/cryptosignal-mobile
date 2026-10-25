@@ -965,3 +965,61 @@ Add per-style top-6 runs through the real path, an "intent split = 0" assertion,
 - Fixed: #1–3, #5–8, #10–12, #19, #22, #23, #28, #29, #31, D4, D5, N1–N6, R1–R3, B1, B2, B5.
 - Partial: #4, #9, #13, #14, #15, #16, #17 (B4), #18 (role-flip/age), #20, #21, #24, #30, #32, B3 (families with no invalidation).
 - Open: #25, #26, #27, D6.
+
+### C.9 Re-check at `405c7360` (box, 2026-10-25, no real LLM — Mac offline, OmniRoute e2e skipped)
+"Before" = `eecc8169`, "after" = `405c7360`. Same 16 windows as before. Additional checks:
+- An H&S scan over **5 440 windows**: 20 symbols × 15m/1h/4h/1d × 1 000 bars from `data-api.binance.vision`, sliding by 25 bars, at W = 100 (2 880 windows) and W = 200 (2 560 windows).
+- An SSE run of `PydanticAiRunner` with a pydantic-ai `FunctionModel` (dummy env, no key) on BTC 4h, last 100 bars.
+- The web Zod check from C.8.
+
+| Metric | `eecc8169` | `405c7360` |
+|---|---|---|
+| Web Zod accepted / total (harness + LLM-like, classic + smc) | 303 / 303 | **286 / 286**; SSE `shapes` from the runner 18 / 18 |
+| Raw / pre-filter removed | 145 / 11 | 146 / 28: invalidated (trendline 11, double_bottom 7, liquidity 5, double_top 1, sym. triangle 1), stale H&S 2, review_shape 1 |
+| Harness classic: shapes in → out / gate / cap / split | 91 → 91 / 0 / 0 / 0 | 85 → 85 / 0 / 0 / 0 |
+| Harness classic: invalidation, evidence in → out | 17 → 17, 17 → 17 | **53 → 53**, 17 → 17 |
+| Harness smc: shapes / invalidation in → out | 59 / 36 → 36 | 55 / 55 → 55 |
+| Families without `invalidation_price` | trendline, liquidity, fib, OB, triangles, channels | fib only |
+| Triangles / doubles with valid geometry | 9/9, 10/10 | 8/8, 10/10 |
+| H&S + IHS reaching the wire (16 windows) | 0 | 0 (both real ones `stale`) |
+| H&S + IHS reaching the wire (5 440-window scan) | n/a | W=100: 78 (30 unbroken, 48 completed); W=200: 116 (29 unbroken, 87 completed) |
+| SSE order | regime after LLM | `text, regime, text(model done), text(summary), shapes, analysis, text, markers, done` |
+| pytest / ruff check / format | 147 passed / clean / clean | 149 passed, 2 skipped / clean / clean |
+
+**Verdicts**
+- **H&S neckline ends 1 bar before the break; H&S reaches the wire: true.** All 78 + 116 H&S/IHS candidates in the scan that survived the pre-filter passed the gate, and fresh (unbroken) ones exist (30 at W=100). `tests/test_hs_wire.py` covers it.
+- **Gate relaxation: acceptable short-term, but scope it by id, not by name.**
+  - `_hs_neckline_shape` matches the substring `"H&S neckline"` in `name` (`drawing_gate.py:410-411`) and then (a) skips swing anchoring for the last point (`:436-443`, filling `sides` with a copy of the previous side) and (b) skips `ancient` (`:462`).
+  - Today only server-built candidates reach the gate, so other families can't use this. But the exemption depends on display text. Key it on `_candidate_id` prefix `hs_` / `ihs_`, which the sidecar already carries.
+  - Effect of (b): **19 of 48** completed H&S/IHS at W=100 have the neckline's first anchor in the oldest 35 % of the window.
+- **Staleness at 96 bars: not sensible as a constant.**
+  - At the production default of 100 candles it can never fire: the right shoulder must be in play, so the break is < 65 bars back. Measured at W=100: median 17 bars since break, max 58, 0 dropped as stale.
+  - At W=200: median 36, max 96, 26 dropped.
+  - **16/48 (W=100) and 48/87 (W=200) of the "completed" patterns had already reached their measured-move target** (neck ± height) and are still offered with scores of 0.81–0.89.
+  - Proposal: stale if target reached, or bars since break > max(5, 0.15·W). Score completed patterns below unbroken ones.
+- **Invalidation coverage: partial; the check is a fixed price, not a line.**
+  - `_candidate_invalidated` (`candidates.py`, see `_candidate_invalidated`) compares every close after the last anchor with **one constant price**. For sloped lines that price is the line value at `window_end` ± 0.25·ATR (`_line_invalidation_at`). That makes the check wrong for any sloped line.
+  - Its direction comes from where the *last close* sits relative to that price, not from the pattern's side.
+  - `_last_anchor_time` = the latest shape point. For zones and levels drawn to the right edge (S/R, BOS, CHoCH, FVG, OB to the last bar), that is the last candle, so **the check never runs for them**.
+  - Measured: the 16 trendline/liquidity/triangle drops were real breaks (one liquidity drop was not). But **8 of 30 line candidates still on offer are already broken by > 0.25·ATR when the line is evaluated bar by bar**: trendline 4/20, descending triangle 2/4, symmetrical triangle 2/4. Examples: ETH 4h "Descending triangle lower" broken at bar 197; SOL 1d "Resistance trendline" at bar 195.
+  - **The S/R role flip never fires.** The two breached zones (ETH 1h 2417.8, ETH 4h 2407.6) are still named `S/R …` with no "flipped" evidence, because the zone runs to `window_end`.
+  - Fix: evaluate the line at each bar after the last *swing* anchor; take the side from the pattern (support/lower → below); for zones use the swing anchors, not the drawn end.
+- **SSE: order and `regime` before the LLM: true** (order above).
+- **analysis.bias from the regime: true.** Bull and bear prompts on the same window both return `bias=bearish`, `confidence=0.7` and the same evidence.
+  - **Anti-sycophancy gap:** the scripted model answered the bullish user with "Tăng mạnh, mua ngay!" ("Strong rally, buy now!"). That passed the validator and was streamed as the summary, contradicting `analysis.bias=bearish` and the "no entries" instruction. There is no `regime_ack` or summary check (#4).
+  - **Content quality:**
+    - `evidence_for` is fixed text per regime label (consistent with `detect_regime`, but carries no measured values except ATR).
+    - When nothing is found, `evidence_against` falls back to **"No structural warnings on selected drawings"**. That is a reassuring filler, not evidence. It appears even when `intent_check.bias_conflict` is true, which should itself be evidence_against.
+    - The text is English while the UI is Vietnamese.
+- **meta.htf (D6): mapping fine, but lookahead in backtests and unreachable from Render.**
+  - Mapping 1m→15m, 15m→1h, 1h→4h, 4h→1d, 1d→none.
+  - `fetch_klines(..., end_time=to*1000)` keeps the HTF candle that *opens* ≤ `to`, i.e. a candle closing after the window. Example, SOL 4h: the 1d candle closes 20 h after the last 4h candle closes. Live, that is an unclosed candle; on a historical window it is lookahead. Fix: drop HTF candles with `open + htf_sec > to + ltf_sec`.
+  - **`KLINES_URL = https://api.binance.com` returns HTTP 451 from US IPs** (verified from this box). `render.yaml` sets `region: oregon`, and `_htf_context` swallows the exception, so **`meta.htf` will be `None` in production**. Use `data-api.binance.vision` or a non-US region.
+- **The Zod contract only runs in CI on paper.** `.github/workflows/web.yml` runs `npm ci`, but the web app has only `pnpm-lock.yaml` (`packageManager: pnpm@10.15.0`), so the install step will fail. `tsx` is not a web dependency either, so the test would skip anyway. Fix: use `pnpm/action-setup` + `pnpm install --frozen-lockfile`, add `tsx` as a devDependency, and fail (not skip) when `CI=true`.
+- **Duplicate meta / merged notes: true.** No second `meta` event in the runs. When the budget fallback comes from the `UnexpectedModelBehavior` path (validator retries exhausted), `intent_budget_fallback` is not set, so the user isn't told their picks were replaced.
+- **intent.horizon: added** (`schema.py:136`), passed to meta. Not used by any detector or prompt yet.
+
+**Part C status at `405c7360`**
+- Fixed: #1–3, #5–8, #10–12, #19, #22, #23, #27 (schema only), #28, #29, #31, D4, D5, N1–N6, R1–R3, B1, B2, B4 (H&S reaches the wire), B5.
+- Partial: #4 (no regime/bias/summary check), #9, #13, #14, #15, #16, #17 (staleness), #18, #20, #21, #24, #30, #32 (analysis content), B3 (fixed-price check, S/R flip never fires), D6 (lookahead, 451).
+- Open: #25, #26.
