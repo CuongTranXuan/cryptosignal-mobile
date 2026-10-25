@@ -164,7 +164,7 @@ class SessionsStore:
             if key == "chart" and value is not None:
                 value = _coerce_chart(value)
             if key == "messages" and value is not None:
-                value = value[:MAX_MESSAGES_PER_SESSION]
+                value = [SessionMessage.model_validate(m) for m in value[:MAX_MESSAGES_PER_SESSION]]
             record = record.model_copy(update={key: value})
         record = record.model_copy(update={"updated_at": int(time.time())})
         self._upsert(record)

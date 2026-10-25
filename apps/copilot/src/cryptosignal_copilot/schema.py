@@ -2,10 +2,20 @@ import logging
 from dataclasses import replace
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    ValidationError,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 from cryptosignal_copilot.drawing_gate import DrawingWindow, Drop, apply_preview_gate
 from cryptosignal_copilot.shape_sidecar import attach_sidecar, extract_sidecar
+from cryptosignal_copilot.wire_guardrail import Guardrail, coerce_wire_guardrail
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +83,22 @@ class PatternShape(BaseModel):
 PatternShapeModel = PatternShape
 
 
+class SessionShape(PatternShape):
+    """A shape as stored in a session message: the wire shape, guardrail included."""
+
+    guardrail: Guardrail | None = None
+
+    _wire_guardrail = field_validator("guardrail", mode="before")(coerce_wire_guardrail)
+
+    @model_serializer(mode="wrap")
+    def _omit_empty_optionals(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        data = handler(self)
+        for key in ("guardrail", "agentId"):
+            if data.get(key) is None:
+                data.pop(key, None)
+        return data
+
+
 def parse_pattern_shape(input_data: object) -> PatternShape:
     return PatternShape.model_validate(input_data)
 
@@ -95,7 +121,17 @@ class AgentMarker(BaseModel):
     source: Literal["agent"]
     # Optional drawing feedback join (not rendered as a chart marker when set).
     drawing_id: str | None = None
-    guardrail: dict[str, Any] | None = None
+    guardrail: Guardrail | None = None
+
+    _wire_guardrail = field_validator("guardrail", mode="before")(coerce_wire_guardrail)
+
+    @model_serializer(mode="wrap")
+    def _omit_empty_optionals(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        data = handler(self)
+        for key in ("agentId", "label", "drawing_id", "guardrail"):
+            if data.get(key) is None:
+                data.pop(key, None)
+        return data
 
 
 def parse_agent_marker(input_data: object) -> AgentMarker:
@@ -182,7 +218,7 @@ class SessionMessage(BaseModel):
     role: Literal["user", "assistant"]
     content: str
     model_id: str | None = None
-    shapes: list[PatternShape] = Field(default_factory=list)
+    shapes: list[SessionShape] = Field(default_factory=list)
     markers: list[AgentMarker] = Field(default_factory=list)
     created_at: int
     meta: SessionMessageMeta | None = None

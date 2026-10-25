@@ -5,7 +5,9 @@ import json
 from collections import Counter
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
+
+from cryptosignal_copilot.wire_guardrail import Guardrail, Invalidation
 
 SkipReasonCode = Literal[
     "low_confidence",
@@ -33,22 +35,6 @@ _GATE_REASON_TO_SKIP: dict[str, SkipReasonCode] = {
     "fib-no-C": "invalid_geometry",
     "cap": "cap",
 }
-
-
-class Invalidation(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    price: float
-    condition: str | None = None
-
-
-class Guardrail(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    regime: Literal["trend_up", "trend_down", "range", "volatile"]
-    confidence: float = Field(ge=0, le=1)
-    evidence_against: list[str] = Field(default_factory=list)
-    invalidation: Invalidation | None = None
 
 
 class IntentCheck(BaseModel):
