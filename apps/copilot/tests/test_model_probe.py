@@ -618,3 +618,16 @@ async def test_config_missing_returns_contract_shape(tmp_path, monkeypatch):
     assert models.json()["requested_default"] == "m/fast"
     assert report.json()["provider"] == "omniroute"
     assert service.probe_runs == 0
+
+
+async def test_refresh_not_rate_limited_while_upstream_down(probe_env):
+    clock = Clock()
+    service = make_service(
+        stub_transport(models=ROWS, models_error=httpx.ConnectError("refused")), clock=clock
+    )
+    cfg = load_llm_config()
+    await service.get_report(cfg, force=True)
+    clock.now += 1
+    report = await service.get_report(cfg, force=True)
+    assert report.upstream_reachable is False
+    assert service.probe_runs == 2

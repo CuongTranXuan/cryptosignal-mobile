@@ -578,8 +578,14 @@ class ModelProbeService:
         return ModelHealth(default_model=default_model, report=report)
 
     def check_refresh_allowed(self) -> None:
-        """Raise `ProbeRateLimited` when a forced refresh comes too soon after the last probe."""
+        """Raise `ProbeRateLimited` when a forced refresh comes too soon after the last probe.
+
+        Not applied while the upstream is down: those probes cost no completions, and the
+        user should see a freshly started gateway immediately.
+        """
         if self.in_progress or self._last_started is None:
+            return
+        if self._report is not None and not self._report.upstream_reachable:
             return
         interval = self.settings.refresh_min_interval_s
         remaining = self._last_started + interval - self._clock()
