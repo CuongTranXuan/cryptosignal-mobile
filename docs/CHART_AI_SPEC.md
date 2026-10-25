@@ -725,3 +725,77 @@ Severity: **B** = bug (wrong output now), **S** = spec gap (missing or weaker th
 2. Validator #4/#5 + schema #6/#7/#8 + prompt order (D5).
 3. Detector rewrites to Part B §2 (#17–#23, #14–#16), then scoring #24, regime #10, HTF D6.
 4. Eval #30 per Part B §9; it is the gate for tuning any [init] threshold.
+
+### C.5 Re-check at `625ecc82` (box, 2026-10-25, no LLM)
+Same 16 live Binance windows as C.1 (BTC/ETH/SOL/BNB × 15m/1h/4h/1d, 200 closed bars). "Before" = `04f47ef`, "after" = `625ecc82`. Each source tree was exported with `git archive` and imported by path, so the two runs cannot share code.
+
+**All candidates resolved (the coder's method)**
+| Metric | `04f47ef` | `625ecc82` |
+|---|---|---|
+| Candidates by family | trendline 32, fib 16, fvg 16, choch 11, channel_down 9, S/R 6, order_block 6, channel_up 4, double_bottom 2, IHS 2 | trendline 26, fvg 27, liquidity 17, fib 9, S/R 7, order_block 6, channel_down 6, choch 4, bos 3, channel_up 3, descending_triangle 2, double_top 1, double_bottom 1, IHS 1 |
+| Shapes / dropped | 149 / 60 | 142 / 54 |
+| Dropped by the cap | 19 | **54 (all drops)** |
+| Real gate rejections (cap excluded) | **41 (28 %)**: min-span 18, ancient 16, single-touch 4, near-vertical 3 | **0 (0 %)** |
+| Regime (16 windows) | range 9, volatile 6, trend_up 1 | range 8, trend_down 5, trend_up 3 |
+| Prompt context, o200k tokens (median, min–max) | 1 505 (1 298–1 574) | 1 603 (1 256–1 780) |
+| `pytest` / ruff | 125 passed | 140 passed, 1 skipped; ruff check + format clean; `tests/eval` 5 passed |
+
+**Realistic path: the top 6 candidates per style are resolved**
+| Style | `04f47ef` real drops | `625ecc82` real drops | `625ecc82` cap drops |
+|---|---|---|---|
+| classic | 15 / 95 (16 %) | 0 / 85 | 13 / 85 (15 %) |
+| smc | 16 / 33 (48 %, all ancient FVGs) | 0 / 57 | 0 |
+
+**The coder's 0 % claim is correct, but the code gets there partly by filtering.** `candidates.py:959` drops any candidate whose shapes fail `review_shape`. Then `:961-974` runs the whole catalog through `apply_preview_gate` and removes any candidate that has a non-cap drop. I turned both filters off and re-ran the detectors. They produce **151 raw candidates, and 38 (25 %) are removed before the LLM sees the catalog.** None of these removals are logged or reported.
+- Removed by family: descending_triangle 10, liquidity 9, fib_retracement 7, ascending_triangle 4, trendline 4, channel_down 2, double_bottom 2.
+- Gate reasons on the raw catalog (shapes): fib min-span 21, triangle ancient 16, unpaired-triangle 11, liquidity ancient 9, near-vertical 3, triangle-structure 4, channel min-span 1.
+- So 14 of the 16 triangles found are removed. Fib still produces level lines that are too short. Liquidity pairs are often ancient.
+- `tests/eval/test_chart_replay.py:76-99` asserts `gate_drop_rate ≤ 0.02` on this already-filtered catalog, so the test passes by construction. It needs a raw-detector metric, e.g. `prefilter_drop_rate` reported next to `gate_drop_rate`.
+- SOLUSDT 1d ends up with 0 classic candidates.
+
+**Status of C.3 items at `625ecc82`** (file:line at `625ecc82`, all under `apps/copilot/src/cryptosignal_copilot/`)
+| # | Status | Evidence |
+|---|---|---|
+| 1 | fixed | rails `f"{type_label} upper/lower"` (`candidates.py:461-476`); channel rails renamed "Channel high/low rail" (`:505-519`) |
+| 2 | fixed | `enrich_resolved_shapes` (`drawing_intent.py:159-198`); `enrich_shapes_with_guardrails` keeps an existing guardrail that has evidence_against or invalidation (`chart_response.py:125-130`). Ids are hashed twice (`drw_` of `drw_`); this is deterministic and harmless. |
+| 3 | fixed | `_candidate_id` carried from resolve to enrich (`drawing_intent.py:138, 154, 174`) |
+| 4 | partial | unknown id, too_many, duplicate and style_forbidden are checked (`agent_validate.py:26-55`). Regime_mismatch, bias_unsupported, evidence_uncited and invalidation_missing are still not checked (the schema has no fields for them, see D2). |
+| 5 | fixed | `example_ids = catalog.ids_for_style(style)[:3]` (`agent_validate.py:22`) |
+| 6 | fixed | id regex, `max_length=6`, cap on intents rather than shapes (`drawing_intent.py:13-16, 62-64, 130`). The shape cap of 6 in the gate still cuts multi-shape picks: 13/85 classic shapes in the top-6 run. |
+| 7 | fixed | `0.40 + 0.55·score`, capped at 0.70 below 3 touches, dropped below 0.55 (`drawing_intent.py:74-80`). Touches = `len(swing_ids)` (`:68-71`). |
+| 8 | fixed | `close_below` / `close_above` from last_close (`drawing_intent.py:83-88, 103-105`) |
+| 9 | partial | filled only for S/R (`candidates.py:211`) and DT/DB (`:310, :351`) |
+| 10 | fixed | EMA20/50 + ZigZag structure + ATR% vs median (`chart_regime.py:37-80`). The distribution now looks plausible. |
+| 11 | fixed | `zigzag_mult` 2.5/2.0/2.0/1.75/1.5 (`features.py:18-30`) |
+| 12 | fixed (new bug N2) | newest-first, middle-candle direction, mitigation, gap ≥ 0.1·ATR (`candidates.py:611-716`) |
+| 13 | open | order block is still `candles[-2].close > candles[-3].high`, bullish only (`candidates.py:846-872`) |
+| 14 | partial (new bug N3) | 4-swing rule + close break (`candidates.py:745-769, 796-820`) |
+| 15 | partial | 4-swing CHoCH both directions (`candidates.py:770-792, 821-843`). No close-break confirmation. |
+| 16 | partial | highs and lows, tol `max(0.01·range, 0.15·ATR)` (`candidates.py:365-404, 873-880`). No swept check, no minimum spacing, not limited to in-play anchors (9 removed by the prefilter). |
+| 17 | open | unchanged: last 3 highs, tol 0.35·ATR, neck = `min(shoulders) − ATR` (`candidates.py:526-568`) |
+| 18 | partial (new bug N4) | neckline now goes through swing troughs (`candidates.py:274-300, 315-341`). tol 0.4·ATR, and there is no separation or trough-depth check. |
+| 19 | partial (new bug N1) | swing-pair search; flat rail = `|slope|·span ≤ 0.5·ATR` (`candidates.py:357-363`); both rail spans ≥ 15 (`:425, :431`) |
+| 20 | open | channel = last 2 highs + 2 lows with the same direction; no parallelism or width check (`candidates.py:484-522`) |
+| 21 | open | trendline = last 2 same-side swings, score `0.55 + span/100` (`candidates.py:217-256`) |
+| 22 | fixed | tol `min(0.25·ATR, 0.01·range)`, all clusters, ≥ 5 bars apart, in play (`candidates.py:155-183`) |
+| 23 | open | leg ≥ 1.5·ATR; levels drawn `b.t → a.t` (`candidates.py:570-608`) → 21 min-span shape fails, removed by the prefilter. The ternary at `:586` has identical branches. |
+| 24 | open | scores are still constants (0.6–0.72) |
+| 25 | open (mitigated) | still no Elliott/Wyckoff detectors; `intent_prep.py:61-66` now tells the user and suggests no_valid_pattern |
+| 26 | open | one-line slices, no few-shots (`intent_step.py:22-30`) |
+| 27 | open | no `AnalyzeIntent.horizon` |
+| 28 | fixed | prominence = distance from the previous pivot (`features.py:220`) |
+| 29 | fixed | `zz[-16:]` (`features.py:278`) |
+| 30 | partial | 9 real fixtures + replay test (`tests/eval/test_chart_replay.py`). Below the 50–60 windows Part B asks for; no labels; the drop-rate test is circular (see above); no sycophancy flip. |
+| 31 | fixed | `build_deterministic_fallback` after output retries fail (`agent.py:160`) |
+| 32 | open | no `regime` / `analysis` SSE event, no `no_valid_pattern` state |
+| D4 | fixed | requested pattern is boosted, not filtered (`intent_step.py:46-59`) |
+| D5 | fixed | `User prompt (read last)` (`agent.py:339`) |
+| D6 | open | `htf_summary` still uses buckets from the same window (`features.py:234`) |
+
+**New bugs found at `625ecc82`**
+- **N1 (triangle prefers the oldest pairs):** the 4-nested loop iterates oldest→newest and keeps the first match because the comparison is a strict `>` on fixed scores 0.68/0.65 (`candidates.py:422-452`). There is also no recency or `anchor_in_play` check, no check that the rails overlap in time or converge, and only 1 triangle is returned per window. Result: 16 ancient and 11 unpaired triangle shapes, so 14 of 16 triangles are removed by the prefilter. Fix: iterate newest-first, or score by recency; require both rails' last touch in play, a time overlap, and convergence ahead of the last bar.
+- **N2 (FVG id not stable):** `_cand_id("fvg", last_t, side)` (`candidates.py:663, 690`) hashes the *last candle time*, so the same gap gets a new id every bar. This breaks feedback and persistence keyed by id. Fix: hash `(t0, side, low, high)`.
+- **N3 (BOS recency check does nothing):** `last.time >= newest_half_start` (`candidates.py:746, 797`) is always true, because `last` is the newest candle. It should test the break bar or `h1`/`l1` position.
+- **N4 (DT/DB neckline fallback):** a normal double top has a *single* trough between the tops. In that case `between_lows` has fewer than 2 lows and falls back to `lows[-2:]` (`candidates.py:276-277, 317-318`). That can include a low from before the first top, which gives a sloped neckline outside the pattern. Spec: horizontal neckline at the lowest low between the tops.
+- **N5 (filtering is silent):** the 25 % prefilter removal (`candidates.py:959-974`) is not in `meta`/`skipped`, so `gate_drop_rate` can no longer detect bad detectors. Report `prefilter_dropped` by reason.
+- **N6 (minor):** `enrich_resolved_shapes` contains dead code (`drawing_intent.py:170-171`).
