@@ -14,13 +14,39 @@ from cryptosignal_copilot.config import sqlite_url_for_path
 from cryptosignal_copilot.db.engine import get_engine, reset_engine_for_tests
 from cryptosignal_copilot.db.migrate import run_db_migrations
 from cryptosignal_copilot.db.models import CopilotSessionRow
+from cryptosignal_copilot.intent_prep import normalize_session_intent
 from cryptosignal_copilot.schema import (
+    AnalyzeIntent,
     CopilotSession,
     SessionChartContext,
     SessionMessage,
     SessionSummary,
     normalize_session_reasoning_effort,
 )
+
+
+def _intent_to_json(intent: AnalyzeIntent | None) -> str | None:
+    if intent is None:
+        return None
+    return json.dumps(intent.model_dump(mode="json"))
+
+
+def _intent_from_json(raw: str | None) -> AnalyzeIntent | None:
+    if not raw:
+        return None
+    data = json.loads(raw)
+    if data is None:
+        return None
+    return AnalyzeIntent.model_validate(data)
+
+
+def _session_from_row(row: CopilotSessionRow) -> CopilotSession:
+    data = json.loads(row.payload)
+    if data.get("intent") is None and row.intent_json:
+        data["intent"] = json.loads(row.intent_json)
+    if row.reasoning_effort is not None and data.get("reasoning_effort") is None:
+        data["reasoning_effort"] = row.reasoning_effort
+    return CopilotSession.model_validate(data)
 
 
 def _coerce_chart(value: object) -> SessionChartContext:
@@ -70,10 +96,10 @@ class SessionsStore:
                     .order_by(CopilotSessionRow.updated_at.desc())
                     .limit(MAX_SESSIONS)
                 ).scalars()
-                payloads = [row.payload for row in rows]
+                row_list = list(rows)
         out: list[SessionSummary] = []
-        for payload in payloads:
-            record = CopilotSession.model_validate(json.loads(payload))
+        for row in row_list:
+            record = _session_from_row(row)
             out.append(
                 SessionSummary(
                     id=record.id,
@@ -82,6 +108,7 @@ class SessionsStore:
                     updated_at=record.updated_at,
                     model_id=record.model_id,
                     reasoning_effort=record.reasoning_effort,
+                    intent=record.intent,
                     symbol=record.chart.symbol,
                     interval=record.chart.interval,
                     candle_count=record.chart.candle_count,
@@ -96,7 +123,7 @@ class SessionsStore:
                 row = session.get(CopilotSessionRow, session_id)
         if row is None:
             raise SessionNotFoundError(session_id)
-        return CopilotSession.model_validate(json.loads(row.payload))
+        return _session_from_row(row)
 
     def create_session(
         self,
@@ -106,6 +133,7 @@ class SessionsStore:
         chart: SessionChartContext,
         messages: list[SessionMessage] | None = None,
         reasoning_effort: str | None = None,
+        intent: AnalyzeIntent | None = None,
     ) -> CopilotSession:
         self._evict_if_needed()
         now = int(time.time())
@@ -116,6 +144,7 @@ class SessionsStore:
             updated_at=now,
             model_id=model_id,
             reasoning_effort=normalize_session_reasoning_effort(reasoning_effort),
+            intent=intent,
             chart=chart,
             messages=(messages or [])[:MAX_MESSAGES_PER_SESSION],
         )
@@ -124,12 +153,14 @@ class SessionsStore:
 
     def update_session(self, session_id: str, **updates: Any) -> CopilotSession:
         record = self.get_session(session_id)
-        allowed = {"title", "model_id", "chart", "messages", "reasoning_effort"}
+        allowed = {"title", "model_id", "chart", "messages", "reasoning_effort", "intent"}
         for key, value in updates.items():
             if key not in allowed:
                 continue
             if key == "reasoning_effort":
                 value = normalize_session_reasoning_effort(value)
+            if key == "intent":
+                value = normalize_session_intent(value)
             if key == "chart" and value is not None:
                 value = _coerce_chart(value)
             if key == "messages" and value is not None:
@@ -174,6 +205,7 @@ class SessionsStore:
             updated_at=float(record.updated_at),
             payload=json.dumps(payload),
             reasoning_effort=record.reasoning_effort,
+            intent_json=_intent_to_json(record.intent),
         )
         with self._lock:
             with self._session() as session:

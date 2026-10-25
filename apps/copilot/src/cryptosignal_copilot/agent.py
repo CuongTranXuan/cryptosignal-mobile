@@ -10,6 +10,7 @@ from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError, UnexpectedMode
 
 from cryptosignal_copilot.agent_output import build_agent_output_type, output_retries_for_model
 from cryptosignal_copilot.analyze_prep import AnalyzePlan, retry_plan
+from cryptosignal_copilot.chart_response import aggregate_skipped, enrich_shapes_with_guardrails
 from cryptosignal_copilot.config import load_llm_config
 from cryptosignal_copilot.drawing_gate import (
     DrawingWindow,
@@ -248,11 +249,30 @@ class PydanticAiRunner:
         if dropped:
             yield "text", {"delta": format_drop_note(dropped)}
 
+        intent_check = (current_plan.meta or {}).get("intent_check") or {}
+        regime = str(intent_check.get("detected_regime") or "range")
+        valid_shapes, drawing_anchors = enrich_shapes_with_guardrails(
+            valid_shapes,
+            regime=regime,
+            symbol=request.symbol,
+            interval=request.interval,
+        )
+        skipped, skipped_count = aggregate_skipped(dropped)
+        requested = (request.intent.requested_pattern if request.intent else None) or None
+        if requested and not any(
+            requested.replace("_", " ") in str(s.get("name", "")).lower()
+            or requested in str(s.get("name", "")).lower()
+            for s in valid_shapes
+        ):
+            skipped, skipped_count = aggregate_skipped(dropped, extra=["unsupported_pattern"])
+
         yield (
             "shapes",
             {
                 "shapes": valid_shapes,
                 "dropped": [{"id": shape_id, "reason": reason} for shape_id, reason in dropped],
+                "skipped": skipped,
+                "skipped_count": skipped_count,
             },
         )
         if valid_shapes:
@@ -260,8 +280,9 @@ class PydanticAiRunner:
             more = f" (+{len(valid_shapes) - 5} nữa)" if len(valid_shapes) > 5 else ""
             yield "text", {"delta": f"\n\nLớp phủ sẵn sàng: {len(valid_shapes)} — {names}{more}."}
 
-        if output.markers:
-            valid_markers, dropped_marker_ids = filter_agent_markers(output.markers, allowed_times)
+        merged_markers = list(output.markers) + drawing_anchors
+        if merged_markers:
+            valid_markers, dropped_marker_ids = filter_agent_markers(merged_markers, allowed_times)
             if dropped_marker_ids:
                 yield (
                     "text",

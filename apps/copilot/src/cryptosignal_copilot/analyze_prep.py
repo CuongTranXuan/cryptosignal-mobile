@@ -11,19 +11,12 @@ from cryptosignal_copilot.candle_budget import (
     previous_preset,
 )
 from cryptosignal_copilot.config import LlmConfig, load_default_candle_count
+from cryptosignal_copilot.intent_prep import build_intent_check, validate_analyze_intent
 from cryptosignal_copilot.model_catalog import ModelNotFoundError, ModelsCatalog, NormalizedModel
 from cryptosignal_copilot.model_routes import resolve_provider_model_id
+from cryptosignal_copilot.prep_errors import AnalyzePrepError
 from cryptosignal_copilot.run_settings import build_run_model_settings, lower_reasoning_effort
 from cryptosignal_copilot.schema import AnalyzeRequest
-
-
-class AnalyzePrepError(Exception):
-    def __init__(self, code: str, status_code: int, message: str, detail: str = "") -> None:
-        self.code = code
-        self.status_code = status_code
-        self.message = message
-        self.detail = detail
-        super().__init__(message)
 
 
 @dataclass(frozen=True)
@@ -73,6 +66,9 @@ async def prepare_analyze(
     *,
     history_tokens: int = 0,
 ) -> AnalyzePlan:
+    intent = validate_analyze_intent(request.intent)
+    request = request.model_copy(update={"intent": intent}, deep=True)
+
     model_id = (request.model or cfg.model).strip()
     if not model_id:
         raise AnalyzePrepError("unknown_model", 400, "Mô hình không hợp lệ", "model is required")
@@ -132,6 +128,8 @@ async def prepare_analyze(
         "max_tokens": settings.get("max_tokens"),
         "reasoning_effort": effort,
         "retried": False,
+        "intent": intent.model_dump(),
+        "intent_check": build_intent_check(request, intent),
     }
     return AnalyzePlan(
         model_id=model_id,

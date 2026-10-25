@@ -92,6 +92,9 @@ class AgentMarker(BaseModel):
     label: str | None = None
     confidence: float = Field(ge=0, le=1)
     source: Literal["agent"]
+    # Optional drawing feedback join (not rendered as a chart marker when set).
+    drawing_id: str | None = None
+    guardrail: dict[str, Any] | None = None
 
 
 def parse_agent_marker(input_data: object) -> AgentMarker:
@@ -102,8 +105,13 @@ def _dump_omit_unset_agent_id(model: PatternShape | AgentMarker) -> dict[str, An
     data = model.model_dump()
     if data.get("agentId") is None:
         data.pop("agentId", None)
-    if isinstance(model, AgentMarker) and data.get("label") is None:
-        data.pop("label", None)
+    if isinstance(model, AgentMarker):
+        if data.get("label") is None:
+            data.pop("label", None)
+        if data.get("drawing_id") is None:
+            data.pop("drawing_id", None)
+        if data.get("guardrail") is None:
+            data.pop("guardrail", None)
     return data
 
 
@@ -116,6 +124,18 @@ class Candle(BaseModel):
     low: float
     close: float
     volume: float
+
+
+class AnalyzeIntent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    style: Literal["classic", "smc", "elliott", "wyckoff"] = "classic"
+    bias: Literal["bullish", "bearish", "neutral"] | None = None
+    requested_pattern: str | None = None
+
+
+# UI contract alias: session + analyze share this shape.
+ChartIntent = AnalyzeIntent
 
 
 class AnalyzeRequest(BaseModel):
@@ -132,6 +152,8 @@ class AnalyzeRequest(BaseModel):
     model: str | None = None
     candle_count: int | None = Field(default=None, ge=1)
     reasoning_effort: str | None = None
+    session_id: str | None = None
+    intent: AnalyzeIntent | None = None
 
 
 class SessionMessageMeta(BaseModel):
@@ -173,6 +195,7 @@ class CopilotSession(BaseModel):
     updated_at: int
     model_id: str
     reasoning_effort: str | None = None
+    intent: AnalyzeIntent | None = None
     chart: SessionChartContext
     messages: list[SessionMessage] = Field(default_factory=list)
 
@@ -195,6 +218,7 @@ class SessionSummary(BaseModel):
     updated_at: int
     model_id: str
     reasoning_effort: str | None = None
+    intent: AnalyzeIntent | None = None
     symbol: str
     interval: str
     candle_count: int
@@ -207,6 +231,7 @@ class CreateSessionRequest(BaseModel):
     title: str = "New chat"
     model_id: str
     reasoning_effort: str | None = None
+    intent: AnalyzeIntent | None = None
     chart: SessionChartContext
     messages: list[SessionMessage] = Field(default_factory=list)
 
@@ -220,12 +245,25 @@ class CreateSessionRequest(BaseModel):
         return None
 
 
+class FeedbackAction(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str
+    message_id: str | None = None
+    drawing_id: str
+    action: Literal["keep", "reject", "edit", "delete"]
+    before: dict[str, Any] | None = None
+    after: dict[str, Any] | None = None
+    client_ts: float | None = None
+
+
 class UpdateSessionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     title: str | None = None
     model_id: str | None = None
     reasoning_effort: str | None = None
+    intent: AnalyzeIntent | None = None
     chart: SessionChartContext | None = None
     messages: list[SessionMessage] | None = None
 

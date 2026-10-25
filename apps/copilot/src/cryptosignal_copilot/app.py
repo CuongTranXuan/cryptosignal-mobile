@@ -19,6 +19,7 @@ from cryptosignal_copilot.config import (
     validate_llm_env_on_startup,
 )
 from cryptosignal_copilot.db.migrate import run_db_migrations
+from cryptosignal_copilot.intent_prep import normalize_session_intent, resolve_analyze_intent
 from cryptosignal_copilot.logging_setup import configure_logging
 from cryptosignal_copilot.model_catalog import ModelsCatalog, get_models_catalog
 from cryptosignal_copilot.provider_errors import error_payload
@@ -119,14 +120,22 @@ def create_app(
 
     @app.post("/v1/copilot/sessions")
     async def create_session(body: CreateSessionRequest):
-        record = await asyncio.to_thread(
-            store.create_session,
-            title=body.title,
-            model_id=body.model_id,
-            chart=body.chart,
-            messages=body.messages,
-            reasoning_effort=body.reasoning_effort,
-        )
+        try:
+            intent = normalize_session_intent(body.intent) if body.intent is not None else None
+            record = await asyncio.to_thread(
+                store.create_session,
+                title=body.title,
+                model_id=body.model_id,
+                chart=body.chart,
+                messages=body.messages,
+                reasoning_effort=body.reasoning_effort,
+                intent=intent,
+            )
+        except AnalyzePrepError as exc:
+            return JSONResponse(
+                error_payload(exc.code, exc.message, exc.detail),
+                status_code=exc.status_code,
+            )
         return record.model_dump(by_alias=True)
 
     @app.get("/v1/copilot/sessions/{session_id}")
@@ -141,7 +150,14 @@ def create_app(
     async def patch_session(session_id: str, body: UpdateSessionRequest):
         try:
             patch = body.model_dump(exclude_unset=True, by_alias=True)
+            if "intent" in patch:
+                patch["intent"] = normalize_session_intent(patch["intent"])
             record = await asyncio.to_thread(store.update_session, session_id, **patch)
+        except AnalyzePrepError as exc:
+            return JSONResponse(
+                error_payload(exc.code, exc.message, exc.detail),
+                status_code=exc.status_code,
+            )
         except SessionNotFoundError:
             return JSONResponse({"error": "session not found"}, status_code=404)
         return record.model_dump(by_alias=True)
@@ -174,6 +190,24 @@ def create_app(
             analyze_req = AnalyzeRequest.model_validate(body)
         except ValidationError as exc:
             return JSONResponse({"detail": exc.errors()}, status_code=422)
+
+        try:
+            session_intent = None
+            if analyze_req.session_id:
+                try:
+                    session_record = await asyncio.to_thread(
+                        store.get_session, analyze_req.session_id
+                    )
+                except SessionNotFoundError:
+                    return JSONResponse({"error": "session not found"}, status_code=404)
+                session_intent = session_record.intent
+            merged_intent = resolve_analyze_intent(analyze_req.intent, session_intent)
+            analyze_req = analyze_req.model_copy(update={"intent": merged_intent}, deep=True)
+        except AnalyzePrepError as exc:
+            return JSONResponse(
+                error_payload(exc.code, exc.message, exc.detail),
+                status_code=exc.status_code,
+            )
 
         try:
             await prepare_analyze(catalog, cfg, analyze_req)
