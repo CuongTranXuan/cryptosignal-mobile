@@ -417,10 +417,7 @@ def _anchor_hs_terminal(point: dict[str, Any], ctx: _GateContext) -> str | None:
     candle = ctx.candle_by_time.get(time)
     if candle is None:
         return "no-anchor"
-    if (
-        _price_inside_bar(price, candle)
-        and not _price_on_wick(price, candle, ctx.tolerance)
-    ):
+    if _price_inside_bar(price, candle) and not _price_on_wick(price, candle, ctx.tolerance):
         return "non-wick"
     return None
 
