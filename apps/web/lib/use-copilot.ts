@@ -148,6 +148,15 @@ export function filterMarkersToClosedTimes(
   return { valid, droppedIds };
 }
 
+/**
+ * Analyze `existingShapes` follows the backend input model (extra="forbid"): drop
+ * server-added output fields such as `guardrail`, or a second run on the same chart 422s.
+ */
+export function shapeForAnalyzeRequest(shape: PatternShape): PatternShape {
+  const { guardrail: _guardrail, ...wire } = shape;
+  return wire;
+}
+
 function shapeIdsOnChart(): Set<string> {
   return new Set(useShapeStore.getState().shapes.map((shape) => shape.id));
 }
@@ -155,8 +164,9 @@ function shapeIdsOnChart(): Set<string> {
 function applyRenderableStreamMarkers(
   timeValidMarkers: AgentMarker[],
 ): { renderable: AgentMarker[]; renderableCount: number } {
-  const renderable = filterRenderableAnchorMarkers(timeValidMarkers, shapeIdsOnChart());
-  useMarkerStore.getState().setMarkers(renderable);
+  const onChart = shapeIdsOnChart();
+  const renderable = filterRenderableAnchorMarkers(timeValidMarkers, onChart);
+  useMarkerStore.getState().mergeRunMarkers(renderable, onChart);
   return { renderable, renderableCount: renderable.length };
 }
 
@@ -419,9 +429,9 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
           chart.interval,
         );
         droppedIds.push(...outOfWindow);
-        useShapeStore.getState().setPreview(valid);
+        useShapeStore.getState().replaceAgentShapes(valid);
+        useMarkerStore.getState().pruneOrphans(shapeIdsOnChart());
         if (valid.length > 0) {
-          useShapeStore.getState().commitPreview();
           const lines = valid.map((s) =>
             copilotShapeSummaryLine(
               displayShapeName(s.name),
@@ -610,7 +620,7 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
       from: window.from,
       to: window.to,
       closedCandles: window.candles,
-      existingShapes: useShapeStore.getState().committed(),
+      existingShapes: useShapeStore.getState().committed().map(shapeForAnalyzeRequest),
       existingMarkers: useMarkerStore.getState().markers,
       prompt: annotatedPrompt,
       candle_count: candleCount,

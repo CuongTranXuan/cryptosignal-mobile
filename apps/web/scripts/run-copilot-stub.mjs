@@ -17,6 +17,8 @@ os.environ.setdefault("LLM_BASE_URL", "http://127.0.0.1:20128/v1")
 os.environ.setdefault("LLM_API_KEY", "sk-test")
 os.environ.setdefault("LLM_MODEL", "agentrouter/deepseek-v4-flash")
 os.environ.setdefault("COPILOT_RUN_DB_MIGRATIONS", "true")
+# The fake key cannot pass a live probe; keep the catalog unprobed so the UI can send.
+os.environ.setdefault("COPILOT_MODEL_PROBE_ENABLED", "false")
 from cryptosignal_copilot.config import sqlite_url_for_path
 db = Path(tempfile.gettempdir()) / "cryptosignal-copilot-e2e.sqlite3"
 os.environ["DATABASE_URL"] = sqlite_url_for_path(db)

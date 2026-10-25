@@ -62,6 +62,7 @@ export function PatternsTable() {
   const selectedId = useShapeStore((s) => s.selectedId);
   const select = useShapeStore((s) => s.select);
   const remove = useShapeStore((s) => s.remove);
+  const pin = useShapeStore((s) => s.pin);
   const removeMarkersForDrawing = useMarkerStore((s) => s.removeLinkedToDrawing);
 
   const [feedbackDone, setFeedbackDone] = useState<Record<string, "kept" | "rejected">>({});
@@ -71,6 +72,7 @@ export function PatternsTable() {
   const onKeep = (shape: PatternShape) => {
     getCopilotFeedbackClient()?.keep(shape.id, shapeFeedbackSnapshot(shape));
     setFeedbackDone((prev) => ({ ...prev, [shape.id]: "kept" }));
+    pin(shape.id);
   };
 
   const onReject = (shape: PatternShape) => {

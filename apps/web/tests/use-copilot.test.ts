@@ -310,7 +310,7 @@ describe("use-copilot / createCopilotClient", () => {
     expect(useMarkerStore.getState().markers).toHaveLength(0);
     const content = useAiStore.getState().messages.find((m) => m.role === "agent")?.content ?? "";
     expect(content).not.toContain("điểm neo");
-    expect(content).not.toContain("đánh dấu không hợp lệ");
+    expect(content).not.toContain("điểm neo không hợp lệ");
   });
 
   it("streams text+shapes into agent message and setPreview", async () => {
@@ -357,8 +357,13 @@ describe("use-copilot / createCopilotClient", () => {
     expect(useMarkerStore.getState().markers).toEqual([]);
   });
 
-  it("streams markers into the marker store without touching shapes", async () => {
-    const committed = { ...validShape("keep"), status: "committed" as const };
+  it("streams markers into the marker store without touching user shapes", async () => {
+    // N24: earlier unpinned AI shapes are replaced per run; user-drawn shapes stay.
+    const committed = {
+      ...validShape("keep"),
+      source: "human" as const,
+      status: "committed" as const,
+    };
     useShapeStore.setState({ shapes: [committed], selectedId: null });
 
     const marker: AgentMarker = {

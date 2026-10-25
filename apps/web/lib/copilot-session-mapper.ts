@@ -7,6 +7,7 @@ import type {
   UpdateSessionRequest,
 } from "./copilot-schema";
 import { modelLabelForSession } from "./copilot-model-defaults";
+import { uniqueShapesById } from "./stores/shape-store";
 import {
   decodeLegacySessionTitle,
   stripLegacyReasoningFromTitle,
@@ -126,7 +127,7 @@ export function shapesFromSessionMessages(session: CopilotSessionV1): PatternSha
   for (let i = session.messages.length - 1; i >= 0; i--) {
     const msg = session.messages[i];
     if (msg?.role === "assistant" && msg.shapes.length > 0) {
-      return msg.shapes as PatternShape[];
+      return uniqueShapesById(msg.shapes as PatternShape[]);
     }
   }
   return [];

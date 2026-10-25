@@ -146,7 +146,7 @@ export function copilotSkippedShapes(count: number): string {
 }
 
 export function copilotSkippedMarkers(count: number): string {
-  return `\n\n(Bỏ qua ${count} đánh dấu không hợp lệ.)`;
+  return `\n\n(Bỏ qua ${count} điểm neo không hợp lệ.)`;
 }
 
 export function copilotShapeSummaryLine(
