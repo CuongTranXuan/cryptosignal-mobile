@@ -1,7 +1,10 @@
 import { mergeCandles } from "./binance";
 import { mapCopilotHttpError, mapCopilotSseErrorPayload } from "./copilot-errors";
 import {
-  formatBiasConflictNotice,
+  displayShapeName,
+  formatBiasConflictChatNotice,
+} from "./copilot-display";
+import {
   formatSkippedBreakdown,
   isAnalysisSseEmpty,
   parseAnalysisSseEvent,
@@ -25,7 +28,7 @@ import {
   copilotSkippedMarkers,
   copilotSkippedShapes,
   COPILOT_SCROLLED_TO_OVERLAYS,
-  COPILOT_INTENT_BUDGET_FALLBACK,
+  COPILOT_SERVER_PICKED_SHAPES,
 } from "./copilot-strings";
 import { useCopilotSessionStore } from "./stores/copilot-session-store";
 import { fetchKlines as defaultFetchKlines, type FetchKlines } from "./market-client";
@@ -159,14 +162,19 @@ function appendServerSkippedNote(data: Record<string, unknown>): void {
   if (text) useAiStore.getState().appendText(text);
 }
 
-function appendIntentCheckNote(meta: { intent_check?: { bias_conflict: boolean; message?: string } }): void {
+function appendIntentCheckNote(
+  meta: AnalyzeMetaEvent,
+  userBias?: import("./copilot-schema").ChartBias | null,
+): void {
   if (!meta.intent_check?.bias_conflict) return;
-  useAiStore.getState().appendText(formatBiasConflictNotice(meta.intent_check.message));
+  useAiStore.getState().appendText(
+    formatBiasConflictChatNotice(meta.intent_check, userBias),
+  );
 }
 
-function appendIntentBudgetFallbackNote(meta: AnalyzeMetaEvent): void {
-  if (!meta.intent_budget_fallback) return;
-  useAiStore.getState().appendText(COPILOT_INTENT_BUDGET_FALLBACK);
+function appendMetaFallbackNote(meta: AnalyzeMetaEvent): void {
+  if (!meta.validator_fallback && !meta.intent_budget_fallback) return;
+  useAiStore.getState().appendText(`\n\n${COPILOT_SERVER_PICKED_SHAPES}`);
 }
 
 function mergeIntentCheckIntoLastMeta(intentCheck: AnalyzeMetaEvent["intent_check"]): void {
@@ -239,8 +247,13 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
         const parsed = AnalyzeMetaEventSchema.safeParse(data);
         if (parsed.success) {
           useCopilotSessionStore.getState().setLastAnalyzeMeta(parsed.data);
-          appendIntentCheckNote(parsed.data);
-          appendIntentBudgetFallbackNote(parsed.data);
+          const activeId = useCopilotSessionStore.getState().activeSessionId;
+          const sessionIntent =
+            activeId != null
+              ? useCopilotSessionStore.getState().sessionCache[activeId]?.intent
+              : null;
+          appendIntentCheckNote(parsed.data, sessionIntent?.bias);
+          appendMetaFallbackNote(parsed.data);
           appendServerSkippedNote(parsed.data);
           const messages = useAiStore.getState().messages.slice();
           for (let i = messages.length - 1; i >= 0; i--) {
@@ -335,7 +348,7 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
           useShapeStore.getState().commitPreview();
           const lines = valid.map((s) =>
             copilotShapeSummaryLine(
-              s.name,
+              displayShapeName(s.name),
               s.kind,
               Math.round(s.confidence * 100),
               s.points.length,

@@ -1,6 +1,6 @@
 "use client";
 
-import { formatMetaHtfLine } from "../../lib/copilot-chart-ai";
+import { formatMetaHtfLine } from "../../lib/htf-format";
 import type { AnalyzeMetaEvent } from "../../lib/copilot-schema";
 
 type CopilotMetaHtfLineProps = {

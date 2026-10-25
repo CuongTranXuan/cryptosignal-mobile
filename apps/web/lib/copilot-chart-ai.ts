@@ -10,7 +10,9 @@ import {
   type DrawingRegime,
   type KnownSkippedReasonCode,
   type SkippedEntry,
+  type SummaryDirection,
 } from "./copilot-schema";
+import { formatInvalidationLine } from "./guardrail-format";
 
 export const KNOWN_PATTERN_IDS = [
   "head_and_shoulders",
@@ -117,6 +119,7 @@ export function parseAnalysisSseEvent(data: Record<string, unknown>): AnalysisSs
 
 export function isAnalysisSseEmpty(analysis: Partial<AnalysisSseEvent>): boolean {
   if (analysis.no_valid_pattern) return false;
+  if (analysis.summary_direction != null) return false;
   const bias = analysis.bias;
   const hasBias = bias != null && bias !== "neutral";
   const hasEvidence =
@@ -132,6 +135,9 @@ export function formatAnalysisSummaryVi(analysis: AnalysisSseEvent): string | nu
   const lines: string[] = [];
   if (analysis.no_valid_pattern) {
     lines.push("Không có mẫu hình hợp lệ trong cửa sổ này.");
+  }
+  if (analysis.summary_direction) {
+    lines.push(`Hướng tóm tắt: ${labelForSummaryDirection(analysis.summary_direction)}.`);
   }
   if (analysis.bias && analysis.bias !== "neutral") {
     lines.push(`Bias phát hiện: ${labelForBias(analysis.bias)}.`);
@@ -149,8 +155,8 @@ export function formatAnalysisSummaryVi(analysis: AnalysisSseEvent): string | nu
   }
   const inv = analysis.invalidation;
   if (inv != null) {
-    const cond = inv.condition ? ` (${inv.condition})` : "";
-    lines.push(`Vô hiệu hóa: ${inv.price}${cond}`);
+    const line = formatInvalidationLine(inv, "BTCUSDT");
+    if (line) lines.push(`Vô hiệu hóa: ${line}`);
   }
   return lines.join("\n");
 }
@@ -176,15 +182,14 @@ export function labelForHorizon(horizon: ChartHorizon): string {
   return HORIZON_LABELS_VI[horizon];
 }
 
-export function formatMetaHtfLine(meta: AnalyzeMetaEvent | null | undefined): string | null {
-  const htf = meta?.htf;
-  if (!htf || typeof htf !== "object") return null;
-  const interval = typeof htf.interval === "string" ? htf.interval : null;
-  const regime = typeof htf.regime === "string" ? labelForRegime(htf.regime) : null;
-  if (!interval && !regime) return null;
-  if (interval && regime) return `Khung cao hơn (${interval}): ${regime}.`;
-  if (interval) return `Khung cao hơn: ${interval}.`;
-  return `Khung cao hơn: ${regime}.`;
+export function labelForSummaryDirection(direction: SummaryDirection): string {
+  const labels: Record<SummaryDirection, string> = {
+    bullish: "Tăng",
+    bearish: "Giảm",
+    neutral: "Trung lập",
+    conditional: "Có điều kiện",
+  };
+  return labels[direction];
 }
 
 export function serializeAnalyzeIntent(intent: AnalyzeIntent): Record<string, unknown> {
@@ -215,13 +220,6 @@ export function formatSkippedBreakdown(entries: SkippedEntry[]): string | null {
   const total = normalized.reduce((sum, e) => sum + e.count, 0);
   const parts = normalized.map((e) => `${e.count} ${labelForSkippedReason(e.reason_code)}`);
   return `\n\nBỏ qua ${total} hình: ${parts.join(", ")}.`;
-}
-
-export function formatBiasConflictNotice(message?: string): string {
-  if (message?.trim()) {
-    return `\n\n⚠ ${message.trim()}`;
-  }
-  return "\n\n⚠ Xu hướng bạn chọn mâu thuẫn với chế độ thị trường mà hệ thống phát hiện.";
 }
 
 export function parseSkippedFromPayload(data: Record<string, unknown>): SkippedEntry[] {

@@ -23,6 +23,7 @@ export const COPILOT_STYLE_NO_PATTERNS = "Chưa có mẫu hình cho phong cách 
 export const COPILOT_GUARDRAIL_REGIME = "Chế độ";
 export const COPILOT_GUARDRAIL_CONFIDENCE = "Độ tin cậy guardrail";
 export const COPILOT_GUARDRAIL_EVIDENCE = "Bằng chứng trái";
+export const COPILOT_GUARDRAIL_NO_EVIDENCE = "Không có bằng chứng trái";
 export const COPILOT_GUARDRAIL_INVALIDATION = "Vô hiệu hóa";
 export const COPILOT_GUARDRAIL_NONE = "Không có guardrail";
 
@@ -103,8 +104,8 @@ export const COPILOT_EFFECTIVE_CANDLES = "Đã dùng {count} nến";
 export const COPILOT_EFFECTIVE_CANDLES_CLAMPED = "Đã dùng {count} nến (đã giới hạn)";
 export const COPILOT_META_CLAMPED_DETAIL =
   "Máy chủ đã giảm từ {requested} xuống {used} nến (giới hạn token hoặc thử lại tự động)";
-export const COPILOT_INTENT_BUDGET_FALLBACK =
-  "\n\nLưu ý: máy chủ đã thay lựa chọn mẫu vì vượt giới hạn 6 hình.";
+export const COPILOT_SERVER_PICKED_SHAPES = "Hình do máy chủ chọn.";
+export const COPILOT_INTENT_BUDGET_FALLBACK = `\n\n${COPILOT_SERVER_PICKED_SHAPES}`;
 export const COPILOT_DETECTED_REGIME_EARLY = "Chế độ phát hiện";
 export const COPILOT_ANALYSIS_CARD_TITLE = "Tóm tắt phân tích";
 export const COPILOT_CANDLE_CLAMPED_TO_MAX =

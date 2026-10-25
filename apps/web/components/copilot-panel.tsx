@@ -35,7 +35,7 @@ import { CopilotModelPicker } from "./copilot/copilot-model-picker";
 import { CopilotReasoningControl } from "./copilot/copilot-reasoning-control";
 import { CopilotAnalysisSummary } from "./copilot/copilot-analysis-summary";
 import { CopilotBiasConflictBanner } from "./copilot/copilot-bias-conflict-banner";
-import { CopilotIntentBudgetNote } from "./copilot/copilot-intent-budget-note";
+import { CopilotMetaFallbackNote } from "./copilot/copilot-meta-fallback-note";
 import { CopilotMetaHtfLine } from "./copilot/copilot-meta-htf-line";
 import { CopilotRegimeEarlyBadge } from "./copilot/copilot-regime-early-badge";
 import { CopilotIntentControls } from "./copilot/copilot-intent-controls";
@@ -56,6 +56,9 @@ export function CopilotPanel({ client, api }: CopilotPanelProps) {
 
   const sessions = useCopilotSessionStore((s) => s.sessions);
   const activeSessionId = useCopilotSessionStore((s) => s.activeSessionId);
+  const sessionIntent = useCopilotSessionStore((s) =>
+    s.activeSessionId ? (s.sessionCache[s.activeSessionId]?.intent ?? null) : null,
+  );
   const modelId = useCopilotSessionStore((s) => s.modelId);
   const candleCount = useCopilotSessionStore((s) => s.candleCount);
   const customCandleCount = useCopilotSessionStore((s) => s.customCandleCount);
@@ -242,9 +245,10 @@ export function CopilotPanel({ client, api }: CopilotPanelProps) {
         )}
         <CopilotRegimeEarlyBadge regime={lastDetectedRegime} />
         <CopilotMetaHtfLine meta={lastAnalyzeMeta} />
-        <CopilotIntentBudgetNote meta={lastAnalyzeMeta} />
+        <CopilotMetaFallbackNote meta={lastAnalyzeMeta} />
         <CopilotBiasConflictBanner
           intentCheck={lastAnalyzeMeta?.intent_check ?? streamingIntentCheck}
+          userBias={sessionIntent?.bias}
         />
         <CopilotAnalysisSummary analysis={lastAnalysisEvent} />
         <CopilotAnalyzeProgress inFlight={inFlight} />

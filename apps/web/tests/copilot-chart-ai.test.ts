@@ -8,11 +8,10 @@ import {
 import { PatternShapeSchema } from "../lib/pattern-shape";
 import {
   formatAnalysisSummaryVi,
-  formatBiasConflictNotice,
+  labelForSummaryDirection,
   formatSkippedBreakdown,
   isAnalysisSseEmpty,
   parseAnalysisSseEvent,
-  formatMetaHtfLine,
   labelForHorizon,
   labelForPattern,
   labelForSkippedReason,
@@ -23,6 +22,7 @@ import {
   sanitizeIntentForStyle,
   serializeAnalyzeIntent,
 } from "../lib/copilot-chart-ai";
+import { formatMetaHtfLine } from "../lib/htf-format";
 import { MOCK_STYLES_RESPONSE } from "../lib/copilot-api";
 
 describe("copilot-chart-ai", () => {
@@ -140,7 +140,8 @@ describe("copilot-chart-ai", () => {
     const text = formatAnalysisSummaryVi(filled!);
     expect(text).toContain("Giảm");
     expect(text).toContain("volume yếu");
-    expect(text).toContain("42");
+    expect(text).toContain("42,000.00");
+    expect(text).toContain("Đóng nến dưới");
   });
 
   it("labels horizon and formats meta htf line when present", () => {
@@ -165,15 +166,22 @@ describe("copilot-chart-ai", () => {
       clamped: false,
       preview_shape_budget: 6,
       intent_budget_fallback: true,
+      validator_fallback: true,
       skipped: [{ reason_code: "cap", count: 3 }],
     });
     expect(meta.preview_shape_budget).toBe(6);
     expect(meta.intent_budget_fallback).toBe(true);
+    expect(meta.validator_fallback).toBe(true);
   });
 
-  it("formats bias conflict notice with optional server message", () => {
-    expect(formatBiasConflictNotice("Tùy chỉnh")).toContain("Tùy chỉnh");
-    expect(formatBiasConflictNotice()).toContain("mâu thuẫn");
+  it("labels summary_direction for analysis card", () => {
+    expect(labelForSummaryDirection("conditional")).toBe("Có điều kiện");
+    const summary = formatAnalysisSummaryVi({
+      summary_direction: "bullish",
+      evidence_for: [],
+      evidence_against: [],
+    });
+    expect(summary).toContain("Tăng");
   });
 
   it("displays null session intent as classic default and sanitizes patterns per style", () => {

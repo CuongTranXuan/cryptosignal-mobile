@@ -1,7 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { displayShapeName } from "../lib/copilot-display";
 import { labelForRegime } from "../lib/copilot-chart-ai";
+import { formatInvalidationLine } from "../lib/guardrail-format";
 import { getCopilotFeedbackClient } from "../lib/copilot-feedback-host";
 import { shapeFeedbackSnapshot } from "../lib/copilot-shape-snapshot";
 import {
@@ -10,6 +12,7 @@ import {
   COPILOT_GUARDRAIL_EVIDENCE,
   COPILOT_GUARDRAIL_INVALIDATION,
   COPILOT_GUARDRAIL_NONE,
+  COPILOT_GUARDRAIL_NO_EVIDENCE,
   PATTERNS_TABLE_ACTIONS,
   PATTERNS_TABLE_DELETE,
   PATTERNS_TABLE_EDIT,
@@ -18,17 +21,16 @@ import {
   PATTERNS_TABLE_TOTAL,
 } from "../lib/copilot-strings";
 import type { PatternShape } from "../lib/pattern-shape";
+import { useChartStore } from "../lib/stores/chart-store";
 import { useShapeStore } from "../lib/stores/shape-store";
 
 function GuardrailDetails({ shape }: { shape: PatternShape }) {
+  const symbol = useChartStore((s) => s.symbol);
   const g = shape.guardrail;
   if (!g) {
     return <span className="text-[#474d57]">{COPILOT_GUARDRAIL_NONE}</span>;
   }
-  const inv =
-    g.invalidation != null
-      ? `${g.invalidation.price}${g.invalidation.condition ? ` — ${g.invalidation.condition}` : ""}`
-      : "—";
+  const inv = formatInvalidationLine(g.invalidation, shape.symbol || symbol);
   return (
     <div className="space-y-1 text-[#848e9c]">
       <div className="text-[#eaecef]">
@@ -43,12 +45,12 @@ function GuardrailDetails({ shape }: { shape: PatternShape }) {
             ))}
           </ul>
         ) : (
-          <span>—</span>
+          <span className="text-[#474d57]">{COPILOT_GUARDRAIL_NO_EVIDENCE}</span>
         )}
       </div>
       <div>
         <span className="text-[#848e9c]">{COPILOT_GUARDRAIL_INVALIDATION}: </span>
-        <span className="text-[#eaecef]">{inv}</span>
+        <span className="text-[#eaecef]">{inv ?? "—"}</span>
       </div>
     </div>
   );
@@ -115,7 +117,7 @@ export function PatternsTable() {
                   selectedId === s.id ? "bg-[#2b313a]/60" : ""
                 } ${feedbackDone[s.id] === "kept" ? "opacity-70" : ""}`}
               >
-                <td className="py-1.5 text-white">{s.name}</td>
+                <td className="py-1.5 text-white">{displayShapeName(s.name)}</td>
                 <td className="py-1.5">{s.interval}</td>
                 <td className="py-1.5">{s.kind}</td>
                 <td className="py-1.5 text-[#0ecb81]">{Math.round(s.confidence * 100)}%</td>
@@ -145,7 +147,7 @@ export function PatternsTable() {
                   )}
                   <button
                     type="button"
-                    className="mr-2 text-[#f0b90b] hover:underline"
+                    className="mr-2 text-[#eaecef] hover:underline"
                     onClick={() => select(s.id)}
                   >
                     {PATTERNS_TABLE_EDIT}

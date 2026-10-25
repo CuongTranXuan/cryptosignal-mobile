@@ -133,10 +133,14 @@ export const AnalyzeMetaEventSchema = z.object({
   prompt_candle_reduction_pct: z.number().optional(),
   preview_shape_budget: z.number().int().positive().optional(),
   intent_budget_fallback: z.boolean().optional(),
+  validator_fallback: z.boolean().optional(),
   htf: z
     .object({
       interval: z.string().optional(),
       regime: DrawingRegimeSchema.optional(),
+      last_closed_time: z.number().optional(),
+      last_closed_open_time: z.number().optional(),
+      bars: z.number().optional(),
     })
     .passthrough()
     .nullable()
@@ -171,9 +175,18 @@ const optionalBiasWire = z
   .optional()
   .transform((value) => (value == null ? undefined : value));
 
+export const SummaryDirectionSchema = z.enum([
+  "bullish",
+  "bearish",
+  "neutral",
+  "conditional",
+]);
+export type SummaryDirection = z.infer<typeof SummaryDirectionSchema>;
+
 export const AnalysisSseEventSchema = z
   .object({
     bias: optionalBiasWire,
+    summary_direction: SummaryDirectionSchema.optional(),
     no_valid_pattern: z.boolean().optional(),
     evidence_for: z.array(z.string()).optional().default([]),
     evidence_against: z.array(z.string()).optional().default([]),

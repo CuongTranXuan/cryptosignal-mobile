@@ -113,18 +113,21 @@ const biasCandles = fixture.candles.slice(sl.start, sl.start + sl.count);
 const biasSse = await postAnalyze(biasCandles, biasSid);
 const biasMeta = parseSse(biasSse).find((e) => e.event === "meta")?.data?.intent_check;
 
+const { formatInvalidationLine } = await import("../lib/guardrail-format.ts");
+const { displayShapeName, formatBiasConflictBannerText } = await import(
+  "../lib/copilot-display.ts",
+);
+
 const guard = shape?.guardrail ?? {};
-const inv = guard.invalidation
-  ? `${guard.invalidation.price}${guard.invalidation.condition ? ` — ${guard.invalidation.condition}` : ""}`
-  : "—";
+const inv = formatInvalidationLine(guard.invalidation, "BTCUSDT") ?? "—";
 const evidence =
   (guard.evidence_against ?? []).length > 0
     ? guard.evidence_against.map((l) => `<li>${l}</li>`).join("")
-    : "<li class='muted'>—</li>";
+    : `<p class='muted'>Không có bằng chứng trái</p>`;
 
 await page.setContent(
   cardHtml(
-    `<div><strong>${shape?.name ?? "Shape"}</strong> · ${Math.round((shape?.confidence ?? 0) * 100)}%</div>`,
+    `<div><strong>${displayShapeName(shape?.name ?? "Shape")}</strong> · ${Math.round((shape?.confidence ?? 0) * 100)}%</div>`,
     `<div class="muted" style="margin-top:6px">Bằng chứng trái:</div><ul>${evidence}</ul>
      <div class="muted">Vô hiệu hóa: <span style="color:#eaecef">${inv}</span></div>`,
   ),
@@ -139,9 +142,10 @@ await page.setContent(
 );
 results.push(await shotLocator(page, page.locator(".card"), "chart-ai-feedback-buttons.png"));
 
-const biasMsg =
-  biasMeta?.message ??
-  "⚠ Xu hướng bạn chọn mâu thuẫn với chế độ thị trường mà hệ thống phát hiện.";
+const biasMsg = formatBiasConflictBannerText(
+  { detected_regime: biasMeta?.detected_regime ?? "trend_up", bias_conflict: true },
+  "bearish",
+);
 await page.setContent(cardHtml("", `<div class="warn">${biasMsg}</div>`));
 results.push(await shotLocator(page, page.locator(".warn"), "chart-ai-bias-conflict.png"));
 
