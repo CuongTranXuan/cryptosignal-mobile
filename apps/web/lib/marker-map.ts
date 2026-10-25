@@ -25,8 +25,13 @@ function colorForSide(side: AgentMarker["side"]): string {
   }
 }
 
+/** Server drawing anchors carry `drawing_id` and are not chart trade markers (C.12). */
+export function isChartVisibleAgentMarker(marker: AgentMarker): boolean {
+  return marker.drawing_id == null || marker.drawing_id === "";
+}
+
 export function mapAgentMarkersToSeriesMarkers(markers: AgentMarker[]): SeriesMarkerLike[] {
-  return markers.map((marker) => {
+  return markers.filter(isChartVisibleAgentMarker).map((marker) => {
     const mapped: SeriesMarkerLike = {
       id: marker.id,
       time: marker.time,

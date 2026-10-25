@@ -276,6 +276,42 @@ describe("use-copilot / createCopilotClient", () => {
     expect(useCopilotSessionStore.getState().candleCount).toBe(200);
   });
 
+  it("accepts SSE markers with drawing_id guardrail anchors", async () => {
+    const anchor = {
+      id: "anchor-drw_test",
+      symbol: "BTCUSDT",
+      interval: "1h",
+      time: c1.time,
+      side: "neutral",
+      position: "aboveBar",
+      shape: "circle",
+      confidence: 0.8,
+      source: "agent",
+      drawing_id: "drw_test",
+      guardrail: {
+        regime: "range",
+        confidence: 0.8,
+        evidence_against: [],
+        invalidation: null,
+      },
+    };
+    const fetchMock = vi.fn(async () =>
+      streamResponse([
+        sseChunk("markers", { markers: [anchor] }),
+        sseChunk("done", {}),
+      ]),
+    );
+    const client = createCopilotClient({
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      getClosedTimes: () => new Set([c0.time, c1.time, c2.time]),
+    });
+    await client.analyze("markers");
+    expect(useMarkerStore.getState().markers).toHaveLength(1);
+    expect(useMarkerStore.getState().markers[0]?.drawing_id).toBe("drw_test");
+    const content = useAiStore.getState().messages.find((m) => m.role === "agent")?.content ?? "";
+    expect(content).not.toContain("đánh dấu không hợp lệ");
+  });
+
   it("streams text+shapes into agent message and setPreview", async () => {
     const fetchMock = vi.fn(async () =>
       streamResponse([
@@ -828,6 +864,49 @@ describe("use-copilot / createCopilotClient", () => {
     expect(content).toContain("Lớp phủ overlay.");
     const fallbackMatches = content.match(new RegExp(COPILOT_SERVER_PICKED_SHAPES, "g"));
     expect(fallbackMatches?.length ?? 0).toBe(1);
+  });
+
+  it("clears fallback flags after a fallback run before a normal run", async () => {
+    const fallbackThenNormal = vi
+      .fn()
+      .mockImplementationOnce(async () =>
+        streamResponse([
+          sseChunk("meta", {
+            model: "provider-a/model-alpha",
+            candle_count_requested: 300,
+            candle_count_used: 200,
+            clamped: false,
+            validator_fallback: true,
+          }),
+          sseChunk("text", { delta: "fallback" }),
+          sseChunk("done", {}),
+        ]),
+      )
+      .mockImplementationOnce(async () =>
+        streamResponse([
+          sseChunk("meta", {
+            model: "provider-a/model-alpha",
+            candle_count_requested: 300,
+            candle_count_used: 200,
+            clamped: false,
+          }),
+          sseChunk("text", { delta: "normal" }),
+          sseChunk("done", {}),
+        ]),
+      );
+
+    const client = createCopilotClient({
+      fetchImpl: fallbackThenNormal as unknown as typeof fetch,
+      getClosedTimes: () => new Set([c0.time, c1.time, c2.time]),
+    });
+    await client.analyze("first");
+    await client.analyze("second");
+
+    const messages = useAiStore.getState().messages.filter((m) => m.role === "agent");
+    const second = messages[messages.length - 1]?.content ?? "";
+    expect(second).not.toContain(COPILOT_SERVER_PICKED_SHAPES);
+    expect(useCopilotSessionStore.getState().lastAnalyzeMeta?.validator_fallback).toBeUndefined();
+    expect(useCopilotSessionStore.getState().lastAnalyzeMeta?.intent_budget_fallback).toBeUndefined();
   });
 
   it("does not append fallback chat note until done when meta arrives early without flags", async () => {

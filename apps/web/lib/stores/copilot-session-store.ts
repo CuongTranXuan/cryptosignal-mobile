@@ -458,6 +458,7 @@ export const useCopilotSessionStore = create<CopilotSessionState>((set, get) => 
 
   clearAnalyzeStreamState: () => {
     set({
+      lastAnalyzeMeta: null,
       lastDetectedRegime: null,
       streamingIntentCheck: null,
       lastAnalysisEvent: null,

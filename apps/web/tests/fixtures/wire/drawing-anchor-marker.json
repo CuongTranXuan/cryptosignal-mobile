@@ -1,0 +1,18 @@
+{
+  "id": "anchor-drw_abc123",
+  "symbol": "BTCUSDT",
+  "interval": "1h",
+  "time": 1709996400,
+  "side": "neutral",
+  "position": "aboveBar",
+  "shape": "circle",
+  "confidence": 0.72,
+  "source": "agent",
+  "drawing_id": "drw_abc123",
+  "guardrail": {
+    "regime": "trend_up",
+    "confidence": 0.72,
+    "evidence_against": ["Volume divergence on last swing"],
+    "invalidation": { "price": 82500, "condition": "close_below" }
+  }
+}

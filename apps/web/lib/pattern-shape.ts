@@ -59,6 +59,8 @@ export const AgentMarkerSchema = z
     label: z.string().min(1).optional(),
     confidence: z.number().min(0).max(1),
     source: z.literal("agent"),
+    drawing_id: z.string().min(1).optional(),
+    guardrail: DrawingGuardrailSchema.optional(),
   })
   .strict();
 export type AgentMarker = z.infer<typeof AgentMarkerSchema>;

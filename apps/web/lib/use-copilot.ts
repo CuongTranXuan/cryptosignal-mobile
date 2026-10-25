@@ -151,17 +151,8 @@ function parseSseBlocks(buffer: string): { events: { event: string; data: string
   return { events, rest };
 }
 
-function noteDroppedShapes(ids: string[]): void {
-  if (ids.length === 0) return;
-  useAiStore.getState().appendText(copilotSkippedShapes(ids.length));
-}
-
-function appendServerSkippedNote(data: Record<string, unknown>): void {
-  const text = formatSkippedBreakdown(parseSkippedFromPayload(data));
-  if (text) useAiStore.getState().appendText(text);
-}
-
-function appendAgentStreamText(delta: string): void {
+function appendAgentChatLine(delta: string): void {
+  if (!delta) return;
   const messages = useAiStore.getState().messages.slice();
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
@@ -176,9 +167,23 @@ function appendAgentStreamText(delta: string): void {
   }
 }
 
+function noteDroppedShapes(ids: string[]): void {
+  if (ids.length === 0) return;
+  appendAgentChatLine(copilotSkippedShapes(ids.length));
+}
+
+function appendServerSkippedNote(data: Record<string, unknown>): void {
+  const text = formatSkippedBreakdown(parseSkippedFromPayload(data));
+  if (text) appendAgentChatLine(text);
+}
+
+function appendAgentStreamText(delta: string): void {
+  appendAgentChatLine(delta);
+}
+
 function appendMetaFallbackNote(meta: AnalyzeMetaEvent): void {
   if (!meta.validator_fallback && !meta.intent_budget_fallback) return;
-  useAiStore.getState().appendText(`\n\n${COPILOT_SERVER_PICKED_SHAPES}`);
+  appendAgentChatLine(COPILOT_SERVER_PICKED_SHAPES);
 }
 
 function patchLastAgentMessageFromMeta(meta: AnalyzeMetaEvent): void {
@@ -204,7 +209,7 @@ function patchLastAgentMessageFromMeta(meta: AnalyzeMetaEvent): void {
 
 function noteDroppedMarkers(ids: string[]): void {
   if (ids.length === 0) return;
-  useAiStore.getState().appendText(copilotSkippedMarkers(ids.length));
+  appendAgentChatLine(copilotSkippedMarkers(ids.length));
 }
 
 export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient {
@@ -244,7 +249,7 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
       return;
     }
     pendingDrewShapesNotice = null;
-    useAiStore.getState().appendText(copilotDrewShapes(count, lines));
+    appendAgentChatLine(copilotDrewShapes(count, lines));
   };
 
   const finalizeStreamAnalyzeNotes = (): void => {
@@ -394,7 +399,7 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
           const visible = deps.getCoordApi?.()?.getVisibleTimeRange?.() ?? null;
           if (!timesInsideVisibleRange(times, visible)) {
             deps.getCoordApi?.()?.revealTimes(times);
-            useAiStore.getState().appendText(COPILOT_SCROLLED_TO_OVERLAYS);
+            appendAgentChatLine(COPILOT_SCROLLED_TO_OVERLAYS.trim());
           }
         }
         noteDroppedShapes(droppedIds);
@@ -430,7 +435,7 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
         droppedIds.push(...outOfWindow);
         useMarkerStore.getState().setMarkers(valid);
         if (valid.length > 0) {
-          useAiStore.getState().appendText(copilotPlacedMarkers(valid.length));
+          appendAgentChatLine(copilotPlacedMarkers(valid.length));
         }
         noteDroppedMarkers(droppedIds);
         return "ok";

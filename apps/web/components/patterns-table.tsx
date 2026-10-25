@@ -22,6 +22,7 @@ import {
 } from "../lib/copilot-strings";
 import type { PatternShape } from "../lib/pattern-shape";
 import { useChartStore } from "../lib/stores/chart-store";
+import { useMarkerStore } from "../lib/stores/marker-store";
 import { useShapeStore } from "../lib/stores/shape-store";
 
 function GuardrailDetails({ shape }: { shape: PatternShape }) {
@@ -61,6 +62,7 @@ export function PatternsTable() {
   const selectedId = useShapeStore((s) => s.selectedId);
   const select = useShapeStore((s) => s.select);
   const remove = useShapeStore((s) => s.remove);
+  const removeMarkersForDrawing = useMarkerStore((s) => s.removeLinkedToDrawing);
 
   const [feedbackDone, setFeedbackDone] = useState<Record<string, "kept" | "rejected">>({});
 
@@ -74,11 +76,13 @@ export function PatternsTable() {
   const onReject = (shape: PatternShape) => {
     getCopilotFeedbackClient()?.reject(shape.id, shapeFeedbackSnapshot(shape));
     setFeedbackDone((prev) => ({ ...prev, [shape.id]: "rejected" }));
+    removeMarkersForDrawing(shape.id);
     remove(shape.id);
   };
 
   const onDelete = (shape: PatternShape) => {
     getCopilotFeedbackClient()?.deleteShape(shape.id, shapeFeedbackSnapshot(shape));
+    removeMarkersForDrawing(shape.id);
     remove(shape.id);
   };
 
