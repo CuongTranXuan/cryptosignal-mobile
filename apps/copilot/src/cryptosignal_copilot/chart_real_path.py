@@ -6,10 +6,12 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Any
 
-from cryptosignal_copilot.candidates import CandidateCatalog
+from cryptosignal_copilot.candidates import CandidateCatalog, patterns_for_style
 from cryptosignal_copilot.chart_response import enrich_shapes_with_guardrails
 from cryptosignal_copilot.drawing_gate import DrawingWindow
 from cryptosignal_copilot.drawing_intent import (
+    MAX_DRAWING_INTENTS,
+    CandidateDrawingIntent,
     DrawingIntent,
     enrich_resolved_shapes,
     fit_intents_to_shape_budget,
@@ -17,6 +19,7 @@ from cryptosignal_copilot.drawing_intent import (
 )
 from cryptosignal_copilot.gate_policy import split_gate_and_cap_drops
 from cryptosignal_copilot.schema import Candle, filter_preview_details
+from cryptosignal_copilot.wire_shape import shapes_for_wire
 
 
 @dataclass
@@ -74,6 +77,22 @@ def _split_pick_count(
     return splits
 
 
+def simulate_llm_top_intents(
+    catalog: CandidateCatalog,
+    style: str,
+    *,
+    max_intents: int = MAX_DRAWING_INTENTS,
+) -> list[DrawingIntent]:
+    """Top-N by score without shape budget (models the pre-B2 LLM failure mode)."""
+    allowed = patterns_for_style(style)
+    pool = sorted(
+        [c for c in catalog.candidates if c.pattern_id in allowed],
+        key=lambda c: c.score,
+        reverse=True,
+    )
+    return [CandidateDrawingIntent(candidate_id=c.id) for c in pool[:max_intents]]
+
+
 def run_real_path(
     catalog: CandidateCatalog,
     candles: list[Candle],
@@ -81,8 +100,10 @@ def run_real_path(
     symbol: str,
     interval: str,
     style: str,
+    intents: list[DrawingIntent] | None = None,
 ) -> tuple[list[dict[str, Any]], RealPathMetrics]:
-    intents = fit_intents_to_shape_budget(catalog, style)
+    if intents is None:
+        intents = fit_intents_to_shape_budget(catalog, style)
     shapes, _ = resolve_drawing_intents(intents, catalog)
     last_close = float(candles[-1].close)
     shapes = enrich_resolved_shapes(shapes, catalog, last_close=last_close)
@@ -108,13 +129,15 @@ def run_real_path(
         interval=interval,
     )
     gate_drops, cap_drops = split_gate_and_cap_drops(dropped)
+    split_picks = _split_pick_count(intents, catalog, valid)
+    valid = shapes_for_wire(valid)
     metrics = RealPathMetrics(
         intents=len(intents),
         shapes_in=len(shapes),
         shapes_out=len(valid),
         gate_dropped=len(gate_drops),
         cap_dropped=len(cap_drops),
-        split_picks=_split_pick_count(intents, catalog, valid),
+        split_picks=split_picks,
         invalidations_in=inv_in,
         invalidations_out=_invalidation_count(valid),
         evidence_in=ev_in,

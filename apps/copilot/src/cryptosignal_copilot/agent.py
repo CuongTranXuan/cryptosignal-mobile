@@ -14,6 +14,7 @@ from cryptosignal_copilot.analyze_prep import AnalyzePlan, retry_plan
 from cryptosignal_copilot.chart_response import aggregate_skipped, enrich_shapes_with_guardrails
 from cryptosignal_copilot.config import load_llm_config
 from cryptosignal_copilot.drawing_gate import (
+    MAX_SHAPES,
     DrawingWindow,
     bar_seconds,
     effective_project_bars,
@@ -24,6 +25,7 @@ from cryptosignal_copilot.drawing_intent import (
     build_deterministic_fallback,
     enrich_resolved_shapes,
     resolve_drawing_intents,
+    total_shape_cost,
 )
 from cryptosignal_copilot.env_parse import env_flag
 from cryptosignal_copilot.model_factory import build_model
@@ -42,6 +44,7 @@ from cryptosignal_copilot.schema import (
     filter_agent_markers,
     filter_preview_details,
 )
+from cryptosignal_copilot.wire_shape import shapes_for_wire
 
 # LANGUAGE: require Vietnamese for `summary` and chat-facing text the user sees.
 # System scaffolding stays English. Heavy Vietnamese scaffolding here plus full-VI
@@ -60,7 +63,9 @@ INSTRUCTIONS = (
     "JSON field names stay English. No tools; no invented OHLC or times. "
     "Return `summary` (friendly multi-paragraph chat) plus `drawing_intents`: "
     "each item is {type:'candidate', candidate_id} referencing ids from the sheet "
-    "(or type:'pair' with two ids for a channel/triangle). Max 6 resolved shapes. "
+    "(or type:'pair' with two ids for a channel/triangle). "
+    "Hard limits: Max 6 drawing_intents and total shape_cost across picks <= 6 "
+    "(use shape_cost on each candidate row). "
     "Optional `markers` for point signals (AgentMarker schema). "
     "Do not emit raw PatternShape geometry — ids only. "
     "Do not promise entries, stops, or that levels will hold."
@@ -195,6 +200,16 @@ class PydanticAiRunner:
                 yield "done", {}
                 return
 
+            if catalog is not None and llm_output is not None:
+                total_cost, _costs = total_shape_cost(llm_output.drawing_intents, catalog)
+                if total_cost > MAX_SHAPES:
+                    style = (request.intent.style if request.intent else "classic") or "classic"
+                    llm_output = build_deterministic_fallback(catalog, style)
+                    meta = dict(current_plan.meta or {})
+                    meta["intent_budget_fallback"] = True
+                    current_plan.meta = meta
+                    yield "meta", meta
+
             yield "text", {"delta": "Mô hình đã xong. Đang dựng lớp phủ…"}
             if llm_output and llm_output.summary:
                 yield "text", {"delta": "\n\n" + llm_output.summary}
@@ -229,6 +244,7 @@ class PydanticAiRunner:
 
         intent_check = (current_plan.meta or {}).get("intent_check") or {}
         regime = str(intent_check.get("detected_regime") or "range")
+        yield "regime", {"regime": regime, "intent_check": intent_check}
         valid_shapes, drawing_anchors = enrich_shapes_with_guardrails(
             valid_shapes,
             regime=regime,
@@ -236,6 +252,9 @@ class PydanticAiRunner:
             interval=request.interval,
         )
         skipped, skipped_count = aggregate_skipped(dropped)
+        budget_fallback = bool((current_plan.meta or {}).get("intent_budget_fallback"))
+        if budget_fallback:
+            skipped, skipped_count = aggregate_skipped(dropped, extra=["cap"])
         requested = (request.intent.requested_pattern if request.intent else None) or None
         if requested and not any(
             requested.replace("_", " ") in str(s.get("name", "")).lower()
@@ -244,13 +263,33 @@ class PydanticAiRunner:
         ):
             skipped, skipped_count = aggregate_skipped(dropped, extra=["unsupported_pattern"])
 
+        wire_shapes = shapes_for_wire(valid_shapes)
         yield (
             "shapes",
             {
-                "shapes": valid_shapes,
+                "shapes": wire_shapes,
                 "dropped": [{"id": shape_id, "reason": reason} for shape_id, reason in dropped],
                 "skipped": skipped,
                 "skipped_count": skipped_count,
+            },
+        )
+        bias = (request.intent.bias if request.intent else None) or "neutral"
+        primary_inv = None
+        for shape in valid_shapes:
+            guard = shape.get("guardrail")
+            if isinstance(guard, dict) and guard.get("invalidation"):
+                primary_inv = guard["invalidation"]
+                break
+        yield (
+            "analysis",
+            {
+                "bias": bias,
+                "no_valid_pattern": len(wire_shapes) == 0,
+                "evidence_for": [],
+                "evidence_against": [],
+                "invalidation": primary_inv,
+                "confidence": None,
+                "intent_check": intent_check,
             },
         )
         if valid_shapes:

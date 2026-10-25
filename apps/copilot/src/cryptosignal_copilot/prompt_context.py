@@ -42,6 +42,7 @@ def build_prompt_context(
         "from": request.from_,
         "to": request.to,
         "intent": request.intent.model_dump() if request.intent else None,
+        "preview_shape_budget": 6,
         "feature_sheet": feature_sheet,
         "candidates": candidates,
         "recent_closed_candles": tail_candle_rows(request),

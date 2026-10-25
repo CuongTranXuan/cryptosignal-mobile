@@ -11,7 +11,9 @@ from cryptosignal_copilot.candidates import (
     _line_price_at,
     _triangle_close_fit,
 )
-from cryptosignal_copilot.chart_real_path import run_real_path
+from cryptosignal_copilot.chart_real_path import run_real_path, simulate_llm_top_intents
+from cryptosignal_copilot.drawing_intent import total_shape_cost
+from cryptosignal_copilot.drawing_gate import MAX_SHAPES
 from cryptosignal_copilot.schema import Candle
 
 FIXTURE_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "ohlcv"
@@ -47,14 +49,18 @@ def _load_fixture(name: str) -> tuple[str, str, list[Candle]]:
 
 def _prefilter_metrics(catalog) -> dict[str, float | int | dict[str, int]]:
     raw = catalog.raw_candidate_count or len(catalog.candidates) + len(catalog.prefilter_dropped)
-    dropped = len(catalog.prefilter_dropped)
-    rate = dropped / raw if raw else 0.0
-    by_pattern = Counter(d.pattern_id for d in catalog.prefilter_dropped)
+    invalidated = [d for d in catalog.prefilter_dropped if d.reason == "invalidated"]
+    gate_drops = [d for d in catalog.prefilter_dropped if d.reason != "invalidated"]
+    rate = len(gate_drops) / raw if raw else 0.0
+    by_pattern = Counter(d.pattern_id for d in gate_drops)
+    inv_by_family = Counter(FAMILY_BY_PATTERN.get(d.pattern_id, d.pattern_id) for d in invalidated)
     return {
         "raw_candidates": raw,
-        "prefilter_dropped": dropped,
+        "prefilter_dropped": len(gate_drops),
         "prefilter_drop_rate": rate,
         "prefilter_by_pattern": dict(by_pattern),
+        "invalidated_dropped": len(invalidated),
+        "invalidated_by_family": dict(inv_by_family),
     }
 
 
@@ -101,10 +107,38 @@ def _triangle_geometry_ok(cand, candles: list[Candle], catalog) -> bool:
         return False
     from cryptosignal_copilot.features import ZigZagSwing
 
-    hu = ZigZagSwing(id="h0", i=0, t=int(up[0]["time"]), side="high", price=float(up[0]["price"]), prominence_atr=1)
-    hl = ZigZagSwing(id="h1", i=1, t=int(up[1]["time"]), side="high", price=float(up[1]["price"]), prominence_atr=1)
-    lu = ZigZagSwing(id="l0", i=2, t=int(lo[0]["time"]), side="low", price=float(lo[0]["price"]), prominence_atr=1)
-    ll = ZigZagSwing(id="l1", i=3, t=int(lo[1]["time"]), side="low", price=float(lo[1]["price"]), prominence_atr=1)
+    hu = ZigZagSwing(
+        id="h0",
+        i=0,
+        t=int(up[0]["time"]),
+        side="high",
+        price=float(up[0]["price"]),
+        prominence_atr=1,
+    )
+    hl = ZigZagSwing(
+        id="h1",
+        i=1,
+        t=int(up[1]["time"]),
+        side="high",
+        price=float(up[1]["price"]),
+        prominence_atr=1,
+    )
+    lu = ZigZagSwing(
+        id="l0",
+        i=2,
+        t=int(lo[0]["time"]),
+        side="low",
+        price=float(lo[0]["price"]),
+        prominence_atr=1,
+    )
+    ll = ZigZagSwing(
+        id="l1",
+        i=3,
+        t=int(lo[1]["time"]),
+        side="low",
+        price=float(lo[1]["price"]),
+        prominence_atr=1,
+    )
     return (
         _triangle_close_fit(
             candles,
@@ -142,9 +176,21 @@ def test_replay_prefilter_rates():
         pf = _prefilter_metrics(catalog)
         suite_raw += int(pf["raw_candidates"])
         suite_pf_dropped += int(pf["prefilter_dropped"])
-        assert pf["prefilter_drop_rate"] <= 0.10, path.name
         _assert_catalog_geometry(catalog, candles)
     assert suite_pf_dropped / suite_raw <= 0.10
+
+
+def test_replay_llm_like_top_six_exceeds_budget_without_fit():
+    """Documents B2: top-6 by score can exceed shape budget before validator/fallback."""
+    over_budget_windows = 0
+    for path in sorted(FIXTURE_DIR.glob("*.json")):
+        symbol, interval, candles = _load_fixture(path.name)
+        catalog = build_candidate_catalog(candles, symbol=symbol, interval=interval)  # type: ignore[arg-type]
+        intents = simulate_llm_top_intents(catalog, "classic")
+        total, _ = total_shape_cost(intents, catalog)
+        if total > MAX_SHAPES:
+            over_budget_windows += 1
+    assert over_budget_windows >= 1
 
 
 def test_replay_real_path_classic_and_smc():

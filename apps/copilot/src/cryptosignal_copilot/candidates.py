@@ -157,6 +157,59 @@ def _trendline_touch_count(
     return max(touches, 2)
 
 
+def _last_anchor_time(cand: DrawingCandidate) -> int:
+    times: list[int] = []
+    for shape in cand.shapes:
+        points = shape.get("points")
+        if not isinstance(points, list):
+            continue
+        for point in points:
+            if isinstance(point, dict) and "time" in point:
+                times.append(int(point["time"]))
+    return max(times) if times else 0
+
+
+def _candidate_invalidated(cand: DrawingCandidate, candles: list[Candle]) -> bool:
+    if cand.invalidation_price is None or not candles:
+        return False
+    anchor_t = _last_anchor_time(cand)
+    last_close = float(candles[-1].close)
+    if cand.invalidation_price < last_close:
+        condition = "close_below"
+    else:
+        condition = "close_above"
+    inv = cand.invalidation_price
+    for candle in candles:
+        if candle.time <= anchor_t:
+            continue
+        if condition == "close_below" and candle.close < inv:
+            return True
+        if condition == "close_above" and candle.close > inv:
+            return True
+    return False
+
+
+def _channel_close_fit(
+    candles: list[Candle],
+    *,
+    hu: ZigZagSwing,
+    hl: ZigZagSwing,
+    lu: ZigZagSwing,
+    ll: ZigZagSwing,
+    window_end: int,
+    atr: float,
+) -> float | None:
+    return _triangle_close_fit(candles, hu=hu, hl=hl, lu=lu, ll=ll, window_end=window_end, atr=atr)
+
+
+def _channel_regime_ok(pattern_id: str, regime: str) -> bool:
+    if pattern_id == "channel_up" and regime == "trend_down":
+        return False
+    if pattern_id == "channel_down" and regime == "trend_up":
+        return False
+    return True
+
+
 def _triangle_close_fit(
     candles: list[Candle],
     *,
@@ -337,16 +390,12 @@ def _trendlines_from_swings(
                 span_bars = (b.t - a.t) / bar_sec if bar_sec else 0
                 if span_bars < 8:
                     continue
-                touches = _trendline_touch_count(
-                    side_swings, a.t, a.price, b.t, b.price, touch_tol
-                )
+                touches = _trendline_touch_count(side_swings, a.t, a.price, b.t, b.price, touch_tol)
                 fit = min(1.0, (touches - 1) / 3.0)
                 recency = (b.t - pool[0].t) / max(pool[-1].t - pool[0].t, 1)
                 score = max(
                     0.58,
-                    _geometry_score(
-                        fit=fit, touches=touches, span_bars=span_bars, recency=recency
-                    ),
+                    _geometry_score(fit=fit, touches=touches, span_bars=span_bars, recency=recency),
                 )
                 if best is None or score > best[0]:
                     best = (score, a, b)
@@ -385,6 +434,7 @@ def _double_top_bottom(
     interval: Interval,
     window_start: int,
     window_end: int,
+    bar_sec: int,
 ) -> list[DrawingCandidate]:
     if atr is None or len(zz) < 4:
         return []
@@ -403,6 +453,8 @@ def _double_top_bottom(
             e2 = candidate
             break
         if e2 is None or not anchor_in_play(e2.t, window_start, window_end):
+            continue
+        if bar_sec and (e2.t - e1.t) / bar_sec < 12:
             continue
         troughs = [z for z in lows if e1.t <= z.t <= e2.t]
         if not troughs:
@@ -457,14 +509,17 @@ def _double_top_bottom(
             break
         if e2_low is None or not anchor_in_play(e2_low.t, window_start, window_end):
             continue
+        if bar_sec and (e2_low.t - e1.t) / bar_sec < 12:
+            continue
         peaks = [z for z in highs if e1.t <= z.t <= e2_low.t]
         if not peaks:
             continue
         neck = max(p.price for p in peaks)
         middle_lows = [low for low in lows if e1.t < low.t < e2_low.t]
-        if middle_lows and min(low.price for low in middle_lows) < min(
-            e1.price, e2_low.price
-        ) - tol:
+        if (
+            middle_lows
+            and min(low.price for low in middle_lows) < min(e1.price, e2_low.price) - tol
+        ):
             continue
         touches = 2 + len(peaks)
         fit = min(1.0, touches / 4.0)
@@ -601,6 +656,7 @@ def _triangles_and_channels(
     bar_sec: int,
     window_start: int,
     window_end: int,
+    regime: str,
 ) -> list[DrawingCandidate]:
     out: list[DrawingCandidate] = []
     highs = [z for z in zz if z.side == "high"]
@@ -722,10 +778,29 @@ def _triangles_and_channels(
                         ch_up = ch_down = False
             if ch_up or ch_down:
                 pid = "channel_up" if ch_up else "channel_down"
-                score = _geometry_score(
-                    touches=4,
-                    span_bars=(ll.t - lu.t) / bar_sec if bar_sec else 0,
-                    size_atr=width / atr_val if atr_val else 1.0,
+                if not _channel_regime_ok(pid, regime):
+                    ch_up = ch_down = False
+                fit = _channel_close_fit(
+                    candles,
+                    hu=hu,
+                    hl=hl,
+                    lu=lu,
+                    ll=ll,
+                    window_end=window_end,
+                    atr=atr_val,
+                )
+                if fit is None:
+                    ch_up = ch_down = False
+            if ch_up or ch_down:
+                pid = "channel_up" if ch_up else "channel_down"
+                score = max(
+                    0.58,
+                    _geometry_score(
+                        fit=fit if fit is not None else 0.5,
+                        touches=4,
+                        span_bars=(ll.t - lu.t) / bar_sec if bar_sec else 0,
+                        size_atr=width / atr_val if atr_val else 1.0,
+                    ),
                 )
                 cid = _cand_id("ch", pid, hu.t, ll.t)
                 out.append(
@@ -759,7 +834,34 @@ def _triangles_and_channels(
     return out
 
 
+def _neckline_end_after_break(
+    candles: list[Candle],
+    *,
+    la: ZigZagSwing,
+    lb: ZigZagSwing,
+    shoulder_t: int,
+    bar_sec: int,
+    break_below: bool,
+) -> tuple[int, bool]:
+    end_t = shoulder_t + 3 * bar_sec if bar_sec else shoulder_t
+    broken = False
+    for candle in candles:
+        if candle.time <= shoulder_t:
+            continue
+        neck = _line_price_at(la.t, la.price, lb.t, lb.price, candle.time)
+        if break_below and candle.close < neck:
+            end_t = candle.time
+            broken = True
+            break
+        if not break_below and candle.close > neck:
+            end_t = candle.time
+            broken = True
+            break
+    return end_t, broken
+
+
 def _head_shoulders(
+    candles: list[Candle],
     zz: list[ZigZagSwing],
     atr: float | None,
     *,
@@ -768,6 +870,7 @@ def _head_shoulders(
     window_start: int,
     window_end: int,
     last_close: float,
+    bar_sec: int,
 ) -> list[DrawingCandidate]:
     if atr is None or len(zz) < 5:
         return []
@@ -792,9 +895,19 @@ def _head_shoulders(
         if abs(la.price - lb.price) > tol:
             continue
         neck_at_right = _line_price_at(la.t, la.price, lb.t, lb.price, right.t)
+        end_t, broken = _neckline_end_after_break(
+            candles,
+            la=la,
+            lb=lb,
+            shoulder_t=right.t,
+            bar_sec=bar_sec,
+            break_below=True,
+        )
         evidence: list[str] = []
-        if last_close >= neck_at_right:
+        if not broken and last_close >= neck_at_right:
             evidence.append("neckline not broken")
+        if broken:
+            evidence.append("pattern completed")
         recency = (right.t - window_start) / max(window_end - window_start, 1)
         touches = 3 + len(between_lows)
         fit = min(1.0, touches / 5.0)
@@ -807,7 +920,7 @@ def _head_shoulders(
                 recency=recency,
             ),
         )
-        neck_end = _line_price_at(la.t, la.price, lb.t, lb.price, window_end)
+        neck_end = _line_price_at(la.t, la.price, lb.t, lb.price, end_t)
         cid = _cand_id("hs", left.t, head.t, right.t)
         cand = DrawingCandidate(
             id=cid,
@@ -822,7 +935,7 @@ def _head_shoulders(
                     interval=interval,
                     name="H&S neckline",
                     p1=(la.t, la.price),
-                    p2=(window_end, neck_end),
+                    p2=(end_t, neck_end),
                     confidence=score,
                 )
             ],
@@ -836,6 +949,7 @@ def _head_shoulders(
 
 
 def _inverse_head_shoulders(
+    candles: list[Candle],
     zz: list[ZigZagSwing],
     atr: float | None,
     *,
@@ -844,6 +958,7 @@ def _inverse_head_shoulders(
     window_start: int,
     window_end: int,
     last_close: float,
+    bar_sec: int,
 ) -> list[DrawingCandidate]:
     if atr is None or len(zz) < 5:
         return []
@@ -868,9 +983,19 @@ def _inverse_head_shoulders(
         if abs(ha.price - hb.price) > tol:
             continue
         neck_at_right = _line_price_at(ha.t, ha.price, hb.t, hb.price, right.t)
+        end_t, broken = _neckline_end_after_break(
+            candles,
+            la=ha,
+            lb=hb,
+            shoulder_t=right.t,
+            bar_sec=bar_sec,
+            break_below=False,
+        )
         evidence: list[str] = []
-        if last_close <= neck_at_right:
+        if not broken and last_close <= neck_at_right:
             evidence.append("neckline not broken")
+        if broken:
+            evidence.append("pattern completed")
         recency = (right.t - window_start) / max(window_end - window_start, 1)
         touches = 3 + len(between_highs)
         fit = min(1.0, touches / 5.0)
@@ -883,7 +1008,7 @@ def _inverse_head_shoulders(
                 recency=recency,
             ),
         )
-        neck_end = _line_price_at(ha.t, ha.price, hb.t, hb.price, window_end)
+        neck_end = _line_price_at(ha.t, ha.price, hb.t, hb.price, end_t)
         cid = _cand_id("ihs", left.t, head.t, right.t)
         cand = DrawingCandidate(
             id=cid,
@@ -898,7 +1023,7 @@ def _inverse_head_shoulders(
                     interval=interval,
                     name="Inverse H&S neckline",
                     p1=(ha.t, ha.price),
-                    p2=(window_end, neck_end),
+                    p2=(end_t, neck_end),
                     confidence=score,
                 )
             ],
@@ -1289,9 +1414,7 @@ def build_candidate_catalog(
     bar_sec = bar_seconds(interval)
     candidates: list[DrawingCandidate] = []
     candidates.extend(
-        _trendlines_from_swings(
-            zz, atr, symbol=symbol, interval=interval, bar_sec=bar_sec
-        )
+        _trendlines_from_swings(zz, atr, symbol=symbol, interval=interval, bar_sec=bar_sec)
     )
     window_start = candles[0].time
     window_end = candles[-1].time
@@ -1313,6 +1436,7 @@ def build_candidate_catalog(
             interval=interval,
             window_start=window_start,
             window_end=window_end,
+            bar_sec=bar_sec,
         )
     )
     last_close = float(candles[-1].close)
@@ -1326,10 +1450,12 @@ def build_candidate_catalog(
             bar_sec=bar_sec,
             window_start=window_start,
             window_end=window_end,
+            regime=str(regime),
         )
     )
     candidates.extend(
         _head_shoulders(
+            candles,
             zz,
             atr,
             symbol=symbol,
@@ -1337,10 +1463,12 @@ def build_candidate_catalog(
             window_start=window_start,
             window_end=window_end,
             last_close=last_close,
+            bar_sec=bar_sec,
         )
     )
     candidates.extend(
         _inverse_head_shoulders(
+            candles,
             zz,
             atr,
             symbol=symbol,
@@ -1348,6 +1476,7 @@ def build_candidate_catalog(
             window_start=window_start,
             window_end=window_end,
             last_close=last_close,
+            bar_sec=bar_sec,
         )
     )
     candidates.extend(_fib_retracement(candles, zz, atr, symbol=symbol, interval=interval))
@@ -1360,6 +1489,17 @@ def build_candidate_catalog(
     )
     raw_candidate_count = len(candidates)
     prefilter_dropped: list[PrefilterDrop] = []
+    not_invalidated: list[DrawingCandidate] = []
+    for cand in candidates:
+        if _candidate_invalidated(cand, candles):
+            prefilter_dropped.append(
+                PrefilterDrop(
+                    candidate_id=cand.id, pattern_id=cand.pattern_id, reason="invalidated"
+                )
+            )
+        else:
+            not_invalidated.append(cand)
+    candidates = not_invalidated
     kept: list[DrawingCandidate] = []
     for cand in candidates:
         reason = prefilter_candidate(cand.shapes, gate_window)

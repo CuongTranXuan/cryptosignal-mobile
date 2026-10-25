@@ -199,6 +199,25 @@ def enrich_resolved_shapes(
     return enriched
 
 
+def total_shape_cost(
+    intents: Sequence[DrawingIntent],
+    catalog: CandidateCatalog,
+) -> tuple[int, list[tuple[str, int]]]:
+    by_id = catalog.by_id()
+    costs: list[tuple[str, int]] = []
+    total = 0
+    for intent in intents:
+        ids = [intent.candidate_id] if intent.type == "candidate" else list(intent.candidate_ids)
+        for cid in ids:
+            cand = by_id.get(cid)
+            if cand is None:
+                continue
+            cost = len(cand.shapes)
+            costs.append((cid, cost))
+            total += cost
+    return total, costs
+
+
 def fit_intents_to_shape_budget(
     catalog: CandidateCatalog,
     style: str,

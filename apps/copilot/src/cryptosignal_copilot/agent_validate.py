@@ -5,10 +5,12 @@ from __future__ import annotations
 from pydantic_ai import Agent, ModelRetry
 
 from cryptosignal_copilot.candidates import CandidateCatalog, patterns_for_style
+from cryptosignal_copilot.drawing_gate import MAX_SHAPES
 from cryptosignal_copilot.drawing_intent import (
     MAX_DRAWING_INTENTS,
     AnalyzeResultLlm,
     resolve_drawing_intents,
+    total_shape_cost,
 )
 
 
@@ -53,4 +55,12 @@ def attach_drawing_intent_validator(
                         f"Candidate {cid} ({cand.pattern_id}) is not allowed for style={style}. "
                         f"Examples: {example_ids}."
                     )
+        total, costs = total_shape_cost(output.drawing_intents, catalog)
+        if total > MAX_SHAPES:
+            detail = ", ".join(f"{cid}={cost}" for cid, cost in costs)
+            raise ModelRetry(
+                f"Total shape_cost {total} exceeds preview shape budget {MAX_SHAPES}. "
+                f"Per pick: {detail}. Replace or drop candidates so shape_cost sums to "
+                f"<={MAX_SHAPES} (see shape_cost on the candidate sheet)."
+            )
         return output
