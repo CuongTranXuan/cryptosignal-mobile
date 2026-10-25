@@ -21,6 +21,7 @@ def tail_candle_rows(request: AnalyzeRequest, count: int = TAIL_CANDLE_COUNT) ->
 
 
 def estimate_prompt_candle_chars(request: AnalyzeRequest, *, compact: bool) -> int:
+    payload: list[Any]
     if compact:
         payload = tail_candle_rows(request)
     else:

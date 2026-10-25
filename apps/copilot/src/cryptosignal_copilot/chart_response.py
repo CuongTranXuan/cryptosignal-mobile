@@ -121,15 +121,23 @@ def enrich_shapes_with_guardrails(
         candidate = str(shape.get("id") or "")
         stable_id = stable_drawing_id(candidate, fallback_key=fingerprint_shape(shape))
         confidence = float(shape.get("confidence", 0.55))
-        guardrail = default_guardrail(
-            regime,
-            confidence,
-            evidence_against=[],
-            invalidation_price=None,
-        )
+        existing = shape.get("guardrail")
+        if isinstance(existing, dict) and (
+            existing.get("evidence_against") or existing.get("invalidation")
+        ):
+            guardrail = existing
+            confidence = float(existing.get("confidence", confidence))
+        else:
+            guardrail = default_guardrail(
+                regime,
+                confidence,
+                evidence_against=[],
+                invalidation_price=None,
+            )
         out = dict(shape)
         out["id"] = stable_id
         out["guardrail"] = guardrail
+        out["confidence"] = confidence
         enriched.append(out)
         points = out.get("points") or []
         time_val = int(points[0]["time"]) if points else 0

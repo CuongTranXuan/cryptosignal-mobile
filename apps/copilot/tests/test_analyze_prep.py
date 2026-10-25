@@ -46,6 +46,6 @@ async def test_clamp_candle_count(llm_env):
         cfg,
         _req(closedCandles=candles, candle_count=600, **{"from": 0, "to": 599}),
     )
-    assert plan.candle_count_used == 500
+    assert plan.candle_count_used == 300
     assert plan.meta["clamped"] is True
-    assert len(plan.request.closedCandles) == 500
+    assert len(plan.request.closedCandles) == 300

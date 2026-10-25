@@ -45,12 +45,10 @@ def build_run_model_settings(
 
 
 def lower_reasoning_effort(current: str | None, model: NormalizedModel) -> str | None:
-    if not model.reasoning_efforts:
+    tiers = list(model.reasoning_efforts)
+    if not tiers or not current or current not in tiers:
         return current
-    if current == "low" and "none" in model.reasoning_efforts:
-        return "none"
-    if current == "medium" and "low" in model.reasoning_efforts:
-        return "low"
-    if current == "high" and "low" in model.reasoning_efforts:
-        return "low"
-    return current
+    index = tiers.index(current)
+    if index <= 0:
+        return tiers[0]
+    return tiers[index - 1]

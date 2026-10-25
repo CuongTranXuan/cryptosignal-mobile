@@ -15,12 +15,29 @@ ATR_PERIOD = 14
 DEFAULT_ZIGZAG_ATR_MULT = 2.0
 
 
+def zigzag_mult(interval: IntervalName) -> float:
+    match interval:
+        case "1m":
+            return 2.5
+        case "15m":
+            return 2.0
+        case "1h":
+            return 2.0
+        case "4h":
+            return 1.75
+        case "1d":
+            return 1.5
+        case _ as unreachable:
+            assert_never(unreachable)
+
+
 class CandleLike(Protocol):
     time: int
     open: float
     high: float
     low: float
     close: float
+    volume: float
 
 
 @dataclass(frozen=True)
@@ -106,7 +123,7 @@ def _thin_swings(swings: list[Swing]) -> list[Swing]:
     return kept
 
 
-def _provisional_edge_swings(candles: list[CandleLike], radius: int) -> list[Swing]:
+def _provisional_edge_swings(candles: Sequence[CandleLike], radius: int) -> list[Swing]:
     count = len(candles)
     if count < radius + 1:
         return []
@@ -128,7 +145,7 @@ def _provisional_edge_swings(candles: list[CandleLike], radius: int) -> list[Swi
     return found
 
 
-def fractal_swings(candles: list[CandleLike], interval: IntervalName) -> list[Swing]:
+def fractal_swings(candles: Sequence[CandleLike], interval: IntervalName) -> list[Swing]:
     radius = fractal_radius(interval)
     count = len(candles)
     found: list[Swing] = []
@@ -158,7 +175,7 @@ def _zigzag_id(side: SwingSide, time: int, price: float) -> str:
     return f"zz_{side}_{digest}"
 
 
-def fractals_as_zigzag(candles: list[CandleLike], interval: IntervalName) -> list[ZigZagSwing]:
+def fractals_as_zigzag(candles: Sequence[CandleLike], interval: IntervalName) -> list[ZigZagSwing]:
     return [
         ZigZagSwing(
             id=_zigzag_id(swing.side, swing.time, swing.price),
@@ -173,7 +190,7 @@ def fractals_as_zigzag(candles: list[CandleLike], interval: IntervalName) -> lis
 
 
 def zigzag_swings(
-    candles: list[CandleLike],
+    candles: Sequence[CandleLike],
     interval: IntervalName,
     *,
     atr_mult: float = DEFAULT_ZIGZAG_ATR_MULT,
@@ -196,8 +213,11 @@ def zigzag_swings(
             continue
         pivots.append(swing)
     out: list[ZigZagSwing] = []
-    for swing in pivots:
-        prom = abs(swing.price - pivots[0].price) / atr if atr > 0 else 0.0
+    for idx, swing in enumerate(pivots):
+        if idx == 0:
+            prom = 0.0
+        else:
+            prom = abs(swing.price - pivots[idx - 1].price) / atr if atr > 0 else 0.0
         out.append(
             ZigZagSwing(
                 id=_zigzag_id(swing.side, swing.time, swing.price),
@@ -255,7 +275,7 @@ def build_feature_sheet(
             "price": round(z.price, 6),
             "prom_atr": z.prominence_atr,
         }
-        for z in zz[-12:]
+        for z in zz[-16:]
     ]
     return {
         "atr14": round(atr, 6) if atr is not None else None,

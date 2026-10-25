@@ -21,7 +21,7 @@ def test_normalize_omniroute_deepseek_flash():
     model = normalize_model_row(row)
     assert model.request_max_tokens == 32_768
     assert model.recommended_candles == 100
-    assert model.recommended_max_candles == 500
+    assert model.recommended_max_candles == 300
     assert model.supports_reasoning is True
     assert model.source == "provider"
 

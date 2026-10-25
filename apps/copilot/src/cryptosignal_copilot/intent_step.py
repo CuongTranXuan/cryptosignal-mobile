@@ -46,8 +46,15 @@ def style_prompt_slice(style: str) -> str:
 def _filter_candidates(catalog: CandidateCatalog, intent: AnalyzeIntent) -> list:
     allowed_patterns = patterns_for_style(intent.style)
     pool = [c for c in catalog.candidates if c.pattern_id in allowed_patterns]
-    if intent.requested_pattern:
-        pool = [c for c in pool if c.pattern_id == intent.requested_pattern]
+    requested = intent.requested_pattern
+    if requested:
+        boosted = [c for c in pool if c.pattern_id == requested]
+        rest = [c for c in pool if c.pattern_id != requested]
+        pool = sorted(boosted, key=lambda c: c.score, reverse=True) + sorted(
+            rest, key=lambda c: c.score, reverse=True
+        )
+    else:
+        pool = sorted(pool, key=lambda c: c.score, reverse=True)
     return pool
 
 
@@ -76,9 +83,10 @@ def rules_first_step(
     if requested:
         matched = [c for c in pool if c.pattern_id == requested and c.score >= 0.6]
         if matched and not conflict:
-            intents = [CandidateDrawingIntent(candidate_id=matched[0].id)]
+            intents: list[DrawingIntent] = [CandidateDrawingIntent(candidate_id=matched[0].id)]
             shapes, _ = resolve_drawing_intents(intents, catalog)
-            shapes = enrich_resolved_shapes(shapes, catalog)
+            last_close = float(request.closedCandles[-1].close) if request.closedCandles else None
+            shapes = enrich_resolved_shapes(shapes, catalog, last_close=last_close)
             return IntentStepResult(
                 use_llm=False,
                 prompt_slice=slice_text,
@@ -89,7 +97,8 @@ def rules_first_step(
     if clear_winner and not conflict and not request.prompt.strip():
         intents = [CandidateDrawingIntent(candidate_id=top.id)]
         shapes, _ = resolve_drawing_intents(intents, catalog)
-        shapes = enrich_resolved_shapes(shapes, catalog)
+        last_close = float(request.closedCandles[-1].close) if request.closedCandles else None
+        shapes = enrich_resolved_shapes(shapes, catalog, last_close=last_close)
         return IntentStepResult(
             use_llm=False,
             prompt_slice=slice_text,

@@ -51,7 +51,7 @@ def test_build_user_prompt_english_window_annotation(monkeypatch):
     )
     prompt = _build_user_prompt(req, plan=plan)
     assert "WINDOW from=100" in prompt and "to=200" in prompt
-    assert "User prompt: Tìm tam giác" in prompt
+    assert "User prompt (read last): Tìm tam giác" in prompt
     assert "Context JSON" in prompt
     assert "CỬA SỔ PHÂN TÍCH CHÍNH" not in prompt
     assert "get_klines" not in prompt

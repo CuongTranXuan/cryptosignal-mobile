@@ -21,6 +21,7 @@ from cryptosignal_copilot.drawing_gate import (
 )
 from cryptosignal_copilot.drawing_intent import (
     AnalyzeResultLlm,
+    build_deterministic_fallback,
     enrich_resolved_shapes,
     resolve_drawing_intents,
 )
@@ -127,8 +128,9 @@ class PydanticAiRunner:
                     instructions=INSTRUCTIONS,
                     retries={"output": output_retries_for_model(current_plan.model)},
                 )
+                intent_style = (request.intent.style if request.intent else "classic") or "classic"
                 if catalog is not None:
-                    attach_drawing_intent_validator(agent, catalog)
+                    attach_drawing_intent_validator(agent, catalog, style=intent_style)
                 run_settings = strip_thinking_when_routed(
                     current_plan.model,
                     current_plan.reasoning_effort,
@@ -152,6 +154,10 @@ class PydanticAiRunner:
                             )
                             yield "meta", current_plan.meta
                             continue
+                    if catalog is not None:
+                        style = (request.intent.style if request.intent else "classic") or "classic"
+                        llm_output = build_deterministic_fallback(catalog, style)
+                        break
                     yield "error", unexpected_model_behavior_payload(exc)
                     yield "done", {}
                     return
@@ -192,8 +198,11 @@ class PydanticAiRunner:
             if llm_output and llm_output.summary:
                 yield "text", {"delta": "\n\n" + llm_output.summary}
             if catalog is not None and llm_output is not None:
+                last_close = (
+                    float(request.closedCandles[-1].close) if request.closedCandles else None
+                )
                 raw_shapes, _ = resolve_drawing_intents(llm_output.drawing_intents, catalog)
-                raw_shapes = enrich_resolved_shapes(raw_shapes, catalog)
+                raw_shapes = enrich_resolved_shapes(raw_shapes, catalog, last_close=last_close)
                 output_markers = list(llm_output.markers)
             else:
                 raw_shapes = []
@@ -325,6 +334,6 @@ def _build_user_prompt(
         f"WINDOW from={request.from_} to={request.to} ({n} closed candles in store; "
         f"recent tail + feature sheet below).\n"
         f"{_projection_note(request)}\n"
-        f"User prompt: {request.prompt}\n"
-        f"Context JSON: {json.dumps(ctx, separators=(',', ':'))}"
+        f"Context JSON: {json.dumps(ctx, separators=(',', ':'))}\n"
+        f"User prompt (read last): {request.prompt}"
     )

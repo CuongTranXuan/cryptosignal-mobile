@@ -54,11 +54,16 @@ def validate_analyze_intent(intent: AnalyzeIntent | None) -> AnalyzeIntent:
 
 
 def build_intent_check(request: AnalyzeRequest, intent: AnalyzeIntent) -> dict[str, object]:
-    regime = detect_regime(request.closedCandles)
+    regime = detect_regime(request.closedCandles, request.interval)
     conflict = bias_conflicts_regime(intent.bias, regime)
     message: str | None = None
     if conflict:
         message = "User bias conflicts with detector regime; shapes follow detector regime."
+    elif intent.style in ("elliott", "wyckoff"):
+        message = (
+            f"Style {intent.style} has no live v1 detectors; use classic/SMC candidates or "
+            "no_valid_pattern when nothing fits."
+        )
     check = IntentCheck(
         detected_regime=regime,
         bias_conflict=conflict,
