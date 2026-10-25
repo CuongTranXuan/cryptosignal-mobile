@@ -407,8 +407,9 @@ def _review_horizontal(
     return data, None
 
 
-def _hs_neckline_shape(name: str) -> bool:
-    return "H&S neckline" in name or "Inverse H&S neckline" in name
+def _hs_neckline_shape(data: dict[str, Any]) -> bool:
+    cid = str(data.get("_candidate_id", ""))
+    return cid.startswith("hs_") or cid.startswith("ihs_")
 
 
 def _anchor_hs_terminal(point: dict[str, Any], ctx: _GateContext) -> str | None:
@@ -430,8 +431,7 @@ def _review_diagonal(
     historical = [point for point in points if int(point["time"]) <= ctx.last_closed]
     if not historical:
         return None, "no-anchor"
-    name = str(data.get("name", ""))
-    hs_neck = _hs_neckline_shape(name)
+    hs_neck = _hs_neckline_shape(data)
     sides: list[SwingSide] = []
     for index, point in enumerate(historical):
         if hs_neck and index == len(historical) - 1:

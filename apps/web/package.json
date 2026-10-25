@@ -4,7 +4,9 @@
   "packageManager": "pnpm@10.15.0",
   "type": "module",
   "pnpm": {
-    "onlyBuiltDependencies": ["esbuild"]
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   },
   "scripts": {
     "dev": "next dev",
@@ -30,6 +32,7 @@
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^4.3.4",
     "jsdom": "^30.0.1",
+    "tsx": "^4.23.15",
     "typescript": "^5.9.2",
     "vitest": "^2.1.9"
   }

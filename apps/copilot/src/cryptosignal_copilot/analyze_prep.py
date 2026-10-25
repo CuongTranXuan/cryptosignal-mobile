@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import logging
+import os
 from collections import Counter
 from dataclasses import dataclass
 from typing import Any
@@ -25,6 +27,8 @@ from cryptosignal_copilot.model_routes import resolve_provider_model_id
 from cryptosignal_copilot.prep_errors import AnalyzePrepError
 from cryptosignal_copilot.run_settings import build_run_model_settings, lower_reasoning_effort
 from cryptosignal_copilot.schema import AnalyzeRequest
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -60,14 +64,24 @@ async def _htf_context(symbol: str, interval: str, end_time_s: int) -> dict[str,
             limit=120,
             end_time=end_time_s * 1000,
         )
-    except Exception:
+    except Exception as exc:
+        logger.warning("htf klines fetch failed for %s %s: %s", symbol, htf, exc)
         return None
-    if len(candles) < 10:
+    closed = [c for c in candles if c.time <= end_time_s]
+    if len(closed) < 10:
+        logger.info(
+            "htf klines insufficient closed bars for %s %s at %s: got %d",
+            symbol,
+            htf,
+            end_time_s,
+            len(closed),
+        )
         return None
     return {
         "interval": htf,
-        "regime": detect_regime(candles, htf),  # type: ignore[arg-type]
-        "bars": len(candles),
+        "regime": detect_regime(closed, htf),  # type: ignore[arg-type]
+        "bars": len(closed),
+        "last_closed_time": closed[-1].time,
     }
 
 
@@ -155,7 +169,9 @@ async def prepare_analyze(
         recommended_max=model.recommended_max_candles,
     )
     trimmed = trim_request_candles(request, used)
-    htf = await _htf_context(trimmed.symbol, trimmed.interval, trimmed.to)
+    htf = None
+    if os.environ.get("COPILOT_SKIP_HTF", "").strip() not in {"1", "true", "yes"}:
+        htf = await _htf_context(trimmed.symbol, trimmed.interval, trimmed.to)
     candidate_catalog = build_candidate_catalog(
         trimmed.closedCandles,
         symbol=trimmed.symbol,

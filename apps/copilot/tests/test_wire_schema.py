@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -49,9 +50,14 @@ def test_wire_shape_keys_match_web_contract():
 
 
 def test_wire_shapes_pass_web_zod_when_node_available():
+    ci = os.environ.get("CI", "").lower() in {"1", "true", "yes"}
     if shutil.which("node") is None:
+        if ci:
+            raise AssertionError("node is required in CI for wire Zod contract test")
         pytest.skip("node is not installed")
     if not (WEB_ROOT / "package.json").exists():
+        if ci:
+            raise AssertionError("apps/web package.json not found in CI")
         pytest.skip("apps/web package.json not found")
     symbol, interval, candles = _load()
     catalog = build_candidate_catalog(candles, symbol=symbol, interval=interval)  # type: ignore[arg-type]
@@ -66,7 +72,10 @@ def test_wire_shapes_pass_web_zod_when_node_available():
     if proc.returncode != 0 and (
         b"Cannot find" in proc.stderr or b"ERR_MODULE_NOT_FOUND" in proc.stderr
     ):
-        pytest.skip(f"web deps not installed: {proc.stderr.decode()}")
+        msg = f"web deps not installed: {proc.stderr.decode()}"
+        if ci:
+            raise AssertionError(msg)
+        pytest.skip(msg)
     assert proc.returncode == 0, proc.stderr.decode()
 
 

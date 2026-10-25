@@ -79,6 +79,14 @@ def build_analysis_event(
         if primary_inv is None and isinstance(inv, dict) and inv.get("price") is not None:
             primary_inv = inv
 
+    bias_conflict = bool(intent_check.get("bias_conflict"))
+    if bias_conflict:
+        message = intent_check.get("message")
+        if isinstance(message, str) and message:
+            evidence_against.append(message)
+        else:
+            evidence_against.append("User bias conflicts with detector regime")
+
     if picked:
         for cand in picked:
             for item in cand.evidence_against:
@@ -88,8 +96,8 @@ def build_analysis_event(
     confidence = round(sum(confidences) / len(confidences), 3) if confidences else 0.55
     if not evidence_for:
         evidence_for = ["Detector regime from closed candles"]
-    if not evidence_against:
-        evidence_against = ["No structural warnings on selected drawings"]
+    if not evidence_against and not bias_conflict:
+        evidence_against = ["Không có cảnh báo cấu trúc trên các hình đã chọn"]
 
     return {
         "bias": bias,

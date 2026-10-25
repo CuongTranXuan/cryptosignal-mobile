@@ -281,6 +281,17 @@ class PydanticAiRunner:
         ):
             extra_skips.append("unsupported_pattern")
         skipped, skipped_count = aggregate_skipped(dropped, extra=extra_skips or None)
+        budget_fallback = bool((current_plan.meta or {}).get("intent_budget_fallback"))
+        if budget_fallback:
+            yield (
+                "text",
+                {
+                    "delta": (
+                        "\n\nĐã áp dụng lớp phủ dự phòng (ngân sách shape ≤6); "
+                        "các pick LLM vượt ngân sách đã được thay thế.\n"
+                    )
+                },
+            )
 
         wire_shapes = shapes_for_wire(valid_shapes)
         yield (

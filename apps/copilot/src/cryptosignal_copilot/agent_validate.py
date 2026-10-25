@@ -12,6 +12,7 @@ from cryptosignal_copilot.drawing_intent import (
     resolve_drawing_intents,
     total_shape_cost,
 )
+from cryptosignal_copilot.output_language_validate import validate_summary_language
 
 
 def attach_drawing_intent_validator(
@@ -63,4 +64,5 @@ def attach_drawing_intent_validator(
                 f"Per pick: {detail}. Replace or drop candidates so shape_cost sums to "
                 f"<={MAX_SHAPES} (see shape_cost on the candidate sheet)."
             )
+        validate_summary_language(output.summary, catalog.regime)
         return output

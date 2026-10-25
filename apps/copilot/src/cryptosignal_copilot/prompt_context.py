@@ -36,12 +36,24 @@ def build_prompt_context(
     candidates: list[dict[str, Any]],
     style_slice: str,
 ) -> dict[str, Any]:
+    intent = request.intent.model_dump() if request.intent else None
+    horizon = request.intent.horizon if request.intent else None
+    horizon_note = None
+    if horizon == "scalp":
+        horizon_note = "Prefer recent swings and shorter-span patterns."
+    elif horizon == "swing":
+        horizon_note = "Prefer multi-swing structures with anchors in the newest half."
+    elif horizon == "position":
+        horizon_note = "Prefer higher-timeframe-aligned levels; avoid ultra-short spans."
+
     return {
         "symbol": request.symbol,
         "interval": request.interval,
         "from": request.from_,
         "to": request.to,
-        "intent": request.intent.model_dump() if request.intent else None,
+        "intent": intent,
+        "horizon": horizon,
+        "horizon_guidance": horizon_note,
         "preview_shape_budget": 6,
         "feature_sheet": feature_sheet,
         "candidates": candidates,

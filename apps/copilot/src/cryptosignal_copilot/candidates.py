@@ -24,8 +24,6 @@ from cryptosignal_copilot.features import (
 from cryptosignal_copilot.gate_policy import anchor_in_play, prefilter_candidate
 from cryptosignal_copilot.schema import Candle, Interval
 
-STALE_COMPLETED_BARS = 96
-
 StyleId = Literal["classic", "smc"]
 PatternId = str
 
@@ -59,6 +57,7 @@ class DrawingCandidate:
     shapes: list[dict[str, Any]]
     evidence_against: list[str] = field(default_factory=list)
     invalidation_price: float | None = None
+    break_time: int | None = None
     name: str = ""
 
 
@@ -182,32 +181,17 @@ def _wick_safe_price(candle: Candle, price: float, tolerance: float) -> float:
     return float(candle.low if price <= (candle.open + candle.close) / 2 else candle.high)
 
 
-def _candidate_invalidated(cand: DrawingCandidate, candles: list[Candle]) -> bool:
-    if cand.invalidation_price is None or not candles:
-        return False
-    anchor_t = _last_anchor_time(cand)
-    last_close = float(candles[-1].close)
-    if cand.invalidation_price < last_close:
-        condition = "close_below"
-    else:
-        condition = "close_above"
-    inv = cand.invalidation_price
-    for candle in candles:
-        if candle.time <= anchor_t:
-            continue
-        if condition == "close_below" and candle.close < inv:
-            return True
-        if condition == "close_above" and candle.close > inv:
-            return True
-    return False
-
-
 def _flip_support_resistance(
-    cand: DrawingCandidate, candles: list[Candle], atr: float | None
+    cand: DrawingCandidate,
+    candles: list[Candle],
+    atr: float | None,
+    zigzag: list[ZigZagSwing],
 ) -> DrawingCandidate:
+    from cryptosignal_copilot.pattern_invalidation import pattern_broken
+
     if cand.pattern_id != "support_resistance" or cand.invalidation_price is None or atr is None:
         return cand
-    if not _candidate_invalidated(cand, candles):
+    if not pattern_broken(cand, candles, atr, zigzag).broken:
         return cand
     shape = cand.shapes[0] if cand.shapes else {}
     low = shape.get("priceLow")
@@ -236,15 +220,52 @@ def _flip_support_resistance(
     )
 
 
-def _candidate_stale(cand: DrawingCandidate, candles: list[Candle], bar_sec: int) -> bool:
+def _hs_target_reached(
+    cand: DrawingCandidate,
+    candles: list[Candle],
+    atr: float | None,
+    break_t: int,
+) -> bool:
+    if atr is None or not cand.shapes:
+        return False
+    shape = cand.shapes[0]
+    points = shape.get("points")
+    if not isinstance(points, list) or len(points) < 2:
+        return False
+    p1, p2 = points[0], points[1]
+    if not isinstance(p1, dict) or not isinstance(p2, dict):
+        return False
+    t1, pr1, t2, pr2 = int(p1["time"]), float(p1["price"]), int(p2["time"]), float(p2["price"])
+    bullish_break = cand.pattern_id == "inverse_head_and_shoulders"
+    for candle in candles:
+        if candle.time <= break_t:
+            continue
+        neck = _line_price_at(t1, pr1, t2, pr2, candle.time)
+        if bullish_break and candle.close > neck + 0.5 * atr:
+            return True
+        if not bullish_break and candle.close < neck - 0.5 * atr:
+            return True
+    return False
+
+
+def _candidate_stale(
+    cand: DrawingCandidate,
+    candles: list[Candle],
+    bar_sec: int,
+    atr: float | None,
+) -> bool:
     if cand.pattern_id not in ("head_and_shoulders", "inverse_head_and_shoulders"):
         return False
     if "pattern completed" not in cand.evidence_against:
         return False
-    anchor = _last_anchor_time(cand)
-    if not bar_sec or not anchor:
+    break_t = cand.break_time or _last_anchor_time(cand)
+    if not bar_sec or not break_t:
         return False
-    return (candles[-1].time - anchor) / bar_sec > STALE_COMPLETED_BARS
+    stale_bars = max(5, int(0.15 * len(candles)))
+    bars_since = (candles[-1].time - break_t) / bar_sec
+    if bars_since > stale_bars:
+        return True
+    return _hs_target_reached(cand, candles, atr, break_t)
 
 
 def _line_invalidation_at(
@@ -992,10 +1013,11 @@ def _neckline_end_after_break(
     bar_sec: int,
     break_below: bool,
     atr: float | None,
-) -> tuple[int, float, bool]:
+) -> tuple[int, float, bool, int | None]:
     end_t = shoulder_t + 3 * bar_sec if bar_sec else shoulder_t
     end_price = _line_price_at(la.t, la.price, lb.t, lb.price, end_t)
     broken = False
+    break_t: int | None = None
     tol = _price_tolerance(candles, atr)
     prev_time = shoulder_t
     for candle in candles:
@@ -1004,6 +1026,7 @@ def _neckline_end_after_break(
         neck = _line_price_at(la.t, la.price, lb.t, lb.price, candle.time)
         if break_below and candle.close < neck:
             broken = True
+            break_t = candle.time
             if prev_time < candle.time:
                 end_t = prev_time
                 end_price = _line_price_at(la.t, la.price, lb.t, lb.price, end_t)
@@ -1013,6 +1036,7 @@ def _neckline_end_after_break(
             break
         if not break_below and candle.close > neck:
             broken = True
+            break_t = candle.time
             if prev_time < candle.time:
                 end_t = prev_time
                 end_price = _line_price_at(la.t, la.price, lb.t, lb.price, end_t)
@@ -1021,7 +1045,7 @@ def _neckline_end_after_break(
                 end_price = _wick_safe_price(candle, float(candle.high), tol)
             break
         prev_time = candle.time
-    return end_t, end_price, broken
+    return end_t, end_price, broken, break_t
 
 
 def _head_shoulders(
@@ -1059,7 +1083,7 @@ def _head_shoulders(
         if abs(la.price - lb.price) > tol:
             continue
         neck_at_right = _line_price_at(la.t, la.price, lb.t, lb.price, right.t)
-        end_t, end_price, broken = _neckline_end_after_break(
+        end_t, end_price, broken, break_t = _neckline_end_after_break(
             candles,
             la=la,
             lb=lb,
@@ -1085,6 +1109,8 @@ def _head_shoulders(
                 recency=recency,
             ),
         )
+        if broken:
+            score = min(score, 0.72)
         neck_end = end_price
         cid = _cand_id("hs", left.t, head.t, right.t)
         cand = DrawingCandidate(
@@ -1105,6 +1131,7 @@ def _head_shoulders(
                 )
             ],
             invalidation_price=head.price + 0.25 * atr,
+            break_time=break_t,
             evidence_against=evidence,
         )
         if recency > best_recency:
@@ -1148,7 +1175,7 @@ def _inverse_head_shoulders(
         if abs(ha.price - hb.price) > tol:
             continue
         neck_at_right = _line_price_at(ha.t, ha.price, hb.t, hb.price, right.t)
-        end_t, end_price, broken = _neckline_end_after_break(
+        end_t, end_price, broken, break_t = _neckline_end_after_break(
             candles,
             la=ha,
             lb=hb,
@@ -1174,6 +1201,8 @@ def _inverse_head_shoulders(
                 recency=recency,
             ),
         )
+        if broken:
+            score = min(score, 0.72)
         neck_end = end_price
         cid = _cand_id("ihs", left.t, head.t, right.t)
         cand = DrawingCandidate(
@@ -1194,6 +1223,7 @@ def _inverse_head_shoulders(
                 )
             ],
             invalidation_price=head.price - 0.25 * atr,
+            break_time=break_t,
             evidence_against=evidence,
         )
         if recency > best_recency:
@@ -1689,14 +1719,19 @@ def build_candidate_catalog(
     raw_candidate_count = len(candidates)
     prefilter_dropped: list[PrefilterDrop] = []
     processed: list[DrawingCandidate] = []
+    from cryptosignal_copilot.pattern_invalidation import pattern_broken
+
     for cand in candidates:
-        cand = _flip_support_resistance(cand, candles, atr)
-        if _candidate_stale(cand, candles, bar_sec):
+        cand = _flip_support_resistance(cand, candles, atr, zz)
+        if _candidate_stale(cand, candles, bar_sec, atr):
             prefilter_dropped.append(
                 PrefilterDrop(candidate_id=cand.id, pattern_id=cand.pattern_id, reason="stale")
             )
             continue
-        if _candidate_invalidated(cand, candles):
+        if (
+            pattern_broken(cand, candles, atr, zz).broken
+            and cand.pattern_id != "support_resistance"
+        ):
             prefilter_dropped.append(
                 PrefilterDrop(
                     candidate_id=cand.id, pattern_id=cand.pattern_id, reason="invalidated"
@@ -1707,7 +1742,12 @@ def build_candidate_catalog(
     candidates = processed
     kept: list[DrawingCandidate] = []
     for cand in candidates:
-        reason = prefilter_candidate(cand.shapes, gate_window)
+        gated_shapes = []
+        for shape in cand.shapes:
+            tagged = dict(shape)
+            tagged["_candidate_id"] = cand.id
+            gated_shapes.append(tagged)
+        reason = prefilter_candidate(gated_shapes, gate_window)
         if reason:
             prefilter_dropped.append(
                 PrefilterDrop(candidate_id=cand.id, pattern_id=cand.pattern_id, reason=reason)

@@ -60,6 +60,7 @@ def llm_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LLM_API_KEY", "sk-test")
     monkeypatch.setenv("LLM_MODEL", TEST_LLM_MODEL)
     monkeypatch.setenv("COPILOT_RUN_DB_MIGRATIONS", "true")
+    monkeypatch.setenv("COPILOT_SKIP_HTF", "1")
 
 
 @pytest.fixture

@@ -12,8 +12,8 @@ from cryptosignal_copilot.drawing_gate import DrawingWindow
 from tests.eval.test_chart_replay import _load_fixture
 
 
-@patch("cryptosignal_copilot.candidates.STALE_COMPLETED_BARS", 10_000)
-def test_broken_head_shoulders_passes_prefilter_and_wire() -> None:
+@patch("cryptosignal_copilot.candidates._candidate_stale", return_value=False)
+def test_broken_head_shoulders_passes_prefilter_and_wire(_mock_stale: object) -> None:
     symbol, interval, candles = _load_fixture("ethusdt_4h_200.json")
     catalog = build_candidate_catalog(candles, symbol=symbol, interval=interval)  # type: ignore[arg-type]
     hs = [c for c in catalog.candidates if c.pattern_id == "head_and_shoulders"]
@@ -24,7 +24,8 @@ def test_broken_head_shoulders_passes_prefilter_and_wire() -> None:
         window_start=candles[0].time,
         allowed_times={c.time for c in candles},
     )
-    assert prefilter_candidate(hs[0].shapes, window) is None
+    tagged = [{**shape, "_candidate_id": hs[0].id} for shape in hs[0].shapes]
+    assert prefilter_candidate(tagged, window) is None
     intents = [CandidateDrawingIntent(candidate_id=hs[0].id)]
     wire, metrics = run_real_path(
         catalog,
