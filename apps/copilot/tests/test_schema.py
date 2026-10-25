@@ -37,9 +37,11 @@ def test_rejects_order_keys():
 def test_agent_marker_fixture_parses():
     data = json.loads(MARKER_FIXTURE.read_text())
     marker = AgentMarker.model_validate(data)
-    assert marker.side == "buy"
-    assert marker.position == "belowBar"
-    assert marker.shape == "arrowUp"
+    # Shared fixture is a server-built neutral anchor (C.13: no model buy/sell markers).
+    assert marker.side == "neutral"
+    assert marker.position == "inBar"
+    assert marker.shape == "circle"
+    assert marker.drawing_id == "drw_fixture"
     assert marker.agentId is None
 
 
