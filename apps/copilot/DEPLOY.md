@@ -14,6 +14,24 @@
 | Cloud Run | `deploy/cloudrun/deploy.sh` |
 | Secrets | `LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL`, `DATABASE_URL` via Secret Manager / host env |
 
+### Google Gemini (OpenAI-compatible)
+
+Use the [Gemini OpenAI compatibility layer](https://ai.google.dev/gemini-api/docs/openai) with env-only switching (no code changes):
+
+```bash
+LLM_API_STYLE=openai
+LLM_PROVIDER=gemini   # optional; auto-detected from generativelanguage.googleapis.com base URL
+LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai
+LLM_API_KEY=<Gemini API key from Google AI Studio>
+LLM_MODEL=gemini-2.5-flash
+```
+
+**Cloud Run:** store `LLM_API_KEY` in Secret Manager (never commit the key). Mount the same variables as other LLM providers. See `config/gemini.env.example`.
+
+Copilot normalizes `/models` ids (`models/gemini-2.5-flash` → `gemini-2.5-flash`), maps `reasoning_effort` per the [thinking table](https://ai.google.dev/gemini-api/docs/openai#thinking), and strips unsupported OpenAI chat params before requests hit Gemini.
+
+**Native `LLM_API_STYLE=google`:** not enabled in this branch — the OpenAI-compatible path covers Gemini with one pydantic-ai `OpenAIChatModel` stack and identical catalog/analyze behavior.
+
 ### Environment variables
 
 | Variable | Required | Default | Purpose |
@@ -23,6 +41,7 @@
 | `LLM_API_KEY` | yes* | — | Provider API key |
 | `LLM_MODEL` | yes* | — | Default model id; always injected into `/models` fallback |
 | `LLM_TIMEOUT_S` | no | `60` | HTTP timeout for provider calls |
+| `LLM_PROVIDER` | no | auto | `gemini` or `generic`; auto-detect from `LLM_BASE_URL` host |
 | `DATABASE_URL` | no | sqlite under `COPILOT_DATA_DIR` or `/tmp` | SQLAlchemy URL (`sqlite:///`, `postgresql+psycopg://`, `sqlite+libsql://`) |
 | `COPILOT_SESSIONS_DB` | no | — | If `DATABASE_URL` unset, derive `sqlite:///` from this path |
 | `COPILOT_DATA_DIR` | no | — | Default sqlite file: `{dir}/sessions.sqlite3` |

@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING, Any
+
+from cryptosignal_copilot.config import LlmConfig
+from cryptosignal_copilot.llm_provider import detect_llm_provider, provider_api_model_id
 
 if TYPE_CHECKING:
     from cryptosignal_copilot.model_catalog import NormalizedModel
@@ -68,16 +72,29 @@ def collapse_variant_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return collapsed
 
 
-def resolve_provider_model_id(model: NormalizedModel, reasoning_effort: str | None) -> str:
+def resolve_provider_model_id(
+    model: NormalizedModel,
+    reasoning_effort: str | None,
+    *,
+    cfg: LlmConfig | None = None,
+) -> str:
     """Pick the upstream route id when OmniRoute exposes per-effort model ids."""
     routes = dict(model.effort_routes)
     if reasoning_effort == "none":
         if "none" in routes:
-            return routes["none"]
-        return model.id
-    if reasoning_effort and reasoning_effort in routes:
-        return routes[reasoning_effort]
-    return model.id
+            resolved = routes["none"]
+        else:
+            resolved = model.id
+    elif reasoning_effort and reasoning_effort in routes:
+        resolved = routes[reasoning_effort]
+    else:
+        resolved = model.id
+    if cfg is not None:
+        return provider_api_model_id(resolved, detect_llm_provider(cfg))
+    base = os.environ.get("LLM_BASE_URL", "")
+    if "generativelanguage.googleapis.com" in base or os.environ.get("LLM_PROVIDER") == "gemini":
+        return provider_api_model_id(resolved, "gemini")
+    return resolved
 
 
 def strip_thinking_when_routed(
