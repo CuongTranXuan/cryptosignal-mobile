@@ -2,6 +2,9 @@
   "name": "@cryptosignal/web",
   "private": true,
   "packageManager": "pnpm@10.15.0",
+  "engines": {
+    "node": ">=22"
+  },
   "type": "module",
   "pnpm": {
     "onlyBuiltDependencies": [

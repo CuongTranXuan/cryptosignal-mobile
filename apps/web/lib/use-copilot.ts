@@ -1,9 +1,6 @@
 import { mergeCandles } from "./binance";
 import { mapCopilotHttpError, mapCopilotSseErrorPayload } from "./copilot-errors";
-import {
-  displayShapeName,
-  formatBiasConflictChatNotice,
-} from "./copilot-display";
+import { displayShapeName } from "./copilot-display";
 import {
   formatSkippedBreakdown,
   isAnalysisSseEmpty,
@@ -16,6 +13,7 @@ import {
   type AnalyzeMetaEvent,
 } from "./copilot-schema";
 import { mergeAnalyzeMeta } from "./sse-analyze-meta";
+import { isServerOverlayReadyText, joinStreamTextBlocks } from "./sse-stream-text";
 import { modelIdForAnalyzeRequest, modelLabelForSession } from "./copilot-model-defaults";
 import { findCachedModel, getDefaultModelId, getModelsList } from "./copilot-models-cache";
 import { reasoningEffortForAnalyze } from "./copilot-reasoning";
@@ -163,14 +161,19 @@ function appendServerSkippedNote(data: Record<string, unknown>): void {
   if (text) useAiStore.getState().appendText(text);
 }
 
-function appendIntentCheckNote(
-  meta: AnalyzeMetaEvent,
-  userBias?: import("./copilot-schema").ChartBias | null,
-): void {
-  if (!meta.intent_check?.bias_conflict) return;
-  useAiStore.getState().appendText(
-    formatBiasConflictChatNotice(meta.intent_check, userBias),
-  );
+function appendAgentStreamText(delta: string): void {
+  const messages = useAiStore.getState().messages.slice();
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (msg?.role === "agent") {
+      messages[i] = {
+        ...msg,
+        content: joinStreamTextBlocks(msg.content, delta),
+      };
+      useAiStore.setState({ messages });
+      return;
+    }
+  }
 }
 
 function appendMetaFallbackNote(meta: AnalyzeMetaEvent): void {
@@ -215,6 +218,8 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
   let lastResetSignal = useChartStore.getState().shapesResetSignal;
   let streamMergedMeta: AnalyzeMetaEvent | null = null;
   let streamNotesFinalized = false;
+  let streamSawServerOverlayText = false;
+  let pendingDrewShapesNotice: { count: number; lines: string[] } | null = null;
 
   const applyStreamMergedMeta = (merged: AnalyzeMetaEvent): void => {
     streamMergedMeta = merged;
@@ -231,22 +236,26 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
     applyStreamMergedMeta(mergeAnalyzeMeta(prev, { ...prev, intent_check: intentCheck }));
   };
 
+  const flushPendingDrewShapesNotice = (): void => {
+    if (streamSawServerOverlayText || !pendingDrewShapesNotice) return;
+    const { count, lines } = pendingDrewShapesNotice;
+    pendingDrewShapesNotice = null;
+    useAiStore.getState().appendText(copilotDrewShapes(count, lines));
+  };
+
   const finalizeStreamAnalyzeNotes = (): void => {
     if (streamNotesFinalized) return;
     streamNotesFinalized = true;
+    flushPendingDrewShapesNotice();
     if (!streamMergedMeta) return;
-    const activeId = useCopilotSessionStore.getState().activeSessionId;
-    const sessionIntent =
-      activeId != null
-        ? useCopilotSessionStore.getState().sessionCache[activeId]?.intent
-        : null;
-    appendIntentCheckNote(streamMergedMeta, sessionIntent?.bias);
     appendMetaFallbackNote(streamMergedMeta);
   };
 
   const resetStreamMetaAccumulator = (): void => {
     streamMergedMeta = null;
     streamNotesFinalized = false;
+    streamSawServerOverlayText = false;
+    pendingDrewShapesNotice = null;
   };
 
   const runQueuedIfAny = async () => {
@@ -327,7 +336,10 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
       }
       case "text": {
         const delta = typeof data.delta === "string" ? data.delta : "";
-        if (delta) useAiStore.getState().appendText(delta);
+        if (delta) {
+          if (isServerOverlayReadyText(delta)) streamSawServerOverlayText = true;
+          appendAgentStreamText(delta);
+        }
         return "ok";
       }
       case "shapes": {
@@ -373,7 +385,7 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
               s.points.length,
             ),
           );
-          useAiStore.getState().appendText(copilotDrewShapes(valid.length, lines));
+          pendingDrewShapesNotice = { count: valid.length, lines };
           const times = valid.flatMap((s) => s.points.map((pt) => pt.time));
           const visible = deps.getCoordApi?.()?.getVisibleTimeRange?.() ?? null;
           if (!timesInsideVisibleRange(times, visible)) {

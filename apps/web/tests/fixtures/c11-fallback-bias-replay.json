@@ -1,0 +1,108 @@
+{
+  "description": "C.11 validator/budget fallback with bias conflict (replay-shaped sequence)",
+  "events": [
+    [
+      "text",
+      {
+        "delta": "Đang phân tích BTCUSDT 1h (200 nến đã đóng)…\n\n"
+      }
+    ],
+    [
+      "regime",
+      {
+        "regime": "trend_up",
+        "intent_check": {
+          "detected_regime": "trend_up",
+          "bias_conflict": true,
+          "message": "Thiên kiến người dùng không khớp chế độ detector; lớp phủ theo chế độ detector."
+        }
+      }
+    ],
+    [
+      "meta",
+      {
+        "model": "agentrouter/deepseek-v4-flash",
+        "candle_count_requested": 300,
+        "candle_count_used": 100,
+        "clamped": true,
+        "retried": true,
+        "intent_check": {
+          "detected_regime": "trend_up",
+          "bias_conflict": true,
+          "message": "Thiên kiến người dùng không khớp chế độ detector; lớp phủ theo chế độ detector."
+        }
+      }
+    ],
+    [
+      "regime",
+      {
+        "regime": "range",
+        "intent_check": {
+          "detected_regime": "range",
+          "bias_conflict": true,
+          "message": "Thiên kiến người dùng không khớp chế độ detector; lớp phủ theo chế độ detector."
+        }
+      }
+    ],
+    [
+      "text",
+      {
+        "delta": "Mô hình đã xong. Đang dựng lớp phủ…"
+      }
+    ],
+    [
+      "text",
+      {
+        "delta": "\n\nBTCUSDT 1h: chế độ detector là xu hướng tăng — cấu trúng đỉnh/đáy cao hơn trên các nến đã đóng.\n\nBias overlay (server): thiên hướng tăng theo detector.\n\nLưu ý: Thiên kiến người dùng không khớp chế độ detector; lớp phủ theo chế độ detector.\n\nĐây không phải tín hiệu vào lệnh; chỉ mô tả geometry trên nến đã đóng."
+      }
+    ],
+    [
+      "text",
+      {
+        "delta": "\n\nĐã áp dụng lớp phủ dự phòng (ngân sách shape ≤6); các pick LLM vượt ngân sách đã được thay thế.\n"
+      }
+    ],
+    [
+      "shapes",
+      {
+        "shapes": [],
+        "skipped": [{ "reason_code": "cap", "count": 6 }],
+        "skipped_count": 6
+      }
+    ],
+    [
+      "analysis",
+      {
+        "bias": "bullish",
+        "evidence_for": ["Breakout"],
+        "evidence_against": [
+          "Thiên kiến người dùng không khớp chế độ detector; lớp phủ theo chế độ detector."
+        ],
+        "summary_direction": "neutral"
+      }
+    ],
+    [
+      "text",
+      {
+        "delta": "\n\nLớp phủ sẵn sàng: 6 — Channel high rail, Triangle upper, Wedge down (+3 nữa)."
+      }
+    ],
+    [
+      "meta",
+      {
+        "model": "agentrouter/deepseek-v4-flash",
+        "candle_count_requested": 300,
+        "candle_count_used": 100,
+        "clamped": true,
+        "validator_fallback": true,
+        "intent_budget_fallback": true,
+        "intent_check": {
+          "detected_regime": "range",
+          "bias_conflict": true,
+          "message": "Thiên kiến người dùng không khớp chế độ detector; lớp phủ theo chế độ detector."
+        }
+      }
+    ],
+    ["done", {}]
+  ]
+}

@@ -26,12 +26,18 @@ jobs:
           version: 10.15.0
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: pnpm
           cache-dependency-path: apps/web/pnpm-lock.yaml
       - name: Install web deps
         working-directory: apps/web
         run: pnpm install --frozen-lockfile
+      - name: Typecheck
+        working-directory: apps/web
+        run: pnpm exec tsc --noEmit
+      - name: Vitest
+        working-directory: apps/web
+        run: pnpm exec vitest run
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
