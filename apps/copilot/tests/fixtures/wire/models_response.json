@@ -1,0 +1,125 @@
+{
+  "healthy": {
+    "default_model": "agentrouter/deepseek-v4-flash",
+    "fetched_at": 1793000000,
+    "models": [
+      {
+        "id": "agentrouter/deepseek-v4-flash",
+        "label": "deepseek-v4-flash",
+        "provider": "agentrouter",
+        "context_window": 1000000,
+        "max_output_tokens": 384000,
+        "supports_reasoning": true,
+        "reasoning_efforts": [
+          "none",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "supports_json": true,
+        "source": "table",
+        "advanced": false,
+        "request_max_tokens": 32768,
+        "recommended_candles": 100,
+        "recommended_max_candles": 300,
+        "presets": [
+          50,
+          100,
+          200,
+          300
+        ],
+        "structured_output_mode": "prompted",
+        "latency_ms": 400,
+        "status": "ok"
+      },
+      {
+        "id": "cursor/composer-2.5",
+        "label": "composer-2.5",
+        "provider": "cursor",
+        "context_window": 32000,
+        "max_output_tokens": 4096,
+        "supports_reasoning": true,
+        "reasoning_efforts": [],
+        "supports_json": true,
+        "source": "default",
+        "advanced": false,
+        "request_max_tokens": 4096,
+        "recommended_candles": 100,
+        "recommended_max_candles": 300,
+        "presets": [
+          50,
+          100,
+          200,
+          300
+        ],
+        "structured_output_mode": "prompted",
+        "latency_ms": 550,
+        "status": "ok"
+      }
+    ],
+    "requested_default": "agentrouter/deepseek-v4-flash",
+    "default_fallback": false,
+    "probed_at": "2026-10-26T07:33:20Z",
+    "ttl_s": 600,
+    "stale": false,
+    "probe_in_progress": false,
+    "upstream_reachable": true,
+    "upstream_error": null
+  },
+  "default_fallback": {
+    "default_model": "cursor/composer-2.5",
+    "fetched_at": 1793000000,
+    "models": [
+      {
+        "id": "cursor/composer-2.5",
+        "label": "composer-2.5",
+        "provider": "cursor",
+        "context_window": 32000,
+        "max_output_tokens": 4096,
+        "supports_reasoning": true,
+        "reasoning_efforts": [],
+        "supports_json": true,
+        "source": "default",
+        "advanced": false,
+        "request_max_tokens": 4096,
+        "recommended_candles": 100,
+        "recommended_max_candles": 300,
+        "presets": [
+          50,
+          100,
+          200,
+          300
+        ],
+        "structured_output_mode": "prompted",
+        "latency_ms": 400,
+        "status": "ok"
+      }
+    ],
+    "requested_default": "agentrouter/deepseek-v4-flash",
+    "default_fallback": true,
+    "probed_at": "2026-10-26T07:33:20Z",
+    "ttl_s": 600,
+    "stale": false,
+    "probe_in_progress": false,
+    "upstream_reachable": true,
+    "upstream_error": null
+  },
+  "upstream_down": {
+    "default_model": null,
+    "fetched_at": null,
+    "models": [],
+    "requested_default": "agentrouter/deepseek-v4-flash",
+    "default_fallback": false,
+    "probed_at": "2026-10-26T07:33:20Z",
+    "ttl_s": 600,
+    "stale": false,
+    "probe_in_progress": false,
+    "upstream_reachable": false,
+    "upstream_error": {
+      "code": "connect_error",
+      "message": "Upstream unreachable (connection failed)"
+    }
+  }
+}

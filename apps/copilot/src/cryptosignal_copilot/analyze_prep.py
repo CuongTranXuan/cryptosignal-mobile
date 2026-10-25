@@ -24,6 +24,7 @@ from cryptosignal_copilot.intent_step import candidate_id_list_for_prompt, rules
 from cryptosignal_copilot.klines import fetch_klines
 from cryptosignal_copilot.llm_provider import detect_llm_provider
 from cryptosignal_copilot.model_catalog import ModelNotFoundError, ModelsCatalog, NormalizedModel
+from cryptosignal_copilot.model_probe import ModelHealth
 from cryptosignal_copilot.model_routes import resolve_provider_model_id
 from cryptosignal_copilot.prep_errors import AnalyzePrepError
 from cryptosignal_copilot.run_settings import build_run_model_settings, lower_reasoning_effort
@@ -127,13 +128,23 @@ async def prepare_analyze(
     request: AnalyzeRequest,
     *,
     history_tokens: int = 0,
+    model_health: ModelHealth | None = None,
 ) -> AnalyzePlan:
     intent = validate_analyze_intent(request.intent)
     request = request.model_copy(update={"intent": intent}, deep=True)
 
-    model_id = (request.model or cfg.model).strip()
+    fallback_default = model_health.default_model if model_health else None
+    model_id = (request.model or fallback_default or cfg.model).strip()
     if not model_id:
         raise AnalyzePrepError("unknown_model", 400, "Mô hình không hợp lệ", "model is required")
+    probe_status = model_health.unhealthy_status(model_id) if model_health else None
+    if probe_status is not None:
+        raise AnalyzePrepError(
+            "model_unavailable",
+            422,
+            "Mô hình hiện không phản hồi — chọn mô hình khác",
+            f"{model_id}: probe status {probe_status}",
+        )
     try:
         model = await catalog.resolve_model(cfg, model_id)
     except ModelNotFoundError:

@@ -56,6 +56,15 @@ Copilot normalizes `/models` ids (`models/gemini-2.5-flash` → `gemini-2.5-flas
 | `COPILOT_MODEL_INCLUDE_COMBO` | no | `false` | Include `combo/*` routes |
 | `COPILOT_MODEL_NEGATIVE_CACHE_TTL_S` | no | `300` | Temporary hide after 402/502 |
 | `COPILOT_MODELS_CACHE_TTL_S` | no | `600` | `/models` cache TTL |
+| `COPILOT_MODEL_PROBE_ENABLED` | no | `true` | Live-probe each catalog model (1 tiny chat completion) and list only those that answer. Applies to `LLM_API_STYLE=openai`; `false` restores the unverified catalog listing (`status:"unverified"`). |
+| `COPILOT_MODEL_PROBE_TTL_S` | no | `600` | Probe cache TTL (stale-while-revalidate after expiry) |
+| `COPILOT_MODEL_PROBE_DOWN_TTL_S` | no | `15` | TTL for an "upstream unreachable" report, so a freshly started OmniRoute appears quickly |
+| `COPILOT_MODEL_PROBE_TIMEOUT_S` | no | `10` | Per-model probe timeout |
+| `COPILOT_MODEL_PROBE_CONCURRENCY` | no | `4` | Parallel probe requests (1–32) |
+| `COPILOT_MODEL_PROBE_MAX_TOKENS` | no | `1` | `max_tokens` on the probe request (1–4); retried once as `max_completion_tokens` if rejected |
+| `COPILOT_MODEL_PROBE_MAX_MODELS` | no | `60` | Cap on probed candidates (default model, then allowlist order, then id); the rest are hidden and counted in `skipped_count` |
+| `COPILOT_MODEL_PROBE_REFRESH_MIN_INTERVAL_S` | no | `30` | Minimum gap between probe starts for a forced refresh; otherwise `429` + `Retry-After` |
+| `COPILOT_MODELS_FETCH_TIMEOUT_S` | no | `10` | Timeout of the upstream `/models` list call |
 | `COPILOT_DEFAULT_CANDLE_COUNT` | no | `100` | Default session/analyze window |
 | `COPILOT_DEFAULT_MODEL_CONTEXT` | no | `32000` | Catalog fallback when provider omits limits |
 | `COPILOT_DEFAULT_MODEL_MAX_OUTPUT` | no | `4096` | Max-output fallback when provider omits limits |
@@ -65,6 +74,18 @@ Copilot normalizes `/models` ids (`models/gemini-2.5-flash` → `gemini-2.5-flas
 
 \*Required for successful analyze and 200 health; missing → 503 on health/models.  
 \*\*Not required when the UI proxies server-side (`COPILOT_UPSTREAM_URL` on Next.js).
+
+### Model probe endpoints
+
+The picker shows only models the configured OpenAI-compatible upstream (OmniRoute, Gemini, any `/v1` gateway) can serve **right now**. For each catalog candidate (after the usual provider / allowlist / media filters) the server sends one chat completion (`"Reply OK"`, `max_tokens` 1) and classifies the result as `ok`, `auth_error`, `quota_or_rate_limited`, `not_found`, `timeout` or `upstream_error`. Results are cached in-process, shared by concurrent callers (single flight) and warmed in the background at startup (startup never waits). Keys, bearer tokens and credentialed URLs are redacted from messages and never logged.
+
+| Endpoint | Behaviour |
+|---|---|
+| `GET /v1/copilot/models[?refresh=1][&q=]` | Healthy models only (existing catalog fields + `latency_ms`, `status:"ok"`), plus `default_model` (effective), `requested_default`, `default_fallback`, `probed_at`, `ttl_s`, `stale`, `probe_in_progress`, `upstream_reachable`, `upstream_error`. `refresh=1` is rate-limited like POST. |
+| `GET /v1/copilot/models/probe` | Full report incl. failures: `probed_at`, `ttl_s`, `provider` (`omniroute`/`gemini`/`openai_compat`), `upstream_reachable`, `upstream_error`, `skipped_count`, `results[]` (`id`, `status`, `latency_ms`, `http_status`, `error_code`, `message`). |
+| `POST /v1/copilot/models/probe` | Force a re-probe and return the report. Joins an in-flight probe instead of failing. Too soon → `429`, `Retry-After: <s>`, body `{code:"probe_rate_limited", message, retry_after_s}`. |
+
+If the upstream `/models` call fails (connection refused, DNS, timeout, 5xx, auth), both endpoints return `200` with `upstream_reachable:false`, `upstream_error:{code,message}` and no models (`code` ∈ `connect_error`, `timeout`, `http_error`, `auth_error`, `quota_or_rate_limited`, `network_error`, `invalid_response`). Incomplete `LLM_*` env gives the same shape with `code:"config_missing"` (message lists missing variable names only; `/health` stays `503`). If the configured `LLM_MODEL` fails its probe, `default_model` becomes the first healthy model (allowlist order, then latency) with `default_fallback:true`; `POST /analyze` without `model` uses it, and naming a model whose last probe failed returns `422 model_unavailable`. Wire fixtures: `tests/fixtures/wire/models_response.json`, `tests/fixtures/wire/models_probe_report.json`.
 
 ### Database migration notes
 

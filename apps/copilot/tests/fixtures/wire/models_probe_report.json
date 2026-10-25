@@ -1,0 +1,82 @@
+{
+  "healthy": {
+    "probed_at": "2026-10-26T07:33:20Z",
+    "ttl_s": 600,
+    "provider": "omniroute",
+    "upstream_reachable": true,
+    "upstream_error": null,
+    "skipped_count": 0,
+    "results": [
+      {
+        "id": "agentrouter/deepseek-v4-flash",
+        "status": "ok",
+        "latency_ms": 400,
+        "http_status": 200,
+        "error_code": null,
+        "message": null
+      },
+      {
+        "id": "cursor/composer-2.5",
+        "status": "ok",
+        "latency_ms": 550,
+        "http_status": 200,
+        "error_code": null,
+        "message": null
+      },
+      {
+        "id": "cursor/auto",
+        "status": "not_found",
+        "latency_ms": 700,
+        "http_status": 404,
+        "error_code": "model_not_found",
+        "message": "model not found"
+      }
+    ]
+  },
+  "default_fallback": {
+    "probed_at": "2026-10-26T07:33:20Z",
+    "ttl_s": 600,
+    "provider": "omniroute",
+    "upstream_reachable": true,
+    "upstream_error": null,
+    "skipped_count": 0,
+    "results": [
+      {
+        "id": "agentrouter/deepseek-v4-flash",
+        "status": "quota_or_rate_limited",
+        "latency_ms": 400,
+        "http_status": 402,
+        "error_code": "quota",
+        "message": "Budget pool quota exhausted"
+      },
+      {
+        "id": "cursor/composer-2.5",
+        "status": "ok",
+        "latency_ms": 550,
+        "http_status": 200,
+        "error_code": null,
+        "message": null
+      },
+      {
+        "id": "cursor/auto",
+        "status": "not_found",
+        "latency_ms": 700,
+        "http_status": 404,
+        "error_code": "model_not_found",
+        "message": "model not found"
+      }
+    ]
+  },
+  "upstream_down": {
+    "probed_at": "2026-10-26T07:33:20Z",
+    "ttl_s": 600,
+    "provider": "omniroute",
+    "upstream_reachable": false,
+    "upstream_error": {
+      "code": "connect_error",
+      "message": "Upstream unreachable (connection failed)"
+    },
+    "skipped_count": 0,
+    "results": []
+  }
+}

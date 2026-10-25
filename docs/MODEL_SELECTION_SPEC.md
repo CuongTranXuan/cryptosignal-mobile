@@ -135,6 +135,37 @@ Two layers; both required.
    - the default model is always kept unless it is itself in the negative cache (then `default_model` falls back to the first remaining entry).
 With the filter the list is small (<20), so a plain dropdown is enough; keep `?q=` as optional.
 
+#### 3.1.2 Live probe (only models that answer now)
+`/models` lists what a gateway knows, not what its accounts can serve. The backend (`model_probe.py`) sends each candidate one tiny chat completion and lists only `ok` ones. Contract (additive; every existing field above is kept):
+```ts
+// GET /v1/copilot/models[?refresh=1]
+type ModelsResponse = {
+  models: (ExistingModel & { latency_ms: number; status: "ok" })[]; // healthy only
+  default_model: string | null;      // effective default (healthy) or null
+  requested_default: string;         // LLM_MODEL
+  default_fallback: boolean;         // true when default_model !== requested_default
+  fetched_at: number | null;         // unix s of the /models fetch used
+  probed_at: string | null;          // ISO-8601 UTC
+  ttl_s: number;
+  stale: boolean;                    // cached report past TTL; refresh running
+  probe_in_progress: boolean;
+  upstream_reachable: boolean;
+  upstream_error: { code: string; message: string } | null;
+};
+// GET|POST /v1/copilot/models/probe (POST forces; 429 + Retry-After + retry_after_s when too soon)
+type ProbeReport = {
+  probed_at: string | null; ttl_s: number;
+  provider: "omniroute" | "gemini" | "openai_compat";
+  upstream_reachable: boolean; upstream_error: { code: string; message: string } | null;
+  skipped_count: number;             // candidates over COPILOT_MODEL_PROBE_MAX_MODELS
+  results: { id: string;
+    status: "ok"|"auth_error"|"quota_or_rate_limited"|"not_found"|"timeout"|"upstream_error";
+    latency_ms: number | null; http_status: number | null;
+    error_code: string | null; message: string | null }[];
+};
+```
+`upstream_error.code`: `connect_error|timeout|http_error|auth_error|quota_or_rate_limited|network_error|invalid_response|config_missing`. Analyze: absent `model` → `default_model` from the last probe; a `model` whose last probe failed → `422 model_unavailable` (`detail` names the probe status). Env vars and behaviour: `apps/copilot/DEPLOY.md` § Model probe endpoints. Fixtures: `apps/copilot/tests/fixtures/wire/models_*.json`.
+
 ### 3.2 `POST /v1/copilot/analyze` (additions, both optional)
 | Field | Type | Rule |
 |---|---|---|

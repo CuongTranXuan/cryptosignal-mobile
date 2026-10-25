@@ -65,11 +65,15 @@ async def test_models_endpoint_and_cache_single_fetch(llm_env, test_app, omnirou
     from cryptosignal_copilot.app import create_app
     from cryptosignal_copilot.sessions_store import get_sessions_store
 
+    from cryptosignal_copilot.model_probe import ModelProbeService
+    from tests.probe_fixtures import all_ok_transport
+
     catalog = ModelsCatalog(fetch_models=counting_fetch)
     app = create_app(
         runner=FakeRunner(),
         models_catalog=catalog,
         sessions_store=get_sessions_store(),
+        model_probe=ModelProbeService(catalog, transport=all_ok_transport()),
     )
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         first = await client.get("/v1/copilot/models")

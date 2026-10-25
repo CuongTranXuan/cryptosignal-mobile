@@ -391,11 +391,13 @@ class ModelsSnapshot:
         return {m.id: m for m in self.models}
 
 
-async def default_fetch_models(cfg: LlmConfig) -> list[dict[str, Any]]:
+async def default_fetch_models(
+    cfg: LlmConfig, *, transport: httpx.AsyncBaseTransport | None = None
+) -> list[dict[str, Any]]:
     url = f"{cfg.base_url}/models"
     headers = {"Authorization": f"Bearer {cfg.api_key}"}
     timeout = load_models_fetch_timeout_s()
-    async with httpx.AsyncClient(timeout=timeout) as client:
+    async with httpx.AsyncClient(timeout=timeout, transport=transport) as client:
         res = await client.get(url, headers=headers)
         res.raise_for_status()
         body = res.json()
@@ -486,16 +488,30 @@ class ModelsCatalog:
             if cached is not None and now < cached.expires_at:
                 return cached
             try:
-                rows = await self._fetch_models(cfg)
-                snap = snapshot_from_rows(cfg, rows, fetched_at=now, ttl_s=ttl_s)
-                self._snapshot = snap
-                self._last_error = False
-                return snap
+                return await self._fetch_and_store(cfg, now=now, ttl_s=ttl_s)
             except Exception:
                 self._last_error = True
                 if self._snapshot is not None:
                     return self._snapshot
                 raise
+
+    async def refresh(self, cfg: LlmConfig) -> ModelsSnapshot:
+        """Force a `/models` fetch; raise on failure instead of serving the stale cache."""
+        async with self._lock:
+            try:
+                return await self._fetch_and_store(
+                    cfg, now=time.time(), ttl_s=load_models_cache_ttl_s()
+                )
+            except Exception:
+                self._last_error = True
+                raise
+
+    async def _fetch_and_store(self, cfg: LlmConfig, *, now: float, ttl_s: float) -> ModelsSnapshot:
+        rows = await self._fetch_models(cfg)
+        snap = snapshot_from_rows(cfg, rows, fetched_at=now, ttl_s=ttl_s)
+        self._snapshot = snap
+        self._last_error = False
+        return snap
 
     async def resolve_model(self, cfg: LlmConfig, model_id: str) -> NormalizedModel:
         snap = await self.get_snapshot(cfg)

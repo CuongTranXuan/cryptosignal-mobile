@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,6 +25,10 @@ from cryptosignal_copilot.feedback_store import FeedbackStore, get_feedback_stor
 from cryptosignal_copilot.intent_prep import normalize_session_intent, resolve_analyze_intent
 from cryptosignal_copilot.logging_setup import configure_logging
 from cryptosignal_copilot.model_catalog import ModelsCatalog, get_models_catalog
+from cryptosignal_copilot.model_probe import (
+    ModelProbeService,
+    ProbeRateLimited,
+)
 from cryptosignal_copilot.provider_errors import error_payload
 from cryptosignal_copilot.rate_limit import SlidingWindowRateLimiter, client_ip
 from cryptosignal_copilot.schema import (
@@ -62,9 +67,24 @@ def create_app(
     models_catalog: ModelsCatalog | None = None,
     sessions_store: SessionsStore | None = None,
     feedback_store: FeedbackStore | None = None,
+    model_probe: ModelProbeService | None = None,
 ) -> FastAPI:
     use_runner: AgentRunner = runner if runner is not None else PydanticAiRunner()
-    app = FastAPI()
+    catalog = models_catalog if models_catalog is not None else get_models_catalog()
+    probe = model_probe if model_probe is not None else ModelProbeService(catalog)
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        # Warm the probe cache in the background; never block startup on the upstream.
+        try:
+            cfg = load_llm_config()
+        except LlmConfigError:
+            cfg = None
+        if cfg is not None and cfg.style == "openai" and probe.settings.enabled:
+            probe.start_background(cfg)
+        yield
+
+    app = FastAPI(lifespan=lifespan)
     cors_origins, cors_credentials = _cors_settings()
     app.add_middleware(
         CORSMiddleware,
@@ -75,7 +95,6 @@ def create_app(
     )
 
     rate_limiter = SlidingWindowRateLimiter()
-    catalog = models_catalog if models_catalog is not None else get_models_catalog()
     store = sessions_store if sessions_store is not None else get_sessions_store()
     feedback = feedback_store if feedback_store is not None else get_feedback_store()
 
@@ -93,34 +112,92 @@ def create_app(
             return JSONResponse({"error": "LLM config missing"}, status_code=503)
         return health_payload(cfg)
 
-    @app.get("/v1/copilot/models")
-    async def list_models(q: str | None = Query(default=None)):
-        try:
-            cfg = load_llm_config()
-        except LlmConfigError:
-            return JSONResponse(
-                error_payload("models_unavailable", "Cấu hình LLM chưa sẵn sàng"),
-                status_code=503,
-            )
+    def _probe_applies(style: str) -> bool:
+        return style == "openai" and probe.settings.enabled
+
+    def _rate_limited_response(exc: ProbeRateLimited) -> JSONResponse:
+        body = error_payload("probe_rate_limited", "Vui lòng đợi trước khi kiểm tra lại mô hình")
+        body["retry_after_s"] = exc.retry_after_s
+        return JSONResponse(body, status_code=429, headers={"Retry-After": str(exc.retry_after_s)})
+
+    async def _unprobed_models_body(cfg, q: str | None):
+        """Probe disabled (env or non-OpenAI style): previous catalog behaviour + new fields."""
         try:
             snapshot = await catalog.get_snapshot(cfg)
         except Exception:
             stale = catalog.stale_snapshot()
-            if stale is not None:
-                snapshot = stale
-            else:
+            if stale is None:
                 return JSONResponse(
                     error_payload("models_unavailable", "Không lấy được danh sách mô hình"),
                     status_code=503,
                 )
+            snapshot = stale
         models = list(snapshot.models)
-        if q:
+        if q and q.strip():
             needle = q.strip().lower()
-            if needle:
-                models = [m for m in models if needle in m.id.lower() or needle in m.label.lower()]
+            models = [m for m in models if needle in m.id.lower() or needle in m.label.lower()]
         body = snapshot.to_api_dict()
-        body["models"] = [m.to_api_dict() for m in models]
+        body["models"] = [
+            {**m.to_api_dict(), "latency_ms": None, "status": "unverified"} for m in models
+        ]
+        body.update(
+            {
+                "requested_default": snapshot.default_model,
+                "default_fallback": False,
+                "probed_at": None,
+                "ttl_s": int(probe.settings.ttl_s),
+                "stale": False,
+                "probe_in_progress": False,
+                "upstream_reachable": True,
+                "upstream_error": None,
+            }
+        )
         return body
+
+    @app.get("/v1/copilot/models")
+    async def list_models(
+        q: str | None = Query(default=None),
+        refresh: bool = Query(default=False),
+    ):
+        try:
+            cfg = load_llm_config()
+        except LlmConfigError as exc:
+            return probe.models_body(probe.config_missing_report(str(exc)), q=q)
+        if not _probe_applies(cfg.style):
+            return await _unprobed_models_body(cfg, q)
+        try:
+            report = await probe.get_report(cfg, force=refresh)
+        except ProbeRateLimited as exc:
+            return _rate_limited_response(exc)
+        return probe.models_body(report, q=q)
+
+    async def _probe_report(force: bool):
+        try:
+            cfg = load_llm_config()
+        except LlmConfigError as exc:
+            return probe.report_body(probe.config_missing_report(str(exc)))
+        if not _probe_applies(cfg.style):
+            return JSONResponse(
+                error_payload(
+                    "probe_disabled",
+                    "Kiểm tra mô hình đang tắt",
+                    "COPILOT_MODEL_PROBE_ENABLED=false or LLM_API_STYLE is not openai",
+                ),
+                status_code=409,
+            )
+        try:
+            report = await probe.get_report(cfg, force=force)
+        except ProbeRateLimited as exc:
+            return _rate_limited_response(exc)
+        return probe.report_body(report)
+
+    @app.get("/v1/copilot/models/probe")
+    async def get_models_probe():
+        return await _probe_report(force=False)
+
+    @app.post("/v1/copilot/models/probe")
+    async def post_models_probe():
+        return await _probe_report(force=True)
 
     @app.get("/v1/copilot/styles")
     async def list_styles():
@@ -239,7 +316,7 @@ def create_app(
             )
 
         try:
-            await prepare_analyze(catalog, cfg, analyze_req)
+            await prepare_analyze(catalog, cfg, analyze_req, model_health=probe.model_health())
         except AnalyzePrepError as exc:
             return JSONResponse(
                 error_payload(exc.code, exc.message, exc.detail),
@@ -272,7 +349,9 @@ def create_app(
                         latest_request["value"] = None
 
                     try:
-                        run_plan = await prepare_analyze(catalog, cfg, current)
+                        run_plan = await prepare_analyze(
+                            catalog, cfg, current, model_health=probe.model_health()
+                        )
                     except AnalyzePrepError as exc:
                         yield sse("error", error_payload(exc.code, exc.message, exc.detail))
                         yield sse("done", {})

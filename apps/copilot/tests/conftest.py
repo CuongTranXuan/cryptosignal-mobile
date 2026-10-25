@@ -97,6 +97,12 @@ def test_app(test_models_catalog, tmp_path, monkeypatch):
     catalog.clear_cache()
 
     def _factory(runner):
-        return create_app(runner=runner, models_catalog=catalog, sessions_store=store)
+        from cryptosignal_copilot.model_probe import ModelProbeService
+        from tests.probe_fixtures import all_ok_transport
+
+        probe = ModelProbeService(catalog, transport=all_ok_transport())
+        return create_app(
+            runner=runner, models_catalog=catalog, sessions_store=store, model_probe=probe
+        )
 
     return _factory
