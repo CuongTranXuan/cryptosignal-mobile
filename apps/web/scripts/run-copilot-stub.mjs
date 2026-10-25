@@ -73,9 +73,8 @@ class FakeRunner:
             intents=intents,
         )
 
-        meta["intent_budget_fallback"] = True
-        meta["preview_shape_budget"] = 6
-        yield "meta", meta
+        yield "text", {"delta": "Mô hình đã xong. Đang dựng lớp phủ…"}
+        yield "text", {"delta": "\\n\\nStub server summary (C.11).\\n"}
 
         dropped_for_skip = [("", "cap") for _ in range(metrics.cap_dropped)]
         for reason, count in metrics.gate_reasons.items():
@@ -92,6 +91,17 @@ class FakeRunner:
             wire_shapes,
             intent_check,
         )
+        if wire_shapes:
+            names = ", ".join(str(s.get("name", "?")) for s in wire_shapes[:3])
+            more = f" (+{len(wire_shapes) - 3} nữa)" if len(wire_shapes) > 3 else ""
+            yield "text", {
+                "delta": f"\\n\\nLớp phủ sẵn sàng: {len(wire_shapes)} — {names}{more}.",
+            }
+
+        final_meta = dict(meta)
+        final_meta["intent_budget_fallback"] = True
+        final_meta["preview_shape_budget"] = 6
+        yield "meta", final_meta
         yield "done", {}
 
 async def _fetch_models(_cfg):

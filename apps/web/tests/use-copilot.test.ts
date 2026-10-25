@@ -10,6 +10,7 @@ import {
   COPILOT_ERROR_CREDITS_EXHAUSTED,
   COPILOT_ERROR_RATE_LIMITED,
   COPILOT_ERROR_UNAUTHORIZED,
+  COPILOT_SERVER_PICKED_SHAPES,
   HEAD_SHOULDERS_PROMPT,
   TRIANGLES_PROMPT,
 } from "../lib/copilot-strings";
@@ -739,5 +740,97 @@ describe("use-copilot / createCopilotClient", () => {
     expect(
       useAiStore.getState().messages.find((m) => m.role === "agent")?.content,
     ).toContain("Bỏ qua");
+  });
+
+  it("handles C.11 SSE order: text chunks, regime retry, merged meta, single fallback note", async () => {
+    const fetchMock = vi.fn(async () =>
+      streamResponse([
+        sseChunk("text", { delta: "Đang phân tích…\n\n" }),
+        sseChunk("regime", {
+          regime: "range",
+          intent_check: { detected_regime: "range", bias_conflict: false },
+        }),
+        sseChunk("meta", {
+          model: "provider-a/model-alpha",
+          candle_count_requested: 300,
+          candle_count_used: 200,
+          clamped: true,
+        }),
+        sseChunk("regime", {
+          regime: "trend_up",
+          intent_check: { detected_regime: "trend_up", bias_conflict: false },
+        }),
+        sseChunk("text", { delta: "Mô hình đã xong. " }),
+        sseChunk("text", { delta: "Server summary.\n" }),
+        sseChunk("shapes", { shapes: [validShape("c11")], skipped: [], skipped_count: 0 }),
+        sseChunk("analysis", {
+          bias: "bullish",
+          evidence_for: ["breakout"],
+          evidence_against: [],
+          summary_direction: "bullish",
+        }),
+        sseChunk("text", { delta: "\n\nLớp phủ overlay." }),
+        sseChunk("meta", {
+          model: "provider-a/model-alpha",
+          candle_count_requested: 300,
+          candle_count_used: 200,
+          clamped: true,
+          intent_budget_fallback: true,
+        }),
+        sseChunk("done", {}),
+      ]),
+    );
+    const client = createCopilotClient({
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      getClosedTimes: () => new Set([c0.time, c1.time, c2.time]),
+    });
+    await client.analyze("hi");
+
+    expect(useCopilotSessionStore.getState().lastDetectedRegime).toBe("trend_up");
+    const meta = useCopilotSessionStore.getState().lastAnalyzeMeta;
+    expect(meta?.candle_count_used).toBe(200);
+    expect(meta?.candle_count_requested).toBe(300);
+    expect(meta?.intent_budget_fallback).toBe(true);
+
+    const content = useAiStore.getState().messages.find((m) => m.role === "agent")?.content ?? "";
+    expect(content).toContain("Đang phân tích…");
+    expect(content).toContain("Mô hình đã xong.");
+    expect(content).toContain("Server summary.");
+    expect(content).toContain("Lớp phủ overlay.");
+    const fallbackMatches = content.match(new RegExp(COPILOT_SERVER_PICKED_SHAPES, "g"));
+    expect(fallbackMatches?.length ?? 0).toBe(1);
+  });
+
+  it("does not append fallback chat note until done when meta arrives early without flags", async () => {
+    const fetchMock = vi.fn(async () =>
+      streamResponse([
+        sseChunk("meta", {
+          model: "provider-a/model-alpha",
+          candle_count_requested: 300,
+          candle_count_used: 200,
+          clamped: false,
+          intent_budget_fallback: true,
+        }),
+        sseChunk("text", { delta: "partial" }),
+        sseChunk("meta", {
+          model: "provider-a/model-alpha",
+          candle_count_requested: 300,
+          candle_count_used: 200,
+          clamped: false,
+          validator_fallback: true,
+        }),
+        sseChunk("done", {}),
+      ]),
+    );
+    const client = createCopilotClient({
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      getClosedTimes: () => new Set([c0.time, c1.time, c2.time]),
+    });
+    await client.analyze("hi");
+    const content = useAiStore.getState().messages.find((m) => m.role === "agent")?.content ?? "";
+    const fallbackMatches = content.match(new RegExp(COPILOT_SERVER_PICKED_SHAPES, "g"));
+    expect(fallbackMatches?.length ?? 0).toBe(1);
+    expect(useCopilotSessionStore.getState().lastAnalyzeMeta?.validator_fallback).toBe(true);
+    expect(useCopilotSessionStore.getState().lastAnalyzeMeta?.intent_budget_fallback).toBe(true);
   });
 });

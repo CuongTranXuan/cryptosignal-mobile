@@ -15,6 +15,7 @@ import {
   RegimeSseEventSchema,
   type AnalyzeMetaEvent,
 } from "./copilot-schema";
+import { mergeAnalyzeMeta } from "./sse-analyze-meta";
 import { modelIdForAnalyzeRequest, modelLabelForSession } from "./copilot-model-defaults";
 import { findCachedModel, getDefaultModelId, getModelsList } from "./copilot-models-cache";
 import { reasoningEffortForAnalyze } from "./copilot-reasoning";
@@ -177,14 +178,25 @@ function appendMetaFallbackNote(meta: AnalyzeMetaEvent): void {
   useAiStore.getState().appendText(`\n\n${COPILOT_SERVER_PICKED_SHAPES}`);
 }
 
-function mergeIntentCheckIntoLastMeta(intentCheck: AnalyzeMetaEvent["intent_check"]): void {
-  if (!intentCheck) return;
-  const prev = useCopilotSessionStore.getState().lastAnalyzeMeta;
-  if (!prev) return;
-  useCopilotSessionStore.getState().setLastAnalyzeMeta({
-    ...prev,
-    intent_check: intentCheck,
-  });
+function patchLastAgentMessageFromMeta(meta: AnalyzeMetaEvent): void {
+  const messages = useAiStore.getState().messages.slice();
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (msg?.role === "agent") {
+      messages[i] = {
+        ...msg,
+        modelId: meta.model,
+        modelLabel: modelLabelForSession(getModelsList(), meta.model, getDefaultModelId()),
+        analyzeMeta: {
+          candle_count_used: meta.candle_count_used,
+          clamped: meta.clamped,
+          intent_check: meta.intent_check,
+        },
+      };
+      useAiStore.setState({ messages });
+      break;
+    }
+  }
 }
 
 function noteDroppedMarkers(ids: string[]): void {
@@ -201,6 +213,41 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
   let analyzing = false;
   let unsubReset: (() => void) | null = null;
   let lastResetSignal = useChartStore.getState().shapesResetSignal;
+  let streamMergedMeta: AnalyzeMetaEvent | null = null;
+  let streamNotesFinalized = false;
+
+  const applyStreamMergedMeta = (merged: AnalyzeMetaEvent): void => {
+    streamMergedMeta = merged;
+    useCopilotSessionStore.getState().setLastAnalyzeMeta(merged);
+    patchLastAgentMessageFromMeta(merged);
+  };
+
+  const mergeIntentCheckIntoStreamMeta = (
+    intentCheck: AnalyzeMetaEvent["intent_check"],
+  ): void => {
+    if (!intentCheck) return;
+    const prev = streamMergedMeta ?? useCopilotSessionStore.getState().lastAnalyzeMeta;
+    if (!prev) return;
+    applyStreamMergedMeta(mergeAnalyzeMeta(prev, { ...prev, intent_check: intentCheck }));
+  };
+
+  const finalizeStreamAnalyzeNotes = (): void => {
+    if (streamNotesFinalized) return;
+    streamNotesFinalized = true;
+    if (!streamMergedMeta) return;
+    const activeId = useCopilotSessionStore.getState().activeSessionId;
+    const sessionIntent =
+      activeId != null
+        ? useCopilotSessionStore.getState().sessionCache[activeId]?.intent
+        : null;
+    appendIntentCheckNote(streamMergedMeta, sessionIntent?.bias);
+    appendMetaFallbackNote(streamMergedMeta);
+  };
+
+  const resetStreamMetaAccumulator = (): void => {
+    streamMergedMeta = null;
+    streamNotesFinalized = false;
+  };
 
   const runQueuedIfAny = async () => {
     if (!queuedPrompt) return;
@@ -246,37 +293,9 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
       case "meta": {
         const parsed = AnalyzeMetaEventSchema.safeParse(data);
         if (parsed.success) {
-          useCopilotSessionStore.getState().setLastAnalyzeMeta(parsed.data);
-          const activeId = useCopilotSessionStore.getState().activeSessionId;
-          const sessionIntent =
-            activeId != null
-              ? useCopilotSessionStore.getState().sessionCache[activeId]?.intent
-              : null;
-          appendIntentCheckNote(parsed.data, sessionIntent?.bias);
-          appendMetaFallbackNote(parsed.data);
+          const merged = mergeAnalyzeMeta(streamMergedMeta, parsed.data);
+          applyStreamMergedMeta(merged);
           appendServerSkippedNote(parsed.data);
-          const messages = useAiStore.getState().messages.slice();
-          for (let i = messages.length - 1; i >= 0; i--) {
-            const msg = messages[i];
-            if (msg?.role === "agent") {
-              messages[i] = {
-                ...msg,
-                modelId: parsed.data.model,
-                modelLabel: modelLabelForSession(
-                  getModelsList(),
-                  parsed.data.model,
-                  getDefaultModelId(),
-                ),
-                analyzeMeta: {
-                  candle_count_used: parsed.data.candle_count_used,
-                  clamped: parsed.data.clamped,
-                  intent_check: parsed.data.intent_check,
-                },
-              };
-              useAiStore.setState({ messages });
-              break;
-            }
-          }
         }
         return "ok";
       }
@@ -286,7 +305,7 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
           useCopilotSessionStore.getState().setLastDetectedRegime(parsed.data.regime);
           if (parsed.data.intent_check) {
             useCopilotSessionStore.getState().setStreamingIntentCheck(parsed.data.intent_check);
-            mergeIntentCheckIntoLastMeta(parsed.data.intent_check);
+            mergeIntentCheckIntoStreamMeta(parsed.data.intent_check);
           }
         }
         return "ok";
@@ -297,7 +316,7 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
           useCopilotSessionStore.getState().setLastAnalysisEvent(analysis);
           if (analysis.intent_check) {
             useCopilotSessionStore.getState().setStreamingIntentCheck(analysis.intent_check);
-            mergeIntentCheckIntoLastMeta(analysis.intent_check);
+            mergeIntentCheckIntoStreamMeta(analysis.intent_check);
           }
         }
         return "ok";
@@ -418,6 +437,8 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
         return "error";
       }
       case "done": {
+        finalizeStreamAnalyzeNotes();
+        resetStreamMetaAccumulator();
         if (isSuperseded(data)) {
           useAiStore.getState().finish();
           useCopilotSessionStore.getState().persistActiveSession();
@@ -467,7 +488,11 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
 
     if (useAiStore.getState().inFlight) {
       if (sawError) useAiStore.getState().fail(useAiStore.getState().lastError ?? COPILOT_ERROR);
-      else useAiStore.getState().finish();
+      else {
+        finalizeStreamAnalyzeNotes();
+        useAiStore.getState().finish();
+      }
+      resetStreamMetaAccumulator();
     }
   }
 
@@ -504,6 +529,7 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
     const model = findCachedModel(analyzeModelId ?? sessionState.modelId);
 
     analyzing = true;
+    resetStreamMetaAccumulator();
     useCopilotSessionStore.getState().clearAnalyzeStreamState();
     useAiStore.getState().appendUser(prompt);
     useAiStore.getState().startAgent({
