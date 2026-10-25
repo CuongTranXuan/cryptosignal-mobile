@@ -1,7 +1,11 @@
 {
   "name": "@cryptosignal/web",
   "private": true,
+  "packageManager": "pnpm@10.15.0",
   "type": "module",
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild"]
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
