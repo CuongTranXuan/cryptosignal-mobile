@@ -41,6 +41,7 @@ export function apiSessionToClient(api: CopilotSessionApi): CopilotSessionV1 {
     updated_at: api.updated_at,
     model_id: api.model_id,
     reasoning_effort,
+    intent: api.intent ?? null,
     chart: api.chart,
     messages: api.messages.map((m) => ({
       ...m,
@@ -55,6 +56,7 @@ export function clientSessionToCreateBody(session: CopilotSessionV1): CreateSess
     title: session.title,
     model_id: session.model_id,
     reasoning_effort: session.reasoning_effort ?? null,
+    intent: session.intent ?? null,
     chart: chartForApi(session.chart),
     messages: messagesForApi(session.messages),
   };

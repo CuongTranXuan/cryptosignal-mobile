@@ -2,13 +2,13 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { CopilotApiClient } from "../../lib/copilot-api";
-import { MOCK_STYLES_RESPONSE } from "../../lib/copilot-api";
 import {
+  displaySessionIntent,
   labelForBias,
   labelForPattern,
   labelForStyle,
+  sanitizeIntentForStyle,
 } from "../../lib/copilot-chart-ai";
-import { getIntentForSession, setIntentForSession } from "../../lib/copilot-intent-cache";
 import type { AnalyzeIntent, ChartBias, ChartStyleId } from "../../lib/copilot-schema";
 import {
   COPILOT_BIAS_LABEL,
@@ -16,7 +16,9 @@ import {
   COPILOT_PATTERN_ANY,
   COPILOT_PATTERN_LABEL,
   COPILOT_STYLE_LABEL,
+  COPILOT_STYLE_NO_PATTERNS,
 } from "../../lib/copilot-strings";
+import { useCopilotSessionStore } from "../../lib/stores/copilot-session-store";
 
 type CopilotIntentControlsProps = {
   api: CopilotApiClient;
@@ -26,56 +28,83 @@ type CopilotIntentControlsProps = {
 
 const BIAS_OPTIONS: (ChartBias | null)[] = [null, "bullish", "bearish", "neutral"];
 
-export function CopilotIntentControls({ api, sessionId, disabled }: CopilotIntentControlsProps) {
-  const [intent, setIntent] = useState<AnalyzeIntent>(() => getIntentForSession(sessionId));
-  const [styles, setStyles] = useState(MOCK_STYLES_RESPONSE.styles);
+const FALLBACK_STYLE_IDS: ChartStyleId[] = ["classic", "smc", "elliott", "wyckoff"];
 
-  useEffect(() => {
-    setIntent(getIntentForSession(sessionId));
-  }, [sessionId]);
+export function CopilotIntentControls({ api, sessionId, disabled }: CopilotIntentControlsProps) {
+  const sessionIntent = useCopilotSessionStore((s) =>
+    sessionId ? (s.sessionCache[sessionId]?.intent ?? null) : null,
+  );
+  const setSessionIntent = useCopilotSessionStore((s) => s.setSessionIntent);
+
+  const [styles, setStyles] = useState<{ id: string; patterns: { id: string }[] }[]>([]);
+  const [stylesError, setStylesError] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    void api.fetchStyles().then((res) => {
-      if (!cancelled && res.styles.length > 0) setStyles(res.styles);
-    });
+    void api.fetchStyles().then(
+      (res) => {
+        if (!cancelled) {
+          setStyles(res.styles);
+          setStylesError(false);
+        }
+      },
+      () => {
+        if (!cancelled) setStylesError(true);
+      },
+    );
     return () => {
       cancelled = true;
     };
   }, [api]);
 
+  const display = useMemo(() => displaySessionIntent(sessionIntent), [sessionIntent]);
+
   const styleOptions = useMemo(() => {
-    const ids = styles.map((s) => s.id as ChartStyleId);
-    const unique = [...new Set(ids)];
-    if (unique.length === 0) {
-      return (["classic", "smc", "elliott", "wyckoff"] as ChartStyleId[]).map((id) => ({
-        id,
-        label: labelForStyle(id),
+    if (styles.length > 0) {
+      return styles.map((s) => ({
+        id: s.id as ChartStyleId,
+        label: labelForStyle(s.id),
       }));
     }
-    return unique.map((id) => ({ id, label: labelForStyle(id) }));
+    return FALLBACK_STYLE_IDS.map((id) => ({ id, label: labelForStyle(id) }));
   }, [styles]);
 
   const patternOptions = useMemo(() => {
-    const entry = styles.find((s) => s.id === intent.style);
+    const entry = styles.find((s) => s.id === display.style);
     return entry?.patterns ?? [];
-  }, [styles, intent.style]);
+  }, [styles, display.style]);
+
+  const patternsAvailable = patternOptions.length > 0;
 
   const commitIntent = (next: AnalyzeIntent) => {
-    setIntent(next);
-    if (sessionId) setIntentForSession(sessionId, next);
+    if (!sessionId) return;
+    const patternIds = patternOptions.map((p) => p.id);
+    const sanitized = sanitizeIntentForStyle(next, patternIds);
+    void setSessionIntent(sanitized);
   };
 
   return (
     <div className="flex flex-col gap-2 text-xs">
+      {stylesError && (
+        <p className="text-[#f6465d]" role="status">
+          Không tải được danh sách phong cách từ máy chủ.
+        </p>
+      )}
       <label className="flex flex-col gap-1 text-[#848e9c]">
         <span>{COPILOT_STYLE_LABEL}</span>
         <select
-          disabled={disabled}
-          value={intent.style}
+          disabled={disabled || !sessionId}
+          value={display.style}
           onChange={(e) => {
             const style = e.target.value as ChartStyleId;
-            commitIntent({ style, bias: intent.bias, requested_pattern: undefined });
+            const entry = styles.find((s) => s.id === style);
+            const patternIds = entry?.patterns.map((p) => p.id) ?? [];
+            commitIntent(
+              sanitizeIntentForStyle(
+                { style, bias: display.bias, requested_pattern: display.requested_pattern },
+                patternIds,
+              ),
+            );
           }}
           className="rounded border border-[#2b313a] bg-[#1e2329] px-2 py-1.5 text-[#eaecef] disabled:opacity-40"
         >
@@ -90,12 +119,12 @@ export function CopilotIntentControls({ api, sessionId, disabled }: CopilotInten
       <label className="flex flex-col gap-1 text-[#848e9c]">
         <span>{COPILOT_BIAS_LABEL}</span>
         <select
-          disabled={disabled}
-          value={intent.bias ?? ""}
+          disabled={disabled || !sessionId}
+          value={display.bias ?? ""}
           onChange={(e) => {
             const raw = e.target.value;
             const bias = raw === "" ? undefined : (raw as ChartBias);
-            commitIntent({ ...intent, bias });
+            commitIntent({ ...display, bias });
           }}
           className="rounded border border-[#2b313a] bg-[#1e2329] px-2 py-1.5 text-[#eaecef] disabled:opacity-40"
         >
@@ -107,28 +136,32 @@ export function CopilotIntentControls({ api, sessionId, disabled }: CopilotInten
         </select>
       </label>
 
-      <label className="flex flex-col gap-1 text-[#848e9c]">
-        <span>{COPILOT_PATTERN_LABEL}</span>
-        <select
-          disabled={disabled}
-          value={intent.requested_pattern ?? ""}
-          onChange={(e) => {
-            const raw = e.target.value;
-            commitIntent({
-              ...intent,
-              requested_pattern: raw === "" ? undefined : raw,
-            });
-          }}
-          className="rounded border border-[#2b313a] bg-[#1e2329] px-2 py-1.5 text-[#eaecef] disabled:opacity-40"
-        >
-          <option value="">{COPILOT_PATTERN_ANY}</option>
-          {patternOptions.map((p) => (
-            <option key={p.id} value={p.id}>
-              {labelForPattern(p.id)}
-            </option>
-          ))}
-        </select>
-      </label>
+      {patternsAvailable ? (
+        <label className="flex flex-col gap-1 text-[#848e9c]">
+          <span>{COPILOT_PATTERN_LABEL}</span>
+          <select
+            disabled={disabled || !sessionId}
+            value={display.requested_pattern ?? ""}
+            onChange={(e) => {
+              const raw = e.target.value;
+              commitIntent({
+                ...display,
+                requested_pattern: raw === "" ? undefined : raw,
+              });
+            }}
+            className="rounded border border-[#2b313a] bg-[#1e2329] px-2 py-1.5 text-[#eaecef] disabled:opacity-40"
+          >
+            <option value="">{COPILOT_PATTERN_ANY}</option>
+            {patternOptions.map((p) => (
+              <option key={p.id} value={p.id}>
+                {labelForPattern(p.id)}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : (
+        <p className="text-[#848e9c]" role="status">{COPILOT_STYLE_NO_PATTERNS}</p>
+      )}
     </div>
   );
 }

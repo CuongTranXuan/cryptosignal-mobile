@@ -31,6 +31,10 @@ export function mapCopilotErrorCode(code: string, messageVi: string): string {
       return COPILOT_ERROR_MODELS_UNAVAILABLE;
     case "invalid_reasoning_effort":
       return COPILOT_ERROR_INVALID_REASONING;
+    case "invalid_intent_style":
+    case "invalid_intent_pattern":
+    case "invalid_intent":
+      return messageVi.trim() ? messageVi : COPILOT_ERROR;
     case "provider_error":
       return messageVi.trim() ? mapCopilotSseError(messageVi) : COPILOT_ERROR;
     default:

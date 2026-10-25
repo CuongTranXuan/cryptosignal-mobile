@@ -84,6 +84,8 @@ export const SkippedEntrySchema = z.object({
 
 export type SkippedEntry = z.infer<typeof SkippedEntrySchema>;
 
+export const IntentSourceSchema = z.enum(["rules", "llm"]);
+
 export const AnalyzeMetaEventSchema = z.object({
   model: z.string(),
   candle_count_requested: z.number(),
@@ -92,7 +94,12 @@ export const AnalyzeMetaEventSchema = z.object({
   max_tokens: z.number().optional(),
   reasoning_effort: z.string().nullable().optional(),
   retried: z.boolean().optional(),
+  intent: AnalyzeIntentSchema.optional(),
   intent_check: IntentCheckSchema.optional(),
+  intent_source: IntentSourceSchema.optional(),
+  feature_sheet: z.record(z.unknown()).optional(),
+  candidates: z.array(z.unknown()).optional(),
+  prompt_candle_reduction_pct: z.number().optional(),
   skipped: z.array(SkippedEntrySchema).optional(),
   skipped_count: z.number().int().nonnegative().optional(),
 });
@@ -124,7 +131,7 @@ export const FeedbackRequestSchema = z.object({
   action: FeedbackActionSchema,
   before: z.unknown().optional(),
   after: z.unknown().optional(),
-  client_ts: z.number().int(),
+  client_ts: z.number().optional(),
 });
 
 export type FeedbackRequest = z.infer<typeof FeedbackRequestSchema>;
@@ -174,6 +181,7 @@ export const CopilotSessionSchema = z.object({
   updated_at: z.number(),
   model_id: z.string(),
   reasoning_effort: z.string().nullable().optional(),
+  intent: AnalyzeIntentSchema.nullable().optional(),
   chart: SessionChartSchema,
   messages: z.array(SessionMessageSchema),
 });
@@ -188,6 +196,7 @@ export const SessionSummarySchema = z.object({
   updated_at: z.number(),
   model_id: z.string(),
   reasoning_effort: z.string().nullable().optional(),
+  intent: AnalyzeIntentSchema.nullable().optional(),
   symbol: z.string(),
   interval: z.string(),
   candle_count: z.number(),
@@ -208,6 +217,7 @@ export const CopilotSessionApiSchema = z.object({
   updated_at: z.number(),
   model_id: z.string(),
   reasoning_effort: z.string().nullable().optional(),
+  intent: AnalyzeIntentSchema.nullable().optional(),
   chart: SessionChartSchema,
   messages: z.array(SessionMessageSchema),
 });
@@ -218,6 +228,7 @@ export const CreateSessionRequestSchema = z.object({
   title: z.string(),
   model_id: z.string(),
   reasoning_effort: z.string().nullable().optional(),
+  intent: AnalyzeIntentSchema.nullable().optional(),
   chart: SessionChartSchema,
   messages: z.array(SessionMessageSchema).optional(),
 });
@@ -228,6 +239,7 @@ export const UpdateSessionRequestSchema = z.object({
   title: z.string().optional(),
   model_id: z.string().optional(),
   reasoning_effort: z.string().nullable().optional(),
+  intent: AnalyzeIntentSchema.nullable().optional(),
   chart: SessionChartSchema.optional(),
   messages: z.array(SessionMessageSchema).optional(),
 });

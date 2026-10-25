@@ -4,9 +4,7 @@ import {
   formatBiasConflictNotice,
   formatSkippedBreakdown,
   parseSkippedFromPayload,
-  serializeAnalyzeIntent,
 } from "./copilot-chart-ai";
-import { getIntentForSession } from "./copilot-intent-cache";
 import { AnalyzeMetaEventSchema } from "./copilot-schema";
 import { modelIdForAnalyzeRequest, modelLabelForSession } from "./copilot-model-defaults";
 import { findCachedModel, getDefaultModelId, getModelsList } from "./copilot-models-cache";
@@ -474,8 +472,9 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
     if (reasoningEffort) {
       body.reasoning_effort = reasoningEffort;
     }
-    const sessionId = sessionState.activeSessionId;
-    body.intent = serializeAnalyzeIntent(getIntentForSession(sessionId));
+    if (sessionState.activeSessionId) {
+      body.session_id = sessionState.activeSessionId;
+    }
 
     try {
       const res = await fetchImpl(`${baseUrl}/v1/copilot/analyze`, {

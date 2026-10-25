@@ -16,6 +16,7 @@ export const COPILOT_BIAS_LABEL = "Xu hướng (tùy chọn)";
 export const COPILOT_BIAS_NONE = "Không chọn";
 export const COPILOT_PATTERN_LABEL = "Mẫu yêu cầu (tùy chọn)";
 export const COPILOT_PATTERN_ANY = "Bất kỳ";
+export const COPILOT_STYLE_NO_PATTERNS = "Chưa có mẫu hình cho phong cách này";
 
 export const COPILOT_GUARDRAIL_REGIME = "Chế độ";
 export const COPILOT_GUARDRAIL_CONFIDENCE = "Độ tin cậy guardrail";

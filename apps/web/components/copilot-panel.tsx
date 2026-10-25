@@ -23,7 +23,6 @@ import {
   TRIANGLES_QUICK_INTENT,
   copilotRoleLabel,
 } from "../lib/copilot-strings";
-import { setIntentForSession } from "../lib/copilot-intent-cache";
 import { isDrawDisabled, isSendDisabled } from "../lib/terminal-controls";
 import { type CopilotClient } from "../lib/use-copilot";
 import { useAiStore } from "../lib/stores/ai-store";
@@ -68,6 +67,7 @@ export function CopilotPanel({ client, api }: CopilotPanelProps) {
   const reasoningEffort = useCopilotSessionStore((s) => s.reasoningEffort);
   const setReasoningEffort = useCopilotSessionStore((s) => s.setReasoningEffort);
   const sessionsError = useCopilotSessionStore((s) => s.sessionsError);
+  const setSessionIntent = useCopilotSessionStore((s) => s.setSessionIntent);
 
   const connection = useChartStore((s) => s.connection);
   const shapes = useShapeStore((s) => s.shapes);
@@ -92,8 +92,7 @@ export function CopilotPanel({ client, api }: CopilotPanelProps) {
   };
 
   const sendWithIntent = (text: string, intent: typeof TRIANGLES_QUICK_INTENT) => {
-    if (activeSessionId) setIntentForSession(activeSessionId, intent);
-    send(text);
+    void setSessionIntent(intent).then(() => send(text));
   };
 
   const onSubmit = (e: FormEvent) => {

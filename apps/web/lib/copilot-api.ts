@@ -1,4 +1,3 @@
-import { fallbackStylesCatalog } from "./copilot-chart-ai";
 import {
   CopilotSessionApiSchema,
   CreateSessionRequestSchema,
@@ -122,7 +121,40 @@ export const MOCK_MODELS_RESPONSE: ModelsListResponse = {
   ],
 };
 
-export const MOCK_STYLES_RESPONSE: StylesListResponse = fallbackStylesCatalog();
+/** Mirrors backend `list_styles_payload()` (elliott/wyckoff have no detectors yet). */
+export const MOCK_STYLES_RESPONSE: StylesListResponse = {
+  styles: [
+    {
+      id: "classic",
+      patterns: [
+        { id: "ascending_triangle" },
+        { id: "descending_triangle" },
+        { id: "symmetrical_triangle" },
+        { id: "head_and_shoulders" },
+        { id: "inverse_head_and_shoulders" },
+        { id: "double_top" },
+        { id: "double_bottom" },
+        { id: "channel_up" },
+        { id: "channel_down" },
+        { id: "trendline" },
+        { id: "support_resistance" },
+        { id: "fib_retracement" },
+      ],
+    },
+    {
+      id: "smc",
+      patterns: [
+        { id: "bos" },
+        { id: "choch" },
+        { id: "fvg" },
+        { id: "order_block" },
+        { id: "liquidity" },
+      ],
+    },
+    { id: "elliott", patterns: [] },
+    { id: "wyckoff", patterns: [] },
+  ],
+};
 
 let mockFeedbackSeq = 0;
 
@@ -157,6 +189,7 @@ function mockSessionSummaries(): SessionSummary[] {
       updated_at: s.updated_at,
       model_id: s.model_id,
       reasoning_effort: s.reasoning_effort ?? null,
+      intent: s.intent ?? null,
       symbol: s.chart.symbol,
       interval: s.chart.interval,
       candle_count: s.chart.candle_count,
@@ -182,6 +215,7 @@ function mockCreateSession(body: CreateSessionRequest): CopilotSessionApi {
     updated_at: now,
     model_id: parsed.model_id,
     reasoning_effort: parsed.reasoning_effort ?? null,
+    intent: parsed.intent ?? null,
     chart: parsed.chart,
     messages: parsed.messages ?? [],
   };
@@ -202,6 +236,7 @@ function mockUpdateSession(sessionId: string, body: UpdateSessionRequest): Copil
     model_id: parsed.model_id ?? existing.model_id,
     reasoning_effort:
       parsed.reasoning_effort !== undefined ? parsed.reasoning_effort : existing.reasoning_effort,
+    intent: parsed.intent !== undefined ? parsed.intent : existing.intent,
     chart: parsed.chart ?? existing.chart,
     messages: parsed.messages ?? existing.messages,
     updated_at: Math.floor(Date.now() / 1000),
@@ -332,9 +367,6 @@ export function createCopilotApi(opts: CreateCopilotApiOptions = {}): CopilotApi
 
   const liveStyles = async (): Promise<StylesListResponse> => {
     const res = await fetchImpl(`${baseUrl}/v1/copilot/styles`);
-    if (res.status === 404 && fallbackMock) {
-      return MOCK_STYLES_RESPONSE;
-    }
     if (!res.ok) {
       const body = await readErrorBody(res);
       throw new CopilotApiError(res.status, body, "styles_fetch_failed");

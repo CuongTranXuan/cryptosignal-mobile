@@ -21,7 +21,10 @@ import {
   COPILOT_SESSIONS_OFFLINE,
   COPILOT_SESSIONS_SAVE_FAILED,
 } from "../copilot-strings";
-import type { AnalyzeMetaEvent, CopilotSessionV1, SessionSummary } from "../copilot-schema";
+import { CopilotApiError } from "../copilot-api";
+import { mapCopilotHttpError } from "../copilot-errors";
+import { migrateLegacyChartIntentLocalStorage } from "../copilot-intent-migration";
+import type { AnalyzeIntent, AnalyzeMetaEvent, CopilotSessionV1, SessionSummary } from "../copilot-schema";
 import {
   agentMessageModelLabel,
   apiSessionToClient,
@@ -110,6 +113,7 @@ type CopilotSessionState = {
   persistActiveSession: () => void;
   flushPersist: () => Promise<void>;
   recordAnalysisWindow: (from: number, to: number) => void;
+  setSessionIntent: (intent: AnalyzeIntent | null) => Promise<void>;
 };
 
 function applySessionToUi(session: CopilotSessionV1): void {
@@ -162,6 +166,7 @@ function buildActiveSessionSnapshot(get: () => CopilotSessionState): CopilotSess
       resolveSessionModelId(getModelsList(), modelId ?? base.model_id, getDefaultModelId()) ??
       base.model_id,
     reasoning_effort: reasoningEffort,
+    intent: cached?.intent ?? base.intent ?? null,
     chart: {
       symbol: chartStore.symbol,
       interval: chartStore.interval,
@@ -221,6 +226,11 @@ export const useCopilotSessionStore = create<CopilotSessionState>((set, get) => 
       serverSummaries = listed.sessions;
       listRows = serverSummaries.map(summaryFromApi);
       set({ sessions: listRows, listFetchedAt: Date.now(), sessionsError: null });
+      try {
+        await migrateLegacyChartIntentLocalStorage(api);
+      } catch {
+        // Non-fatal; legacy entries remain for a later bootstrap.
+      }
     } catch {
       listError = COPILOT_SESSIONS_OFFLINE;
       set({ sessionsError: listError });
@@ -623,5 +633,40 @@ export const useCopilotSessionStore = create<CopilotSessionState>((set, get) => 
   recordAnalysisWindow: (from, to) => {
     set({ chartFrom: from, chartTo: to });
     get().persistActiveSession();
+  },
+
+  setSessionIntent: async (intent) => {
+    const api = get().api;
+    const id = get().activeSessionId;
+    if (!api || !id) return;
+    const cached = get().sessionCache[id];
+    if (!cached) return;
+    const previous = cached.intent ?? null;
+    const optimistic: CopilotSessionV1 = {
+      ...cached,
+      intent,
+      updated_at: Math.floor(Date.now() / 1000),
+    };
+    set({ sessionCache: { ...get().sessionCache, [id]: optimistic } });
+    try {
+      const updated = await api.updateSession(id, { intent });
+      const client = apiSessionToClient(updated);
+      set({
+        sessionCache: { ...get().sessionCache, [id]: client },
+        sessionsError: null,
+      });
+    } catch (err) {
+      set({
+        sessionCache: {
+          ...get().sessionCache,
+          [id]: { ...cached, intent: previous },
+        },
+      });
+      const message =
+        err instanceof CopilotApiError
+          ? mapCopilotHttpError(err.status, err.body)
+          : COPILOT_SESSIONS_SAVE_FAILED;
+      useAiStore.getState().fail(message);
+    }
   },
 }));

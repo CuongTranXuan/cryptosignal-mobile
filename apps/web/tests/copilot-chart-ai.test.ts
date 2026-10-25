@@ -13,9 +13,11 @@ import {
   labelForStyle,
   normalizeSkippedEntries,
   parseSkippedFromPayload,
+  displaySessionIntent,
+  sanitizeIntentForStyle,
   serializeAnalyzeIntent,
-  fallbackStylesCatalog,
 } from "../lib/copilot-chart-ai";
+import { MOCK_STYLES_RESPONSE } from "../lib/copilot-api";
 
 describe("copilot-chart-ai", () => {
   it("serializes analyze intent with defaults and optional fields", () => {
@@ -112,9 +114,17 @@ describe("copilot-chart-ai", () => {
     expect(formatBiasConflictNotice()).toContain("mâu thuẫn");
   });
 
-  it("exposes styles fallback catalog ids", () => {
-    const catalog = fallbackStylesCatalog();
-    expect(catalog.styles.some((s) => s.id === "smc")).toBe(true);
-    expect(catalog.styles[0]?.patterns.length).toBeGreaterThan(0);
+  it("displays null session intent as classic default and sanitizes patterns per style", () => {
+    expect(displaySessionIntent(null).style).toBe("classic");
+    const sanitized = sanitizeIntentForStyle(
+      { style: "elliott", requested_pattern: "trendline" },
+      [],
+    );
+    expect(sanitized.requested_pattern).toBeUndefined();
+  });
+
+  it("mock styles match backend empty elliott/wyckoff pattern lists", () => {
+    const elliott = MOCK_STYLES_RESPONSE.styles.find((s) => s.id === "elliott");
+    expect(elliott?.patterns).toEqual([]);
   });
 });

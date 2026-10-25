@@ -155,38 +155,24 @@ export function parseSkippedFromPayload(data: Record<string, unknown>): SkippedE
   return normalizeSkippedEntries(entries);
 }
 
-export function fallbackStylesCatalog(): import("./copilot-schema").StylesListResponse {
-  return {
-    styles: [
-      {
-        id: "classic",
-        patterns: [
-          { id: "ascending_triangle" },
-          { id: "descending_triangle" },
-          { id: "symmetrical_triangle" },
-          { id: "head_and_shoulders" },
-          { id: "inverse_head_and_shoulders" },
-          { id: "double_top" },
-          { id: "double_bottom" },
-          { id: "channel_up" },
-          { id: "channel_down" },
-          { id: "trendline" },
-          { id: "support_resistance" },
-          { id: "fib_retracement" },
-        ],
-      },
-      {
-        id: "smc",
-        patterns: [
-          { id: "bos" },
-          { id: "choch" },
-          { id: "fvg" },
-          { id: "order_block" },
-          { id: "liquidity" },
-        ],
-      },
-      { id: "elliott", patterns: [{ id: "trendline" }] },
-      { id: "wyckoff", patterns: [{ id: "support_resistance" }] },
-    ],
-  };
+/** UI display when session/API intent is null (server default is classic). */
+export function displaySessionIntent(
+  intent: import("./copilot-schema").AnalyzeIntent | null | undefined,
+): AnalyzeIntent {
+  if (!intent) return { ...DEFAULT_ANALYZE_INTENT };
+  return { ...DEFAULT_ANALYZE_INTENT, ...intent };
+}
+
+export function sanitizeIntentForStyle(
+  intent: AnalyzeIntent,
+  patternIdsForStyle: string[],
+): AnalyzeIntent {
+  const next = { ...intent };
+  if (
+    next.requested_pattern &&
+    !patternIdsForStyle.includes(next.requested_pattern)
+  ) {
+    delete next.requested_pattern;
+  }
+  return next;
 }

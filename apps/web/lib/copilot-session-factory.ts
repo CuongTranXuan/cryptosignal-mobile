@@ -25,6 +25,7 @@ export function buildEmptyClientSession(
     updated_at: t,
     model_id: modelId,
     reasoning_effort: reasoningEffort,
+    intent: null,
     chart: {
       symbol: "BTCUSDT",
       interval: "1h",
