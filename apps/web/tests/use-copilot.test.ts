@@ -742,6 +742,35 @@ describe("use-copilot / createCopilotClient", () => {
     ).toContain("Bỏ qua");
   });
 
+  it("does not append Đã vẽ when shapes are empty and server summary covers no picks", async () => {
+    const fetchMock = vi.fn(async () =>
+      streamResponse([
+        sseChunk("text", { delta: "Đang phân tích…\n\n" }),
+        sseChunk("text", { delta: "Mô hình đã xong. Đang dựng lớp phủ…" }),
+        sseChunk("text", {
+          delta: "\n\nKhông có mô hình hợp lệ trên cửa sổ này.\n",
+        }),
+        sseChunk("shapes", { shapes: [], skipped: [], skipped_count: 0 }),
+        sseChunk("analysis", {
+          bias: "neutral",
+          no_valid_pattern: true,
+          evidence_for: [],
+          evidence_against: [],
+        }),
+        sseChunk("done", {}),
+      ]),
+    );
+    const client = createCopilotClient({
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      getClosedTimes: () => new Set([c0.time, c1.time, c2.time]),
+    });
+    await client.analyze("hi");
+    const content = useAiStore.getState().messages.find((m) => m.role === "agent")?.content ?? "";
+    expect(content).toContain("Không có mô hình hợp lệ");
+    expect(content).not.toMatch(/Đã vẽ\s*0/);
+    expect(content).not.toContain("Đã vẽ 0 hình");
+  });
+
   it("handles C.11 SSE order: text chunks, regime retry, merged meta, single fallback note", async () => {
     const fetchMock = vi.fn(async () =>
       streamResponse([

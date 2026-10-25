@@ -239,6 +239,10 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
   const flushPendingDrewShapesNotice = (): void => {
     if (streamSawServerOverlayText || !pendingDrewShapesNotice) return;
     const { count, lines } = pendingDrewShapesNotice;
+    if (count <= 0 || lines.length === 0) {
+      pendingDrewShapesNotice = null;
+      return;
+    }
     pendingDrewShapesNotice = null;
     useAiStore.getState().appendText(copilotDrewShapes(count, lines));
   };

@@ -75,9 +75,7 @@
       {
         "bias": "bullish",
         "evidence_for": ["Breakout"],
-        "evidence_against": [
-          "Thiên kiến người dùng không khớp chế độ detector; lớp phủ theo chế độ detector."
-        ],
+        "evidence_against": [],
         "summary_direction": "neutral"
       }
     ],

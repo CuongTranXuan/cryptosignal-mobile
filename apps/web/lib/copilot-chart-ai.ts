@@ -117,6 +117,24 @@ export function parseAnalysisSseEvent(data: Record<string, unknown>): AnalysisSs
   return null;
 }
 
+const BIAS_CONFLICT_EVIDENCE_RE =
+  /thiên kiến|user bias conflict|bias conflict|không khớp chế độ detector/i;
+
+/** Drop bias-conflict copy from analysis card; banner + server summary own that signal (C.12). */
+export function filterStructuralEvidenceAgainst(
+  analysis: Pick<AnalysisSseEvent, "evidence_against" | "intent_check">,
+): string[] {
+  const message = analysis.intent_check?.message?.trim();
+  return (analysis.evidence_against ?? []).filter((line) => {
+    if (!line) return false;
+    if (message && line.includes(message)) return false;
+    if (analysis.intent_check?.bias_conflict && BIAS_CONFLICT_EVIDENCE_RE.test(line)) {
+      return false;
+    }
+    return true;
+  });
+}
+
 export function isAnalysisSseEmpty(analysis: Partial<AnalysisSseEvent>): boolean {
   if (analysis.no_valid_pattern) return false;
   if (analysis.summary_direction != null) return false;
@@ -149,7 +167,7 @@ export function formatAnalysisSummaryVi(analysis: AnalysisSseEvent): string | nu
   if (forLines.length > 0) {
     lines.push(`Bằng chứng thuận: ${forLines.join("; ")}`);
   }
-  const againstLines = analysis.evidence_against ?? [];
+  const againstLines = filterStructuralEvidenceAgainst(analysis);
   if (againstLines.length > 0) {
     lines.push(`Bằng chứng ngược: ${againstLines.join("; ")}`);
   }

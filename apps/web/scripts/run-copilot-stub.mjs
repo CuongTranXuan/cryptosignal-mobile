@@ -37,6 +37,48 @@ class FakeRunner:
         style = (request.intent.style if request.intent else "classic") or "classic"
         intent_check = (plan.meta or {}).get("intent_check") or {}
         meta = dict(plan.meta or {})
+        prompt = (request.prompt or "").strip()
+
+        if prompt == "e2e empty shapes only":
+            yield "text", {
+                "delta": (
+                    f"Đang phân tích {request.symbol} {request.interval} "
+                    f"({len(request.closedCandles)} nến đã đóng)…\\n\\n"
+                ),
+            }
+            if catalog is not None:
+                yield "regime", build_regime_event(
+                    catalog,
+                    intent_check,
+                    htf=meta.get("htf"),
+                )
+            yield "text", {"delta": "Mô hình đã xong. Đang dựng lớp phủ…"}
+            yield "text", {
+                "delta": (
+                    "\\n\\nKhông có mô hình hợp lệ trên cửa sổ này.\\n\\n"
+                    "Đây không phải tín hiệu vào lệnh; chỉ mô tả geometry trên nến đã đóng."
+                ),
+            }
+            yield "shapes", {"shapes": [], "skipped": [], "skipped_count": 0}
+            if catalog is not None:
+                yield "analysis", build_analysis_event(
+                    catalog,
+                    [],
+                    intent_check,
+                    symbol=request.symbol,
+                )
+            else:
+                yield "analysis", {
+                    "bias": "neutral",
+                    "no_valid_pattern": True,
+                    "evidence_for": [],
+                    "evidence_against": [],
+                    "invalidation": None,
+                    "confidence": None,
+                    "intent_check": intent_check,
+                }
+            yield "done", {}
+            return
 
         yield "text", {
             "delta": f"Stub LLM ({len(request.closedCandles)} nến) — chọn nhiều mẫu để kiểm tra giới hạn 6 hình…\\n\\n",

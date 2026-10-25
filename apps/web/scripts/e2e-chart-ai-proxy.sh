@@ -5,13 +5,15 @@ BASE="${BASE_URL:-http://127.0.0.1:3000/v1/copilot}"
 OUT="${1:-/opt/cursor/artifacts/e2e-chart-ai-results.txt}"
 SSE_CAPTURE="${E2E_SSE_CAPTURE:-/tmp/chart-ai-analyze.sse}"
 SSE_BIAS="${E2E_SSE_BIAS:-/tmp/chart-ai-bias.sse}"
+SSE_EMPTY="${E2E_SSE_EMPTY:-/tmp/chart-ai-empty.sse}"
 FIXTURE="${E2E_FIXTURE:-$(cd "$(dirname "$0")/.." && pwd)/tests/fixtures/e2e/btcusdt_1h_300.json}"
 mkdir -p "$(dirname "$OUT")"
 WEB_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 REPO_ROOT="$(cd "$WEB_DIR/../.." && pwd)"
 TMP_ANALYZE="$(mktemp)"
 TMP_BIAS="$(mktemp)"
-trap 'rm -f "$TMP_ANALYZE" "$TMP_BIAS"' EXIT
+TMP_EMPTY="$(mktemp)"
+trap 'rm -f "$TMP_ANALYZE" "$TMP_BIAS" "$TMP_EMPTY"' EXIT
 
 pass() { echo "PASS: $1"; }
 fail() { echo "FAIL: $1"; exit 1; }
@@ -119,6 +121,35 @@ assert ic.get('bias_conflict') is True, ic
 assert ic.get('detected_regime') == 'trend_up', ic
 "
   pass "bias conflict from real intent_check (no stub patch)"
+
+  echo ""
+  echo "--- Analyze empty shapes (stub prompt, server no-model summary) ---"
+  EMPTY_SID=$(curl -sf -X POST "$BASE/sessions" -H 'Content-Type: application/json' -d '{"title":"e2e-empty","model_id":"agentrouter/deepseek-v4-flash","chart":{"symbol":"BTCUSDT","interval":"1h","from":1,"to":100,"candle_count":80},"intent":{"style":"classic"}}' | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
+
+  python3 -c "
+import json
+from pathlib import Path
+data=json.loads(Path('$FIXTURE').read_text())
+c=data['candles'][:80]
+body={
+  'symbol': data['symbol'],
+  'interval': data['interval'],
+  'from': c[0]['time'],
+  'to': c[-1]['time'],
+  'closedCandles': c,
+  'existingShapes': [],
+  'prompt': 'e2e empty shapes only',
+  'candle_count': len(c),
+  'session_id': '$EMPTY_SID',
+}
+open('$TMP_EMPTY','w').write(json.dumps(body))
+"
+
+  curl -sf -X POST "$BASE/analyze" -H 'Content-Type: application/json' -H 'Accept: text/event-stream' \
+    -d @"$TMP_EMPTY" > "$SSE_EMPTY"
+
+  python3 "$WEB_DIR/scripts/e2e-chart-ai-validate-empty.py" "$SSE_EMPTY"
+  pass "zero shapes with server Không có mô hình summary"
 
   echo ""
   echo "--- Zod client parse (vitest) ---"

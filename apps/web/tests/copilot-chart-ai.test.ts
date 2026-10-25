@@ -174,6 +174,23 @@ describe("copilot-chart-ai", () => {
     expect(meta.validator_fallback).toBe(true);
   });
 
+  it("omits bias-conflict copy from analysis card evidence_against (C.12)", () => {
+    const conflictMsg =
+      "Thiên kiến người dùng không khớp chế độ detector; lớp phủ theo chế độ detector.";
+    const summary = formatAnalysisSummaryVi({
+      bias: "bullish",
+      evidence_for: ["Breakout"],
+      evidence_against: [conflictMsg, "volume yếu"],
+      intent_check: {
+        detected_regime: "trend_up",
+        bias_conflict: true,
+        message: conflictMsg,
+      },
+    });
+    expect(summary).toContain("volume yếu");
+    expect(summary).not.toContain(conflictMsg);
+  });
+
   it("labels summary_direction for analysis card", () => {
     expect(labelForSummaryDirection("conditional")).toBe("Có điều kiện");
     const summary = formatAnalysisSummaryVi({
