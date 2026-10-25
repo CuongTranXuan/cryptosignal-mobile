@@ -6,6 +6,8 @@ import type { ChartCoordinateApi } from "../lib/chart-api";
 import { useAiStore } from "../lib/stores/ai-store";
 import { useBinanceMarket } from "../lib/use-binance-market";
 import { createCopilotApi } from "../lib/copilot-api";
+import { createCopilotFeedbackClient } from "../lib/copilot-feedback";
+import { setCopilotFeedbackClient } from "../lib/copilot-feedback-host";
 import { useCopilotSessionStore } from "../lib/stores/copilot-session-store";
 import { createCopilotClient, type CopilotClient } from "../lib/use-copilot";
 import { ChartCanvas } from "./chart-canvas";
@@ -44,6 +46,26 @@ export function TerminalShell() {
   useEffect(() => {
     useCopilotSessionStore.getState().setApi(copilotApi);
     void useCopilotSessionStore.getState().bootstrap();
+  }, [copilotApi]);
+
+  useEffect(() => {
+    const feedback = createCopilotFeedbackClient(copilotApi, {
+      getSessionId: () => useCopilotSessionStore.getState().activeSessionId,
+      getMessageId: () => {
+        const messages = useAiStore.getState().messages;
+        for (let i = messages.length - 1; i >= 0; i--) {
+          const m = messages[i];
+          if (m?.role === "agent") return m.id;
+        }
+        return null;
+      },
+      onError: (message) => useAiStore.getState().appendText(`\n\n(${message})`),
+    });
+    setCopilotFeedbackClient(feedback);
+    return () => {
+      feedback.dispose();
+      setCopilotFeedbackClient(null);
+    };
   }, [copilotApi]);
 
   useEffect(() => {

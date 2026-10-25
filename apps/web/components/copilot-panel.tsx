@@ -18,9 +18,12 @@ import {
   COPILOT_TAB_MANUAL,
   COPILOT_TITLE,
   HEAD_SHOULDERS_PROMPT,
+  HEAD_SHOULDERS_QUICK_INTENT,
   TRIANGLES_PROMPT,
+  TRIANGLES_QUICK_INTENT,
   copilotRoleLabel,
 } from "../lib/copilot-strings";
+import { setIntentForSession } from "../lib/copilot-intent-cache";
 import { isDrawDisabled, isSendDisabled } from "../lib/terminal-controls";
 import { type CopilotClient } from "../lib/use-copilot";
 import { useAiStore } from "../lib/stores/ai-store";
@@ -31,6 +34,8 @@ import { CopilotAnalyzeProgress } from "./copilot/copilot-analyze-progress";
 import { CopilotCandleControl } from "./copilot/copilot-candle-control";
 import { CopilotModelPicker } from "./copilot/copilot-model-picker";
 import { CopilotReasoningControl } from "./copilot/copilot-reasoning-control";
+import { CopilotBiasConflictBanner } from "./copilot/copilot-bias-conflict-banner";
+import { CopilotIntentControls } from "./copilot/copilot-intent-controls";
 import { CopilotSessionSidebar } from "./copilot/copilot-session-sidebar";
 
 type CopilotPanelProps = {
@@ -84,6 +89,11 @@ export function CopilotPanel({ client, api }: CopilotPanelProps) {
     const trimmed = text.trim();
     if (!trimmed || !client || sendDisabled) return;
     void client.analyze(trimmed);
+  };
+
+  const sendWithIntent = (text: string, intent: typeof TRIANGLES_QUICK_INTENT) => {
+    if (activeSessionId) setIntentForSession(activeSessionId, intent);
+    send(text);
   };
 
   const onSubmit = (e: FormEvent) => {
@@ -157,6 +167,7 @@ export function CopilotPanel({ client, api }: CopilotPanelProps) {
               onCustom={setCustomCandleCount}
               disabled={inFlight}
             />
+            <CopilotIntentControls api={api} sessionId={activeSessionId} disabled={inFlight} />
           </div>
 
           <div className="flex flex-none gap-1 border-b border-[#2b313a] p-2">
@@ -184,7 +195,7 @@ export function CopilotPanel({ client, api }: CopilotPanelProps) {
             <button
               type="button"
               disabled={sendDisabled}
-              onClick={() => send(TRIANGLES_PROMPT)}
+              onClick={() => sendWithIntent(TRIANGLES_PROMPT, TRIANGLES_QUICK_INTENT)}
               className="rounded border border-[#2b313a] px-2 py-1 text-xs text-[#eaecef] hover:border-[#f0b90b] disabled:cursor-not-allowed disabled:opacity-40"
             >
               {COPILOT_ACTION_FIND_TRIANGLES}
@@ -192,7 +203,7 @@ export function CopilotPanel({ client, api }: CopilotPanelProps) {
             <button
               type="button"
               disabled={sendDisabled}
-              onClick={() => send(HEAD_SHOULDERS_PROMPT)}
+              onClick={() => sendWithIntent(HEAD_SHOULDERS_PROMPT, HEAD_SHOULDERS_QUICK_INTENT)}
               className="rounded border border-[#2b313a] px-2 py-1 text-xs text-[#eaecef] hover:border-[#f0b90b] disabled:cursor-not-allowed disabled:opacity-40"
             >
               {COPILOT_ACTION_HEAD_SHOULDERS}
@@ -223,6 +234,7 @@ export function CopilotPanel({ client, api }: CopilotPanelProps) {
             {sessionsError}
           </div>
         )}
+        <CopilotBiasConflictBanner intentCheck={lastAnalyzeMeta?.intent_check} />
         <CopilotAnalyzeProgress inFlight={inFlight} />
         {messages.length === 0 && (
               <p className="text-xs text-[#474d57]">{COPILOT_EMPTY_STATE}</p>

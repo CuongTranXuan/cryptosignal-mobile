@@ -28,6 +28,62 @@ export const ModelsListResponseSchema = z.object({
 export type CopilotModelRecord = z.infer<typeof CopilotModelRecordSchema>;
 export type ModelsListResponse = z.infer<typeof ModelsListResponseSchema>;
 
+export const ChartStyleIdSchema = z.enum(["classic", "smc", "elliott", "wyckoff"]);
+export type ChartStyleId = z.infer<typeof ChartStyleIdSchema>;
+
+export const ChartBiasSchema = z.enum(["bullish", "bearish", "neutral"]);
+export type ChartBias = z.infer<typeof ChartBiasSchema>;
+
+export const AnalyzeIntentSchema = z.object({
+  style: ChartStyleIdSchema.default("classic"),
+  bias: ChartBiasSchema.optional(),
+  requested_pattern: z.string().min(1).optional(),
+});
+
+export type AnalyzeIntent = z.infer<typeof AnalyzeIntentSchema>;
+
+export const DrawingRegimeSchema = z.enum(["trend_up", "trend_down", "range", "volatile"]);
+export type DrawingRegime = z.infer<typeof DrawingRegimeSchema>;
+
+export const DrawingInvalidationSchema = z.object({
+  price: z.number(),
+  condition: z.string().optional(),
+});
+
+export const DrawingGuardrailSchema = z.object({
+  regime: DrawingRegimeSchema,
+  confidence: z.number().min(0).max(1),
+  evidence_against: z.array(z.string()),
+  invalidation: DrawingInvalidationSchema.nullable(),
+});
+
+export type DrawingGuardrail = z.infer<typeof DrawingGuardrailSchema>;
+
+export const IntentCheckSchema = z.object({
+  detected_regime: DrawingRegimeSchema,
+  bias_conflict: z.boolean(),
+  message: z.string().optional(),
+});
+
+export type IntentCheck = z.infer<typeof IntentCheckSchema>;
+
+export const SkippedReasonCodeSchema = z.enum([
+  "low_confidence",
+  "out_of_window",
+  "invalid_geometry",
+  "no_candidate",
+  "unsupported_pattern",
+]);
+
+export type SkippedReasonCode = z.infer<typeof SkippedReasonCodeSchema>;
+
+export const SkippedEntrySchema = z.object({
+  reason_code: SkippedReasonCodeSchema,
+  count: z.number().int().nonnegative(),
+});
+
+export type SkippedEntry = z.infer<typeof SkippedEntrySchema>;
+
 export const AnalyzeMetaEventSchema = z.object({
   model: z.string(),
   candle_count_requested: z.number(),
@@ -36,9 +92,48 @@ export const AnalyzeMetaEventSchema = z.object({
   max_tokens: z.number().optional(),
   reasoning_effort: z.string().nullable().optional(),
   retried: z.boolean().optional(),
+  intent_check: IntentCheckSchema.optional(),
+  skipped: z.array(SkippedEntrySchema).optional(),
+  skipped_count: z.number().int().nonnegative().optional(),
 });
 
 export type AnalyzeMetaEvent = z.infer<typeof AnalyzeMetaEventSchema>;
+
+export const StylePatternRefSchema = z.object({
+  id: z.string().min(1),
+});
+
+export const StyleCatalogEntrySchema = z.object({
+  id: z.string().min(1),
+  patterns: z.array(StylePatternRefSchema),
+});
+
+export const StylesListResponseSchema = z.object({
+  styles: z.array(StyleCatalogEntrySchema),
+});
+
+export type StylesListResponse = z.infer<typeof StylesListResponseSchema>;
+
+export const FeedbackActionSchema = z.enum(["keep", "reject", "edit", "delete"]);
+export type FeedbackAction = z.infer<typeof FeedbackActionSchema>;
+
+export const FeedbackRequestSchema = z.object({
+  session_id: z.string().min(1),
+  message_id: z.string().optional(),
+  drawing_id: z.string().min(1),
+  action: FeedbackActionSchema,
+  before: z.unknown().optional(),
+  after: z.unknown().optional(),
+  client_ts: z.number().int(),
+});
+
+export type FeedbackRequest = z.infer<typeof FeedbackRequestSchema>;
+
+export const FeedbackResponseSchema = z.object({
+  id: z.string().min(1),
+});
+
+export type FeedbackResponse = z.infer<typeof FeedbackResponseSchema>;
 
 export const CopilotErrorEventSchema = z.object({
   code: z.string(),

@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { IntentCheck } from "../copilot-schema";
 import type { AgentMarker, PatternShape } from "../pattern-shape";
 
 export type AiMode = "manual" | "auto";
@@ -12,7 +13,11 @@ export type AiMessage = {
   shapes?: PatternShape[];
   markers?: AgentMarker[];
   createdAt?: number;
-  analyzeMeta?: { candle_count_used: number; clamped: boolean };
+  analyzeMeta?: {
+    candle_count_used: number;
+    clamped: boolean;
+    intent_check?: IntentCheck;
+  };
 };
 
 export type CopilotHealth = {

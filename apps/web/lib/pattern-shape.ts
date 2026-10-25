@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { DrawingGuardrailSchema } from "./copilot-schema";
 
 export const INTERVALS = ["1m", "15m", "1h", "4h", "1d"] as const;
 export type Interval = (typeof INTERVALS)[number];
@@ -24,6 +25,7 @@ export const PatternShapeSchema = z
     points: z.array(PointSchema),
     priceLow: z.number().nullable(),
     priceHigh: z.number().nullable(),
+    guardrail: DrawingGuardrailSchema.optional(),
   })
   .strict()
   .superRefine((value, ctx) => {

@@ -1,5 +1,7 @@
 /** Vietnamese UI strings for the Copilot panel (default product language). */
 
+import type { AnalyzeIntent } from "./copilot-schema";
+
 export const COPILOT_TITLE = "Copilot";
 export const COPILOT_OFFLINE = "ngắt kết nối";
 
@@ -8,6 +10,29 @@ export const COPILOT_TAB_AUTO_DRAW = "Tự vẽ";
 
 export const COPILOT_ACTION_FIND_TRIANGLES = "Tìm tam giác";
 export const COPILOT_ACTION_HEAD_SHOULDERS = "Vai đầu vai";
+
+export const COPILOT_STYLE_LABEL = "Phong cách phân tích";
+export const COPILOT_BIAS_LABEL = "Xu hướng (tùy chọn)";
+export const COPILOT_BIAS_NONE = "Không chọn";
+export const COPILOT_PATTERN_LABEL = "Mẫu yêu cầu (tùy chọn)";
+export const COPILOT_PATTERN_ANY = "Bất kỳ";
+
+export const COPILOT_GUARDRAIL_REGIME = "Chế độ";
+export const COPILOT_GUARDRAIL_CONFIDENCE = "Độ tin cậy guardrail";
+export const COPILOT_GUARDRAIL_EVIDENCE = "Bằng chứng trái";
+export const COPILOT_GUARDRAIL_INVALIDATION = "Vô hiệu hóa";
+export const COPILOT_GUARDRAIL_NONE = "Không có guardrail";
+
+export const COPILOT_FEEDBACK_KEEP = "Giữ";
+export const COPILOT_FEEDBACK_REJECT = "Bỏ";
+export const COPILOT_FEEDBACK_FAILED = "Không gửi được phản hồi — thử lại sau.";
+
+export const PATTERNS_TABLE_TITLE = "Mẫu hình & lớp vẽ";
+export const PATTERNS_TABLE_TOTAL = "Hình đang hoạt động";
+export const PATTERNS_TABLE_EMPTY = "Chưa có hình đã xác nhận";
+export const PATTERNS_TABLE_ACTIONS = "Thao tác";
+export const PATTERNS_TABLE_EDIT = "Sửa";
+export const PATTERNS_TABLE_DELETE = "Xóa";
 export const COPILOT_ACTION_DRAW_ON_CHART = "Vẽ lên biểu đồ";
 export const COPILOT_ACTION_EDIT_COORDS = "Sửa tọa độ";
 
@@ -22,6 +47,17 @@ export const TRIANGLES_PROMPT =
 export const HEAD_SHOULDERS_PROMPT =
   "Tìm mẫu vai đầu vai trong cửa sổ nến đã đóng này. Return PatternShape polyline(s). " +
   COPILOT_VIETNAMESE_OUTPUT_INSTRUCTION;
+
+/** Quick actions set analyze intent before sending the paired prompt. */
+export const TRIANGLES_QUICK_INTENT: AnalyzeIntent = {
+  style: "classic",
+  requested_pattern: "symmetrical_triangle",
+};
+
+export const HEAD_SHOULDERS_QUICK_INTENT: AnalyzeIntent = {
+  style: "classic",
+  requested_pattern: "head_and_shoulders",
+};
 
 export const AUTO_DRAW_PROMPT =
   "Tự vẽ: cập nhật mẫu hình cho nến đóng mới nhất. Update patterns for the latest closed candle. " +

@@ -14,6 +14,8 @@ import { mapShapeToPixels, mapZoneToRect, pixelsToPoint } from "../lib/overlay-m
 import type { PatternShape } from "../lib/pattern-shape";
 import { useChartStore } from "../lib/stores/chart-store";
 import { useDrawToolStore } from "../lib/stores/draw-tool-store";
+import { getCopilotFeedbackClient } from "../lib/copilot-feedback-host";
+import { shapeFeedbackSnapshot } from "../lib/copilot-shape-snapshot";
 import { useShapeStore } from "../lib/stores/shape-store";
 import { DrawToolbar } from "./draw-toolbar";
 
@@ -31,8 +33,21 @@ type ShapeOverlayProps = {
 };
 
 type DragState =
-  | { kind: "point"; shapeId: string; index: number; points: PatternShape["points"] }
-  | { kind: "zone-edge"; shapeId: string; edge: "high" | "low"; low: number; high: number };
+  | {
+      kind: "point";
+      shapeId: string;
+      index: number;
+      points: PatternShape["points"];
+      before: Record<string, unknown>;
+    }
+  | {
+      kind: "zone-edge";
+      shapeId: string;
+      edge: "high" | "low";
+      low: number;
+      high: number;
+      before: Record<string, unknown>;
+    };
 
 export function ShapeOverlay({ coordApiRef, overlayTick }: ShapeOverlayProps) {
   const shapes = useShapeStore((s) => s.shapes);
@@ -122,7 +137,13 @@ export function ShapeOverlay({ coordApiRef, overlayTick }: ShapeOverlayProps) {
   );
 
   const endDrag = useCallback(() => {
+    const drag = dragRef.current;
     dragRef.current = null;
+    if (!drag) return;
+    const shape = useShapeStore.getState().shapes.find((s) => s.id === drag.shapeId);
+    const feedback = getCopilotFeedbackClient();
+    if (!shape || shape.source !== "agent" || !feedback) return;
+    feedback.scheduleEdit(drag.shapeId, drag.before, shapeFeedbackSnapshot(shape));
   }, []);
 
   const onDrawPointerDown = useCallback(
@@ -306,6 +327,7 @@ function renderZone(
                 edge: "high",
                 low: shape.priceLow!,
                 high: shape.priceHigh!,
+                before: shapeFeedbackSnapshot(shape),
               };
             }}
           />
@@ -327,6 +349,7 @@ function renderZone(
                 edge: "low",
                 low: shape.priceLow!,
                 high: shape.priceHigh!,
+                before: shapeFeedbackSnapshot(shape),
               };
             }}
           />
@@ -388,6 +411,7 @@ function renderPath(
               shapeId: shape.id,
               index,
               points: shape.points.slice(),
+              before: shapeFeedbackSnapshot(shape),
             };
           }}
         />

@@ -1,14 +1,20 @@
+import { fallbackStylesCatalog } from "./copilot-chart-ai";
 import {
   CopilotSessionApiSchema,
   CreateSessionRequestSchema,
+  FeedbackRequestSchema,
+  FeedbackResponseSchema,
   ModelsListResponseSchema,
   SessionsListResponseSchema,
+  StylesListResponseSchema,
   UpdateSessionRequestSchema,
   type CopilotSessionApi,
   type CreateSessionRequest,
   type CopilotModelRecord,
+  type FeedbackRequest,
   type ModelsListResponse,
   type SessionSummary,
+  type StylesListResponse,
   type UpdateSessionRequest,
 } from "./copilot-schema";
 import { stripLegacyReasoningFromTitle } from "./copilot-session-legacy-title";
@@ -116,8 +122,14 @@ export const MOCK_MODELS_RESPONSE: ModelsListResponse = {
   ],
 };
 
+export const MOCK_STYLES_RESPONSE: StylesListResponse = fallbackStylesCatalog();
+
+let mockFeedbackSeq = 0;
+
 export type CopilotApiClient = {
   fetchModels: (query?: string) => Promise<ModelsListResponse>;
+  fetchStyles: () => Promise<StylesListResponse>;
+  submitFeedback: (body: FeedbackRequest) => Promise<{ id: string }>;
   listSessions: () => Promise<{ sessions: SessionSummary[] }>;
   getSession: (sessionId: string) => Promise<CopilotSessionApi>;
   createSession: (body: CreateSessionRequest) => Promise<CopilotSessionApi>;
@@ -293,6 +305,7 @@ function createLiveSessionsApi(
 /** Test-only: clear in-memory mock sessions. */
 export function resetCopilotApiMockSessionsForTests(): void {
   resetMockSessions();
+  mockFeedbackSeq = 0;
 }
 
 export type CreateCopilotApiOptions = {
@@ -311,9 +324,43 @@ export function createCopilotApi(opts: CreateCopilotApiOptions = {}): CopilotApi
     ? createMockSessionsApi()
     : createLiveSessionsApi(fetchImpl, baseUrl);
 
+  const mockFeedback = async (body: FeedbackRequest) => {
+    const parsed = FeedbackRequestSchema.parse(body);
+    mockFeedbackSeq += 1;
+    return FeedbackResponseSchema.parse({ id: `fb_mock_${mockFeedbackSeq}_${parsed.drawing_id}` });
+  };
+
+  const liveStyles = async (): Promise<StylesListResponse> => {
+    const res = await fetchImpl(`${baseUrl}/v1/copilot/styles`);
+    if (res.status === 404 && fallbackMock) {
+      return MOCK_STYLES_RESPONSE;
+    }
+    if (!res.ok) {
+      const body = await readErrorBody(res);
+      throw new CopilotApiError(res.status, body, "styles_fetch_failed");
+    }
+    const json = await res.json();
+    return StylesListResponseSchema.parse(json);
+  };
+
+  const liveFeedback = async (body: FeedbackRequest) => {
+    const parsed = FeedbackRequestSchema.parse(body);
+    const json = await jsonOrThrow<unknown>(
+      await fetchImpl(`${baseUrl}/v1/copilot/feedback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(parsed),
+      }),
+      "feedback_submit_failed",
+    );
+    return FeedbackResponseSchema.parse(json);
+  };
+
   if (opts.forceMock) {
     return {
       fetchModels: async () => MOCK_MODELS_RESPONSE,
+      fetchStyles: async () => MOCK_STYLES_RESPONSE,
+      submitFeedback: mockFeedback,
       ...sessionsApi,
     };
   }
@@ -332,6 +379,8 @@ export function createCopilotApi(opts: CreateCopilotApiOptions = {}): CopilotApi
       const json = await res.json();
       return ModelsListResponseSchema.parse(json);
     },
+    fetchStyles: liveStyles,
+    submitFeedback: liveFeedback,
     ...sessionsApi,
   };
 }

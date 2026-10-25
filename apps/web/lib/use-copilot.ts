@@ -1,5 +1,12 @@
 import { mergeCandles } from "./binance";
 import { mapCopilotHttpError, mapCopilotSseErrorPayload } from "./copilot-errors";
+import {
+  formatBiasConflictNotice,
+  formatSkippedBreakdown,
+  parseSkippedFromPayload,
+  serializeAnalyzeIntent,
+} from "./copilot-chart-ai";
+import { getIntentForSession } from "./copilot-intent-cache";
 import { AnalyzeMetaEventSchema } from "./copilot-schema";
 import { modelIdForAnalyzeRequest, modelLabelForSession } from "./copilot-model-defaults";
 import { findCachedModel, getDefaultModelId, getModelsList } from "./copilot-models-cache";
@@ -142,6 +149,16 @@ function noteDroppedShapes(ids: string[]): void {
   useAiStore.getState().appendText(copilotSkippedShapes(ids.length));
 }
 
+function appendServerSkippedNote(data: Record<string, unknown>): void {
+  const text = formatSkippedBreakdown(parseSkippedFromPayload(data));
+  if (text) useAiStore.getState().appendText(text);
+}
+
+function appendIntentCheckNote(meta: { intent_check?: { bias_conflict: boolean; message?: string } }): void {
+  if (!meta.intent_check?.bias_conflict) return;
+  useAiStore.getState().appendText(formatBiasConflictNotice(meta.intent_check.message));
+}
+
 function noteDroppedMarkers(ids: string[]): void {
   if (ids.length === 0) return;
   useAiStore.getState().appendText(copilotSkippedMarkers(ids.length));
@@ -172,13 +189,22 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
       data = {};
     }
 
-    type SseEvent = "meta" | "text" | "shapes" | "markers" | "extendRange" | "error" | "done";
+    type SseEvent =
+      | "meta"
+      | "text"
+      | "shapes"
+      | "markers"
+      | "extendRange"
+      | "skipped"
+      | "error"
+      | "done";
     const isSseEvent = (value: string): value is SseEvent =>
       value === "meta" ||
       value === "text" ||
       value === "shapes" ||
       value === "markers" ||
       value === "extendRange" ||
+      value === "skipped" ||
       value === "error" ||
       value === "done";
 
@@ -189,6 +215,8 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
         const parsed = AnalyzeMetaEventSchema.safeParse(data);
         if (parsed.success) {
           useCopilotSessionStore.getState().setLastAnalyzeMeta(parsed.data);
+          appendIntentCheckNote(parsed.data);
+          appendServerSkippedNote(parsed.data);
           const messages = useAiStore.getState().messages.slice();
           for (let i = messages.length - 1; i >= 0; i--) {
             const msg = messages[i];
@@ -204,6 +232,7 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
                 analyzeMeta: {
                   candle_count_used: parsed.data.candle_count_used,
                   clamped: parsed.data.clamped,
+                  intent_check: parsed.data.intent_check,
                 },
               };
               useAiStore.setState({ messages });
@@ -211,6 +240,10 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
             }
           }
         }
+        return "ok";
+      }
+      case "skipped": {
+        appendServerSkippedNote(data);
         return "ok";
       }
       case "text": {
@@ -270,6 +303,7 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
           }
         }
         noteDroppedShapes(droppedIds);
+        appendServerSkippedNote(data);
         return "ok";
       }
       case "markers": {
@@ -440,6 +474,8 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
     if (reasoningEffort) {
       body.reasoning_effort = reasoningEffort;
     }
+    const sessionId = sessionState.activeSessionId;
+    body.intent = serializeAnalyzeIntent(getIntentForSession(sessionId));
 
     try {
       const res = await fetchImpl(`${baseUrl}/v1/copilot/analyze`, {
