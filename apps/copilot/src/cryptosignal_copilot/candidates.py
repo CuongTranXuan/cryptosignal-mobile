@@ -8,7 +8,6 @@ from typing import Any, Literal
 
 from cryptosignal_copilot.chart_regime import Regime, detect_regime
 from cryptosignal_copilot.drawing_gate import DrawingWindow, apply_preview_gate
-from cryptosignal_copilot.gate_policy import anchor_in_play, candidate_passes_gate
 from cryptosignal_copilot.features import (
     ZigZagSwing,
     bar_seconds,
@@ -17,6 +16,7 @@ from cryptosignal_copilot.features import (
     zigzag_mult,
     zigzag_swings,
 )
+from cryptosignal_copilot.gate_policy import anchor_in_play, candidate_passes_gate
 from cryptosignal_copilot.schema import Candle, Interval
 
 StyleId = Literal["classic", "smc"]
@@ -354,9 +354,7 @@ def _double_top_bottom(
     return out
 
 
-def _rail_is_flat(
-    a: ZigZagSwing, b: ZigZagSwing, *, bar_sec: int, atr: float
-) -> bool:
+def _rail_is_flat(a: ZigZagSwing, b: ZigZagSwing, *, bar_sec: int, atr: float) -> bool:
     span_bars = abs(b.t - a.t) / bar_sec if bar_sec else 0.0
     if span_bars < 1:
         return True

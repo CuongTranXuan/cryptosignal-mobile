@@ -18,9 +18,7 @@ from cryptosignal_copilot.schema import Candle, filter_preview_details
 
 FIXTURE_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "ohlcv"
 
-TRIANGLE_PATTERNS = frozenset(
-    {"ascending_triangle", "descending_triangle", "symmetrical_triangle"}
-)
+TRIANGLE_PATTERNS = frozenset({"ascending_triangle", "descending_triangle", "symmetrical_triangle"})
 DOUBLE_PATTERNS = frozenset({"double_top", "double_bottom"})
 
 
