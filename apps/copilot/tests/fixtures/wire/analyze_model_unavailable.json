@@ -1,0 +1,7 @@
+{
+  "code": "model_unavailable",
+  "message": "Mô hình hiện không phản hồi — chọn mô hình khác",
+  "detail": "m/quota: probe status quota_or_rate_limited",
+  "model": "m/quota",
+  "probe_status": "quota_or_rate_limited"
+}

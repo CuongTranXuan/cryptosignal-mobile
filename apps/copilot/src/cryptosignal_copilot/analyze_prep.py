@@ -144,6 +144,7 @@ async def prepare_analyze(
             422,
             "Mô hình hiện không phản hồi — chọn mô hình khác",
             f"{model_id}: probe status {probe_status}",
+            fields={"model": model_id, "probe_status": probe_status},
         )
     try:
         model = await catalog.resolve_model(cfg, model_id)

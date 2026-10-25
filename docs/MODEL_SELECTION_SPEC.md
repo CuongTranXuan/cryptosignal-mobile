@@ -164,7 +164,7 @@ type ProbeReport = {
     error_code: string | null; message: string | null }[];
 };
 ```
-`upstream_error.code`: `connect_error|timeout|http_error|auth_error|quota_or_rate_limited|network_error|invalid_response|config_missing`. Analyze: absent `model` → `default_model` from the last probe; a `model` whose last probe failed → `422 model_unavailable` (`detail` names the probe status). Env vars and behaviour: `apps/copilot/DEPLOY.md` § Model probe endpoints. Fixtures: `apps/copilot/tests/fixtures/wire/models_*.json`.
+`upstream_error.code`: `connect_error|timeout|http_error|auth_error|quota_or_rate_limited|network_error|invalid_response|config_missing`. Analyze: absent `model` → `default_model` from the last probe; a `model` whose last probe failed → `422` with body `{code: "model_unavailable", message, detail, model: string, probe_status: "auth_error"|"quota_or_rate_limited"|"not_found"|"timeout"|"upstream_error"}` (`detail` keeps the human-readable string; fixture `apps/copilot/tests/fixtures/wire/analyze_model_unavailable.json`). The same body arrives as an SSE `error` event if the model fails between the pre-check and the stream. Env vars and behaviour: `apps/copilot/DEPLOY.md` § Model probe endpoints. Fixtures: `apps/copilot/tests/fixtures/wire/models_*.json`.
 
 ### 3.2 `POST /v1/copilot/analyze` (additions, both optional)
 | Field | Type | Rule |

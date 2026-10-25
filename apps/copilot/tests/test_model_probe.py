@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from pathlib import Path
 from functools import partial
 from typing import Any
 
@@ -442,8 +443,15 @@ async def test_default_fallback_listing_and_analyze(probe_env, tmp_path, monkeyp
 
         unhealthy = await client.post("/v1/copilot/analyze", json={**ANALYZE, "model": "m/quota"})
         assert unhealthy.status_code == 422
-        assert unhealthy.json()["code"] == "model_unavailable"
-        assert "quota_or_rate_limited" in unhealthy.json()["detail"]
+        err = unhealthy.json()
+        assert err["code"] == "model_unavailable"
+        assert err["probe_status"] == "quota_or_rate_limited"
+        assert err["model"] == "m/quota"
+        assert "quota_or_rate_limited" in err["detail"]
+        fixture = json.loads(
+            (Path(__file__).parent / "fixtures/wire/analyze_model_unavailable.json").read_text()
+        )
+        assert err == fixture
 
         ok = await client.post("/v1/copilot/analyze", json=ANALYZE)
         assert ok.status_code == 200
@@ -482,6 +490,8 @@ async def test_prepare_analyze_uses_effective_default(probe_env):
             model_health=service.model_health(),
         )
     assert exc.value.status_code == 422
+    assert exc.value.fields == {"model": "m/missing", "probe_status": "not_found"}
+    assert exc.value.payload()["probe_status"] == "not_found"
 
 
 async def test_healthy_default_is_kept(probe_env, monkeypatch):

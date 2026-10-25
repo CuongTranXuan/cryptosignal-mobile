@@ -239,7 +239,7 @@ def create_app(
             )
         except AnalyzePrepError as exc:
             return JSONResponse(
-                error_payload(exc.code, exc.message, exc.detail),
+                exc.payload(),
                 status_code=exc.status_code,
             )
         return record.model_dump(by_alias=True)
@@ -261,7 +261,7 @@ def create_app(
             record = await asyncio.to_thread(store.update_session, session_id, **patch)
         except AnalyzePrepError as exc:
             return JSONResponse(
-                error_payload(exc.code, exc.message, exc.detail),
+                exc.payload(),
                 status_code=exc.status_code,
             )
         except SessionNotFoundError:
@@ -311,7 +311,7 @@ def create_app(
             analyze_req = analyze_req.model_copy(update={"intent": merged_intent}, deep=True)
         except AnalyzePrepError as exc:
             return JSONResponse(
-                error_payload(exc.code, exc.message, exc.detail),
+                exc.payload(),
                 status_code=exc.status_code,
             )
 
@@ -319,7 +319,7 @@ def create_app(
             await prepare_analyze(catalog, cfg, analyze_req, model_health=probe.model_health())
         except AnalyzePrepError as exc:
             return JSONResponse(
-                error_payload(exc.code, exc.message, exc.detail),
+                exc.payload(),
                 status_code=exc.status_code,
             )
 
@@ -353,7 +353,7 @@ def create_app(
                             catalog, cfg, current, model_health=probe.model_health()
                         )
                     except AnalyzePrepError as exc:
-                        yield sse("error", error_payload(exc.code, exc.message, exc.detail))
+                        yield sse("error", exc.payload())
                         yield sse("done", {})
                         continue
 
