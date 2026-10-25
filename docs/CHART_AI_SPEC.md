@@ -1023,3 +1023,45 @@ Add per-style top-6 runs through the real path, an "intent split = 0" assertion,
 - Fixed: #1–3, #5–8, #10–12, #19, #22, #23, #27 (schema only), #28, #29, #31, D4, D5, N1–N6, R1–R3, B1, B2, B4 (H&S reaches the wire), B5.
 - Partial: #4 (no regime/bias/summary check), #9, #13, #14, #15, #16, #17 (staleness), #18, #20, #21, #24, #30, #32 (analysis content), B3 (fixed-price check, S/R flip never fires), D6 (lookahead, 451).
 - Open: #25, #26.
+
+### C.10 Re-check at `f73ab160` (box, 2026-10-25, no real LLM — Mac offline, OmniRoute e2e skipped)
+
+Before = `405c7360`, after = `f73ab160`. Same 16 frozen windows (4 symbols × 15m/1h/4h/1d, 200 bars) plus the wide subset (80 series × ~1000 bars, 100/200-bar windows, step 50 for H&S = 2,720 windows; step 100 at 200 bars for breakage). Paths under `apps/copilot/src/cryptosignal_copilot/`.
+
+| Metric (16 windows unless noted) | 405c7360 | f73ab160 |
+|---|---|---|
+| Harness classic: picks / shapes / gate drop / splits | 51 / 85 / 0 / 0 | 48 / 82 / 0 / 0 |
+| Harness SMC: picks / shapes / gate drop | 55 / 55 / 0 | 56 / 56 / 0 |
+| LLM-like top-6 classic: shapes in→out (cap) / windows over budget | 120→91 (29) / 11 | 116→90 (26) / 10 (handled by validator / fallback) |
+| Web Zod strict acceptance (harness + LLM-like, after `shapes_for_wire`) | 284/284 (C.9) | **284/284** + SSE shapes 18/18 |
+| Offered non-fib candidates broken >0.25×ATR after last swing anchor (16 windows) | 7/102 (4 trendlines) | 3/99 (1 wrong-role flipped S/R, 1 completed triangle, 1 flip read as break — OK) |
+| Same, wide subset (200-bar, step 100) — trendlines | 169/872 broken | **0/768** |
+| — liquidity / sym. triangle | 2/550, 2/274 | 0/562, 0/273 |
+| — flipped S/R with wrong role vs last close | n/a (no flip) | **79/209 (38%)** |
+| — asc/desc triangles already broken out in pattern direction, still drawn as live | 9 | 14 |
+| H&S/IHS offered, W=100 (completed / unbroken) | 27 / 17 | 7 / 17 |
+| H&S/IHS offered, W=200 (completed / unbroken) | 39 / 16 | 8 / 16 |
+| H&S/IHS dropped as `stale` W=100 / W=200 | 0 / 19 | 26 / 64 |
+| ruff check / format --check | clean | clean (91 files) |
+| pytest | 149 passed / 2 skipped | 155 passed / 3 skipped (box, no node_modules); wire Zod test passes with `CI=true` + `pnpm install --frozen-lockfile` |
+
+**Verdicts on coder claims**
+
+1. *Per-bar invalidation after swing anchor* — **mostly true.** Trendlines/liquidity/BOS/CHoCH/FVG/OB/doubles/H&S are clean on the wide subset (trendlines 169→0). Two gaps:
+   - **N10 (high): S/R flip runs only once.** `candidates.py:184-219` flips on the first break. Then `candidates.py:1733` exempts `support_resistance` from the broken-prefilter. A zone that was later re-crossed keeps the stale role: 79/209 flipped zones (38%) contradict the last close. Example: ETHUSDT 1h "S/R support (flipped) 2417.83" has its last close at 2365.9 (3.5×ATR **below** the "support"). Fix: assign the role from the last close relative to the zone (above→support, below→resistance, inside→keep). Or re-run `pattern_broken` from the flip bar and drop the zone on a second break.
+   - **N11 (low): triangles have no "completed" state.** `pattern_invalidation.py:140-143` checks only the failure side. Asc/desc triangles that already broke out in the pattern direction (14 on the subset, ETHUSDT 4h desc. triangle in the 16 windows) are drawn as live, with rails extended. Mark them `pattern completed` and give them H&S-style staleness.
+   - `tests/test_pattern_invalidation.py:29` silently skips because the fixture has no trendlines, so the trendline path has no CI coverage. Use a fixture that has one.
+2. *validate_summary_language* — **partial; it also has a critical bypass.**
+   - **N12 (critical): validator exhaustion drops the catalog.** When output retries are exhausted at attempt 0, `agent.py:168-172` calls `retry_plan`. `analyze_prep.py:262-270` builds the new `AnalyzePlan` **without `candidate_catalog`/`intent_step`**, so attempt 1 has no output validator (`agent.py:155-156`) and no candidates. Scripted run (BTCUSDT 4h, 100 candles, trend_down, model always answers "Tăng mạnh, mua ngay!"): the stream showed the sycophantic summary verbatim, 0 shapes, and analysis "No candidate catalog". It did not use the deterministic fallback. Over-budget picks hit the same path. The new language validator makes this path common. Fix: `retry_plan` must rebuild or carry over the catalog (rebuild for the trimmed candles). If no catalog is available, use `build_deterministic_fallback` plus a server summary, and never stream unvalidated text.
+   - **N13 (high): the trade-call blocklist is narrow.** It passes: "long ở hỗ trợ", "short tại kháng cự", "nên bán", "hãy mua vào ở 60k", "Buy the dip", "go long here", "place a stop at 65k, TP 70k", "SL 65k", "đặt stop ở 65k". It blocks only exact phrases (`mua ngay|vào lệnh|chốt lời|cắt lỗ|buy now|entry|…`, `output_language_validate.py:11-18`).
+   - **N14 (high): subtle contradictions pass.** The regime-ack check is a substring test: any "giảm" satisfies trend_down. Under trend_down, these pass: "Sau nhịp giảm, phe mua đã kiểm soát; giá sẽ sớm đảo chiều lên và vượt đỉnh cũ", "Dù xu hướng giảm, … đà tăng sắp bắt đầu", "Bearish regime aside, … expect a rally to new highs". Under trend_up, "Xu hướng tăng nhưng sắp sụp đổ, giá sẽ rơi sâu" passes. Better: make `analysis.bias` from the server the only directional claim. Ask the LLM for a `direction` enum in the output and reject it when it disagrees with the regime, rather than regex-reading prose.
+   - **N15 (medium): over-broad rejections of legit descriptive text.** "lực mua yếu" passes (good). But these trigger retries: "ATR tăng mạnh" (volatility) under trend_down; invalidation phrasing "nếu breakdown dưới 80k" under trend_up and "vô hiệu nếu breakout up" under trend_down; disclaimers "Đây không phải tín hiệu entry"; "giá mục tiêu theo mô hình H&S" (measured move, which the spec allows as geometry); "vùng cắt lỗ của phe bán nằm trên đỉnh" (liquidity description); range "Giá dao động 60-65k" (ack list lacks "dao động"). Each false retry burns output retries, and through N12 that ends in the catalog-less path.
+   - `bias_conflict → evidence_against` works: a bullish prompt in a trend_down window gives `analysis.bias=bearish`, the same for bull and bear prompts, with a conflict line. Minor: the conflict line is English ("User bias conflicts…") while the filler is Vietnamese.
+3. *Staleness* — **true.** `stale` drops: H&S/IHS W=100 0→26, W=200 19→64. Completed H&S offered falls 27→7 / 39→8, and unbroken counts are unchanged (17/16), so fresh H&S still surface. The gate exemption is now id-keyed (`drawing_gate.py`, `_hs_neckline_shape(data)` → `_candidate_id` startswith `hs_`/`ihs_`). Scope is OK.
+4. *HTF* — **endpoint fixed, lookahead NOT fixed.** `klines.py` uses `data-api.binance.vision` (HTTP 200 from the box). But `analyze_prep.py:70` filters `c.time <= end_time_s`, and `c.time` is the HTF **open** time. SOLUSDT 4h historical window (to = last 4h open 1788566400): the 1d candle that opened at 1788566400 and closes 72,000 s (20 h) after the LTF data ends is still included, and `last_closed_time` reports that open time. ETH 1h→4h and BTC 15m→1h were aligned by chance (0 s). Fix: `c.time + htf_sec <= end_time_s + ltf_sec` (HTF close ≤ LTF window close), and rename the field to `last_closed_open_time` or emit the close time.
+5. *web.yml* — **true.** It uses `pnpm/action-setup@v4` (pnpm 10.15.0), `setup-node` cache `pnpm` with `cache-dependency-path: apps/web/pnpm-lock.yaml`, and `pnpm install --frozen-lockfile` (verified OK on the box with pnpm 10.15.0). `tsx@4.23.15` is in devDependencies and the lockfile. With `CI=true` the Zod test throws instead of skipping, and it passes (3/3).
+6. *Vietnamese fallback note* — **true in code** (`agent.py`, the "Đã áp dụng lớp phủ dự phòng (ngân sách shape ≤6)…" text before `shapes`). Not exercised end-to-end here, because with 100 candles a validator-exhausted run takes the N12 path instead.
+
+**Remaining (prioritized for coder):** N12 (retry_plan drops catalog → unvalidated sycophantic text, 0 shapes) → HTF close-time filter (D6) → N10 (S/R role from last close) → N13/N14/N15 (replace prose regex with a structured `direction` field + narrower descriptive allow-list) → N11 (triangle completed state) → trendline invalidation test fixture. Earlier opens: #13, #21, #24, #27.
+
+**Readiness:** UI integration can continue (wire contract 100% Zod-valid, SSE order `text, regime, [meta], text…, shapes, analysis, text, markers, done` stable). **Not ready for user testing** until N12 and the HTF lookahead are fixed: N12 streams the exact sycophantic/trade-call text the validator exists to block, with an empty chart.
