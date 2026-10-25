@@ -1105,3 +1105,67 @@ Before = `f73ab160`. Same 16 windows; wide scan = all 80 series, 200-bar windows
 **Readiness:** wire contract, invalidation, HTF and the N12 failure path are now sound. That is enough for **internal/alpha user testing with a visible "not financial advice" banner**. It is **not ready for general user testing**: a model can still stream a bullish narrative or a trade instruction ("Nên mua ở 60k", "SL: 65k") under a bearish regime. Re-check with real OmniRoute e2e (neutral + bullish prompt) once the Mac is online.
 
 **SSE order (after C.11 coder pass — final meta):** `text` (progress) → `regime` → optional `meta` (candle retry / clamp) → optional second `regime` (after retry, same window as catalog) → `text` (model done) → `text` (server-authored summary) → `shapes` → `analysis` → `text` (overlay ready) → optional `markers` → optional **final `meta`** (`validator_fallback`, `intent_budget_fallback`) → `done`.
+
+### C.12 Re-check at `30618743` (box, 2026-10-25, scripted model only — Mac offline, OmniRoute e2e skipped)
+
+Before = `7c03c618`. 16 windows + full 80-series scan (200-bar step 100, 100-bar step 50). Web client replayed with the real SSE event sequence through `createCopilotClient` (vitest, Node 22).
+
+| Metric | 7c03c618 | 30618743 |
+|---|---|---|
+| Harness classic picks / shapes / gate drop / splits | 48 / 84 / 0 / 0 | unchanged |
+| LLM-like top-6 classic shapes in→out (cap) | 114→90 (24) | unchanged |
+| Web Zod strict (harness + LLM-like + 5 SSE runs) | 286/286 + 30/30 | 286/286 + 30/30 |
+| Non-S/R broken >0.25×ATR (wide) / broken-out triangles offered | 0 / 0 | 0 / 0 |
+| S/R role vs last close (200 / 100-bar) | 0 wrong | 0 wrong |
+| "(flipped)" on zones price never crossed | 223/441 | **14/232** (rest correct; 211 plain zones correctly unlabelled) |
+| H&S/IHS offered / stale drops | unchanged | unchanged |
+| HTF SOL 4h | 0 s lookahead | 0 s |
+| ruff / format | clean | clean (98 files) |
+| pytest (box) | 176 / 2 skip | 197 passed / 2 skipped (Postgres; Zod without node_modules → 3/3 with `CI=true`) |
+| web vitest | — | 139/139 (2 files need repo-relative fixtures); **needs Node ≥ 22** (jsdom 30), CI pins Node 20 and does not run vitest |
+
+**(1) Model free text in SSE — partly closed.**
+- The "Mô hình đã xong" text and the overlay text are server strings. The summary is `compose_stream_summary`. The LLM schema has no summary; legacy `summary` is dropped in `output_parsing.py:34`.
+- **The only model text left is `pick_notes` (≤6 × 240 chars), and it streams.**
+- A note whose `candidate_id` is not in `drawing_intents` gets a ModelRetry (`agent_validate.py:70-75`). ✓
+- **N18 (high): pick-note blocklist bypasses.** Wrong on 21/61 trade phrases and 8/10 directional phrases:
+  - No diacritics: "nen mua o 60k".
+  - NFD-decomposed "Nên mua ở 60k" / "Hãy mua vào ở 60k" / "Chốt lời 70k". The validator does no NFC normalisation.
+  - Zero-width: "nên m\u200bua ở 60k". Leetspeak: "L0ng ở 60k".
+  - "Entry 60k", "Vào long 60k", "Buy @ 65k", "Target $70,000", "Mục tiêu 70k", "Stop dưới 58k", "Dừng lỗ 58k", "Short trên 70k", "Buy the dips", "Should buy near 60k", "Gom hàng vùng 60k", "Accumulate between 60k-62k".
+  - **Allow-override short-circuit** (`output_language_validate.py:_allowed_descriptive` returns before any block): "Phe short yếu; nên mua ở 60k." and "Thanh khoản long dưới 60k — nên long ở 60k." pass. End-to-end, a scripted model note "Phe short yếu; nên mua ở 60k. Đà tăng sắp bắt đầu, giá có thể bứt phá lên 70k." **streamed verbatim** under trend_down (1 model call, no retry).
+  - Directional narrative is still a phrase list. These pass: "Đà tăng sắp bắt đầu", "Tăng mạnh sắp tới", "Giá có thể bứt phá lên 70k", "Bullish breakout imminent", "Price likely heads to 70k", "Gia se tang manh".
+  - Only 1/21 legit phrases is wrongly blocked ("Lực mua ở 60k mạnh (3 lần chạm)").
+  - Recommendation: drop free-text notes. Use a structured note (`touches:int`, `confluence: enum[fib, ema, htf_level, volume]`, `quality: enum`) rendered by server templates. If free text stays: NFKC + strip diacritics + remove zero-width/format chars before matching; make allow-overrides remove only the matched span instead of returning; and block any sentence containing a number with a side/price-target word.
+- Sycophancy via the server: with the same window, a bullish user gets `summary_direction=conditional` and a bearish user gets `bearish` (`server_summary.summary_direction_from_regime`, `bias_conflict`). The user's thesis changes the server's direction. Use the regime direction always and add the conditional clause as text.
+
+**(2) Server summary.**
+- Readable Vietnamese. It is consistent with regime/analysis (trend_up / range / trend_down checked), mentions invalidation, gives no advice, and has a disclaimer.
+- Range and no-pick windows read sensibly, but a no-pick window still says "Lưu ý: Không có cảnh báo cấu trúc trên các hình đã chọn" and never says "không có mẫu hình hợp lệ".
+- Polish:
+  - Raw float prices ("87296.00321398584"). Use `format-market-price` rules server-side.
+  - Typo "cấu trúng" (`server_summary.py` `_regime_lead` trend_up).
+  - English mixed in ("Bias overlay (server)", evidence_for "Lower highs and lower lows…", "Price below EMA50…").
+  - Double period "detector..".
+  - The invalidation price in the conditional clause comes from analysis, while picks list "Fib retracement" etc.; fine.
+
+**(3) N16 — fixed for the validator path.** Final `meta` (`validator_fallback: true`) arrives before `done` and parses with `AnalyzeMetaEventSchema`. The UI note "Hình do máy chủ chọn." renders once. Over-budget exhaustion is reported as `validator_fallback`, not `intent_budget_fallback`, because the budget check now lives inside the validator. The post-run budget fallback is effectively unreachable. Acceptable, but document it.
+
+**(4) N10 — mostly fixed:** 14/232 "flipped" zones never had a close on both sides within the shape span (e.g. BTCUSDT 4h "S/R resistance (flipped) 60860.87"). The crossing check probably counts closes before the zone's first point.
+
+**(5) N17 — fixed:** a second `regime` event after the candle retry; the client just overwrites `lastDetectedRegime` (no text). `skipped: cap` no longer appears on validator fallback.
+
+**(6) N15 — fixed** except "Lực mua ở 60k mạnh".
+
+**(7)** Zod, broken lines, triangles and HTF all hold (table).
+
+**(8) UI impact (replay of real event sequence: initial meta from `app.py:281` + retry meta + final meta):**
+- **N19 (medium): the bias-conflict chat notice "⚠ Xu hướng bạn chọn (Tăng) mâu thuẫn…" is appended once per `meta` event.** It appears 3× on the fallback path (initial, retry, final), plus the server summary's "Lưu ý: Thiên kiến…" (4 mentions). The 2nd notice is glued to the next text without a newline ("…thị trường.Mô hình đã xong"). `use-copilot.ts` `case "meta"` calls `appendIntentCheckNote` and `appendServerSkippedNote` on every meta. Only append on the first meta per run, or dedupe by run.
+- **N20 (low): shapes listed twice:** the client's "Đã vẽ 6 hình…" list plus the server's "Lớp phủ sẵn sàng: 6 — …", with inconsistent names ("Đường xu hướng" vs "Resistance trendline"). Drop one.
+- The second regime event and the final meta are otherwise handled without errors.
+
+**Remaining (priority):** N18 (pick-note bypasses; recommend structured notes) → bias-conflict-dependent `summary_direction` → N19 duplicate notices → summary polish (prices, typo, English strings, no-pattern wording) → N20 → N10 residual 14 → add web vitest to CI on Node 22. Earlier opens: #13, #21, #24, #27. Real OmniRoute e2e still pending (Mac offline).
+
+**Readiness:**
+- (a) **Internal alpha — ready**, with the disclaimer. Server-authored summary, validated fallback, correct geometry/HTF/invalidation, 100% Zod.
+- (b) **General user testing — not ready** until N18 is closed: a model can still put a trade instruction or bullish forecast into a pick note that streams verbatim. N19 should also be fixed first, because repeated warnings look broken.
