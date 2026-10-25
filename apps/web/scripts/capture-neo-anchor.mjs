@@ -1,5 +1,9 @@
 /**
- * Screenshot chart with C.13 neutral "Neo" drawing anchors (stub analyze + session reload).
+ * Screenshot chart with C.13 neutral "Neo" drawing anchors: drives a real analyze from the
+ * chat input (stub runner) and waits for the "Đã đặt N điểm neo" chat line before capturing.
+ *
+ * APP_URL must use `localhost`: Next 16 dev blocks cross-origin dev resources for
+ * 127.0.0.1, so the page never hydrates there and the chart stays blank.
  */
 import { chromium } from "playwright";
 import { mkdirSync, readFileSync } from "node:fs";
@@ -7,8 +11,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const outPath = "/opt/cursor/artifacts/chart-neo-anchor.png";
-const appUrl = process.env.APP_URL ?? "http://127.0.0.1:3000";
+const outPath = process.env.OUT_PATH ?? "/opt/cursor/artifacts/chart-neo-anchor.png";
+const appUrl = process.env.APP_URL ?? "http://localhost:3000";
 const base = process.env.BASE_URL ?? "http://127.0.0.1:3000/v1/copilot";
 const analyzePrompt = "e2e real candles cap budget";
 const ACTIVE_SESSION_KEY = "copilot.active_session_id";
@@ -38,28 +42,6 @@ function toBinanceKlineRow(candle) {
 
 const klinesBody = fixture.candles.map(toBinanceKlineRow);
 const tickerBody = { symbol: "BTCUSDT", priceChangePercent: "1.23" };
-
-async function postAnalyze(candles, sessionId) {
-  const body = {
-    symbol: fixture.symbol,
-    interval: fixture.interval,
-    from: candles[0].time,
-    to: candles[candles.length - 1].time,
-    closedCandles: candles,
-    existingShapes: [],
-    prompt: analyzePrompt,
-    candle_count: candles.length,
-    session_id: sessionId,
-  };
-  const res = await fetch(`${base}/analyze`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) throw new Error(`analyze ${res.status}`);
-  await res.text();
-}
-
 mkdirSync(path.dirname(outPath), { recursive: true });
 
 const sessionRes = await fetch(`${base}/sessions`, {
@@ -78,10 +60,13 @@ const sessionRes = await fetch(`${base}/sessions`, {
     intent: { style: "classic" },
   }),
 });
+if (!sessionRes.ok) throw new Error(`session create ${sessionRes.status}`);
 const { id: sessionId } = await sessionRes.json();
-await postAnalyze(fixture.candles, sessionId);
 
-const browser = await chromium.launch({ headless: true });
+const browser = await chromium.launch({
+  headless: true,
+  channel: process.env.PW_CHANNEL || undefined,
+});
 const context = await browser.newContext({ viewport: { width: 1400, height: 900 } });
 await context.route("**/api/v3/klines**", async (route) => {
   await route.fulfill({
@@ -107,11 +92,21 @@ await page.addInitScript(
 );
 
 await page.goto(appUrl, { waitUntil: "networkidle" });
-await page.getByTestId("chart-canvas").waitFor({ state: "visible", timeout: 120_000 });
-await page.waitForTimeout(3000);
+await page.getByTestId("chart-canvas").locator("canvas").first().waitFor({ timeout: 120_000 });
+const input = page.getByPlaceholder("Hỏi về cửa sổ này…");
+await input.waitFor({ timeout: 60_000 });
+await page.waitForFunction(() => {
+  const el = document.querySelector('input[placeholder="Hỏi về cửa sổ này…"]');
+  return el instanceof HTMLInputElement && !el.disabled;
+});
+await input.fill(analyzePrompt);
+await input.press("Enter");
+const anchorLine = page.getByText(/Đã đặt \d+ điểm neo/);
+await anchorLine.waitFor({ timeout: 120_000 });
+await anchorLine.scrollIntoViewIfNeeded();
+await page.waitForTimeout(1500);
 
-const chart = page.getByTestId("chart-canvas");
-await chart.screenshot({ path: outPath });
+await page.screenshot({ path: outPath });
 
 await browser.close();
 console.log(outPath);

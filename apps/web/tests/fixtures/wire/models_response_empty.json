@@ -1,0 +1,13 @@
+{
+  "models": [],
+  "default_model": null,
+  "requested_default": "agentrouter/deepseek-v4-flash",
+  "default_fallback": true,
+  "fetched_at": 1792900920,
+  "probed_at": "2026-10-25T04:42:00Z",
+  "ttl_s": 600,
+  "stale": false,
+  "probe_in_progress": false,
+  "upstream_reachable": true,
+  "upstream_error": null
+}

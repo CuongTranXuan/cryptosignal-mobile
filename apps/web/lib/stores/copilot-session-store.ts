@@ -3,7 +3,12 @@ import type { CopilotApiClient } from "../copilot-api";
 import { loadActiveSessionId, saveActiveSessionId } from "../copilot-active-session-cache";
 import { DEFAULT_CANDLE_COUNT, clampCandleCountForModel } from "../copilot-model-limits";
 import { resolveCatalogDefaultId, resolveSessionModelId } from "../copilot-model-defaults";
-import { syncModelsSnapshotFromCache } from "../../components/copilot/use-copilot-models";
+import {
+  getModelProbeReport,
+  refreshCopilotModels,
+  syncModelsSnapshotFromCache,
+} from "../../components/copilot/use-copilot-models";
+import { modelSwitchedFrom, probeReasonForModel } from "../copilot-model-probe";
 import {
   defaultReasoningEffortForModel,
   resetReasoningForModel,
@@ -20,6 +25,7 @@ import {
   COPILOT_SESSIONS_MIGRATION_PARTIAL,
   COPILOT_SESSIONS_OFFLINE,
   COPILOT_SESSIONS_SAVE_FAILED,
+  copilotModelSwitchedNotice,
 } from "../copilot-strings";
 import { CopilotApiError } from "../copilot-api";
 import { mapCopilotHttpError } from "../copilot-errors";
@@ -89,6 +95,18 @@ function sessionToAiMessages(
 
 type SessionListRow = ReturnType<typeof summaryFromApi>;
 
+/** Vietnamese notice when the saved model is not healthy and the session moved to `resolvedId`. */
+function switchNotice(
+  models: ReturnType<typeof getModelsList>,
+  savedId: string | null | undefined,
+  resolvedId: string | null | undefined,
+): string | null {
+  const from = modelSwitchedFrom(models, savedId, resolvedId);
+  if (!from || !resolvedId) return null;
+  const reason = probeReasonForModel(getModelProbeReport(), from);
+  return copilotModelSwitchedNotice(from, resolvedId, reason);
+}
+
 type CopilotSessionState = {
   api: CopilotApiClient | null;
   sessions: SessionListRow[];
@@ -106,12 +124,19 @@ type CopilotSessionState = {
   reasoningEffort: string | null;
   modelsReady: boolean;
   sessionsError: string | null;
+  /** Shown after an automatic switch away from an unhealthy model. */
+  modelNotice: string | null;
   sessionsDirty: boolean;
   sessionCache: Record<string, CopilotSessionV1>;
   listFetchedAt: number;
   setApi: (api: CopilotApiClient) => void;
   bootstrap: () => Promise<void>;
   setModelId: (modelId: string) => void;
+  dismissModelNotice: () => void;
+  /** Move off the selected model when it is no longer in the healthy list. */
+  reconcileModelWithCatalog: () => void;
+  /** Analyze rejected the model as unhealthy: refetch models, then reconcile. */
+  handleUnhealthyModel: () => Promise<void>;
   setReasoningEffort: (apiEffort: string | null) => void;
   setCandleCountPreset: (count: number) => void;
   setCustomCandleCount: (count: number) => void;
@@ -213,6 +238,7 @@ export const useCopilotSessionStore = create<CopilotSessionState>((set, get) => 
   reasoningEffort: null,
   modelsReady: false,
   sessionsError: null,
+  modelNotice: null,
   sessionsDirty: false,
   sessionCache: {},
   listFetchedAt: 0,
@@ -343,8 +369,11 @@ export const useCopilotSessionStore = create<CopilotSessionState>((set, get) => 
       activeSession!.reasoning_effort ?? null,
     );
 
+    const notice = switchNotice(models, activeSession!.model_id, resolvedModelId);
+
     saveActiveSessionId(activeId);
     set({
+      ...(notice ? { modelNotice: notice } : {}),
       sessions: listRows,
       activeSessionId: activeId,
       modelId: resolvedModelId,
@@ -359,6 +388,7 @@ export const useCopilotSessionStore = create<CopilotSessionState>((set, get) => 
       model_id: resolvedModelId ?? activeSession!.model_id,
       reasoning_effort: reasoningEffort,
     });
+    if (notice) get().persistActiveSession();
   },
 
   flushPersist: async () => {
@@ -417,8 +447,29 @@ export const useCopilotSessionStore = create<CopilotSessionState>((set, get) => 
   setModelId: (modelId) => {
     const model = findCachedModel(modelId);
     const reasoningEffort = resetReasoningForModel(model, get().reasoningEffort);
-    set({ modelId, reasoningEffort });
+    set({ modelId, reasoningEffort, modelNotice: null });
     get().persistActiveSession();
+  },
+
+  dismissModelNotice: () => set({ modelNotice: null }),
+
+  reconcileModelWithCatalog: () => {
+    const { activeSessionId, modelId, sessionCache } = get();
+    const response = getCachedModelsResponse();
+    if (!activeSessionId || !response || response.models.length === 0) return;
+    const current = modelId ?? sessionCache[activeSessionId]?.model_id ?? null;
+    const resolved = resolveSessionModelId(response.models, current, response.default_model);
+    if (!resolved || resolved === modelId) return;
+    const notice = switchNotice(response.models, current, resolved);
+    get().setModelId(resolved);
+    if (notice) set({ modelNotice: notice });
+  },
+
+  handleUnhealthyModel: async () => {
+    const api = get().api;
+    if (!api) return;
+    await refreshCopilotModels(api);
+    get().reconcileModelWithCatalog();
   },
 
   setReasoningEffort: (apiEffort) => {
@@ -562,6 +613,7 @@ export const useCopilotSessionStore = create<CopilotSessionState>((set, get) => 
     const resolvedId = resolveSessionModelId(models, session.model_id, apiDefault);
     const model = findCachedModel(resolvedId);
     set({
+      modelNotice: switchNotice(models, session.model_id, resolvedId),
       activeSessionId: id,
       modelId: resolvedId,
       candleCount: session.chart.candle_count,

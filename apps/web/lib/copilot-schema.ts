@@ -17,16 +17,68 @@ export const CopilotModelRecordSchema = z.object({
   recommended_candles: z.number().optional(),
   recommended_max_candles: z.number().optional(),
   presets: z.array(z.number()).optional(),
+  latency_ms: z.number().nullable().optional(),
+  status: z.string().optional(),
 });
 
+export const MODEL_PROBE_STATUSES = [
+  "ok",
+  "auth_error",
+  "quota_or_rate_limited",
+  "not_found",
+  "timeout",
+  "upstream_error",
+] as const;
+export type ModelProbeStatus = (typeof MODEL_PROBE_STATUSES)[number];
+
+export const UpstreamErrorSchema = z.object({
+  code: z.string().nullable().optional(),
+  message: z.string().nullable().optional(),
+});
+
+/**
+ * `GET /v1/copilot/models`: healthy models only once the backend probes OmniRoute.
+ * Probe fields are optional so older backends (no probe) still parse; their
+ * absence means "probe state unknown".
+ */
 export const ModelsListResponseSchema = z.object({
-  default_model: z.string(),
-  fetched_at: z.number(),
+  default_model: z.string().nullable(),
+  fetched_at: z.number().nullable().optional(),
   models: z.array(CopilotModelRecordSchema),
+  requested_default: z.string().nullable().optional(),
+  default_fallback: z.boolean().optional(),
+  probed_at: z.string().nullable().optional(),
+  ttl_s: z.number().int().optional(),
+  stale: z.boolean().optional(),
+  probe_in_progress: z.boolean().optional(),
+  upstream_reachable: z.boolean().optional(),
+  upstream_error: UpstreamErrorSchema.nullable().optional(),
+});
+
+/** Unknown future statuses are kept as strings and shown with a generic reason. */
+export const ModelProbeResultSchema = z.object({
+  id: z.string(),
+  status: z.string(),
+  latency_ms: z.number().nullable().optional(),
+  http_status: z.number().int().nullable().optional(),
+  error_code: z.string().nullable().optional(),
+  message: z.string().nullable().optional(),
+});
+
+/** `GET|POST /v1/copilot/models/probe`. */
+export const ModelProbeReportSchema = z.object({
+  probed_at: z.string().nullable(),
+  ttl_s: z.number().int().optional(),
+  provider: z.string().optional(),
+  upstream_reachable: z.boolean().optional(),
+  upstream_error: UpstreamErrorSchema.nullable().optional(),
+  results: z.array(ModelProbeResultSchema),
 });
 
 export type CopilotModelRecord = z.infer<typeof CopilotModelRecordSchema>;
 export type ModelsListResponse = z.infer<typeof ModelsListResponseSchema>;
+export type ModelProbeResult = z.infer<typeof ModelProbeResultSchema>;
+export type ModelProbeReport = z.infer<typeof ModelProbeReportSchema>;
 
 export const ChartStyleIdSchema = z.enum(["classic", "smc", "elliott", "wyckoff"]);
 export type ChartStyleId = z.infer<typeof ChartStyleIdSchema>;

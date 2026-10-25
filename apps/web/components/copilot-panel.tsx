@@ -10,6 +10,7 @@ import {
   COPILOT_ACTION_FIND_TRIANGLES,
   COPILOT_ACTION_HEAD_SHOULDERS,
   COPILOT_EMPTY_STATE,
+  COPILOT_INPUT_NO_MODEL,
   COPILOT_INPUT_PLACEHOLDER,
   COPILOT_LOADING,
   COPILOT_OFFLINE,
@@ -31,7 +32,6 @@ import { useCopilotSessionStore } from "../lib/stores/copilot-session-store";
 import { useShapeStore } from "../lib/stores/shape-store";
 import { CopilotAnalyzeProgress } from "./copilot/copilot-analyze-progress";
 import { CopilotCandleControl } from "./copilot/copilot-candle-control";
-import { CopilotModelPicker } from "./copilot/copilot-model-picker";
 import { CopilotReasoningControl } from "./copilot/copilot-reasoning-control";
 import { CopilotAnalysisSummary } from "./copilot/copilot-analysis-summary";
 import { CopilotBiasConflictBanner } from "./copilot/copilot-bias-conflict-banner";
@@ -40,6 +40,7 @@ import { CopilotMetaHtfLine } from "./copilot/copilot-meta-htf-line";
 import { CopilotRegimeEarlyBadge } from "./copilot/copilot-regime-early-badge";
 import { CopilotIntentControls } from "./copilot/copilot-intent-controls";
 import { CopilotSessionSidebar } from "./copilot/copilot-session-sidebar";
+import { useCopilotModels } from "./copilot/use-copilot-models";
 
 type CopilotPanelProps = {
   client: CopilotClient | null;
@@ -67,7 +68,6 @@ export function CopilotPanel({ client, api }: CopilotPanelProps) {
   const streamingIntentCheck = useCopilotSessionStore((s) => s.streamingIntentCheck);
   const lastAnalysisEvent = useCopilotSessionStore((s) => s.lastAnalysisEvent);
   const candleClampHint = useCopilotSessionStore((s) => s.candleClampHint);
-  const setModelId = useCopilotSessionStore((s) => s.setModelId);
   const setCandleCountPreset = useCopilotSessionStore((s) => s.setCandleCountPreset);
   const setCustomCandleCount = useCopilotSessionStore((s) => s.setCustomCandleCount);
   const createSession = useCopilotSessionStore((s) => s.createSession);
@@ -91,8 +91,11 @@ export function CopilotPanel({ client, api }: CopilotPanelProps) {
     [modelId],
   );
 
+  const { response: modelsResponse } = useCopilotModels(api);
+  const noHealthyModel = modelsResponse != null && modelsResponse.models.length === 0;
+
   const [prompt, setPrompt] = useState("");
-  const sendDisabled = isSendDisabled(connection, inFlight) || !client;
+  const sendDisabled = isSendDisabled(connection, inFlight) || !client || noHealthyModel;
   const drawDisabled = isDrawDisabled(previews.length);
 
   const send = (text: string) => {
@@ -150,15 +153,6 @@ export function CopilotPanel({ client, api }: CopilotPanelProps) {
         />
 
         <div className="flex min-w-0 flex-1 flex-col">
-          <div className="flex flex-none gap-2 border-b border-[#2b313a] p-2">
-            <CopilotModelPicker
-              api={api}
-              selectedModelId={modelId}
-              onSelect={setModelId}
-              disabled={inFlight}
-            />
-          </div>
-
           <div className="flex flex-none flex-col gap-2 border-b border-[#2b313a] p-2">
             <CopilotReasoningControl
               model={selectedModel}
@@ -284,7 +278,7 @@ export function CopilotPanel({ client, api }: CopilotPanelProps) {
             <input
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              placeholder={COPILOT_INPUT_PLACEHOLDER}
+              placeholder={noHealthyModel ? COPILOT_INPUT_NO_MODEL : COPILOT_INPUT_PLACEHOLDER}
               disabled={sendDisabled}
               className="min-w-0 flex-1 rounded border border-[#2b313a] bg-[#1e2329] px-2 py-1.5 text-xs text-white outline-none focus:border-[#f0b90b] disabled:opacity-40"
             />

@@ -1,0 +1,72 @@
+{
+  "models": [
+    {
+      "id": "agentrouter/glm-4.6",
+      "label": "glm-4.6",
+      "provider": "agentrouter",
+      "context_window": 128000,
+      "max_output_tokens": 8192,
+      "supports_reasoning": true,
+      "reasoning_efforts": [
+        "none",
+        "low",
+        "medium",
+        "high"
+      ],
+      "supports_json": true,
+      "source": "provider",
+      "request_max_tokens": 16384,
+      "recommended_candles": 200,
+      "recommended_max_candles": 500,
+      "presets": [
+        50,
+        100,
+        150,
+        200,
+        300,
+        500
+      ],
+      "latency_ms": 655,
+      "status": "ok"
+    },
+    {
+      "id": "gemini/gemini-2.5-flash",
+      "label": "gemini-2.5-flash",
+      "provider": "gemini",
+      "context_window": 1000000,
+      "max_output_tokens": 65536,
+      "supports_reasoning": true,
+      "reasoning_efforts": [
+        "none",
+        "low",
+        "medium",
+        "high"
+      ],
+      "supports_json": true,
+      "source": "provider",
+      "request_max_tokens": 16384,
+      "recommended_candles": 200,
+      "recommended_max_candles": 500,
+      "presets": [
+        50,
+        100,
+        150,
+        200,
+        300,
+        500
+      ],
+      "latency_ms": 298,
+      "status": "ok"
+    }
+  ],
+  "default_model": "agentrouter/glm-4.6",
+  "requested_default": "agentrouter/deepseek-v4-flash",
+  "default_fallback": true,
+  "fetched_at": 1792900920,
+  "probed_at": "2026-10-25T04:42:00Z",
+  "ttl_s": 600,
+  "stale": false,
+  "probe_in_progress": false,
+  "upstream_reachable": true,
+  "upstream_error": null
+}

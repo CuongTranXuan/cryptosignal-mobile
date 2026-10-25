@@ -10,6 +10,7 @@ import {
   COPILOT_MODEL_PICKER_LABEL,
   COPILOT_MODEL_PICKER_PLACEHOLDER,
   COPILOT_MODEL_SEARCH,
+  COPILOT_NO_MODELS_SHORT,
 } from "../../lib/copilot-strings";
 import { modelLabelForSession } from "../../lib/copilot-model-defaults";
 import { useCopilotModels } from "./use-copilot-models";
@@ -27,7 +28,7 @@ function CopilotModelPickerInner({
   onSelect,
   disabled,
 }: CopilotModelPickerProps) {
-  const { models, loading, defaultModelId } = useCopilotModels(api);
+  const { models, loading, defaultModelId, response } = useCopilotModels(api);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -54,9 +55,10 @@ function CopilotModelPickerInner({
   const flat = useMemo(() => groups.flatMap((g) => g.models), [groups]);
 
   const selectedLabel = useMemo(() => {
+    if (response && models.length === 0) return COPILOT_NO_MODELS_SHORT;
     if (!selectedModelId && models.length === 0) return COPILOT_MODEL_PICKER_PLACEHOLDER;
     return modelLabelForSession(models, selectedModelId, defaultModelId);
-  }, [models, selectedModelId, defaultModelId]);
+  }, [models, selectedModelId, defaultModelId, response]);
 
   const close = useCallback(() => {
     setOpen(false);
@@ -114,11 +116,8 @@ function CopilotModelPickerInner({
   let optionOffset = 0;
 
   return (
-    <div className="relative min-w-0 flex-1">
-      <label
-        className="mb-0.5 block text-[10px] uppercase tracking-wide text-[#848e9c]"
-        htmlFor={triggerId}
-      >
+    <div className="relative w-64 min-w-0">
+      <label className="sr-only" htmlFor={triggerId}>
         {COPILOT_MODEL_PICKER_LABEL}
       </label>
       <button
@@ -138,7 +137,7 @@ function CopilotModelPickerInner({
       </button>
       {open && (
         <div
-          className="absolute left-0 right-0 z-20 mt-1 rounded border border-[#2b313a] bg-[#1e2329] shadow-lg"
+          className="absolute left-0 right-0 z-50 mt-1 rounded border border-[#2b313a] bg-[#1e2329] shadow-lg"
           role="presentation"
         >
           <div className="border-b border-[#2b313a] p-2">
@@ -199,6 +198,7 @@ function CopilotModelPickerInner({
                           <span>{model.label}</span>
                           <span className="text-[10px] text-[#848e9c]">
                             {COPILOT_MODEL_LIMITS_PREFIX}: {formatModelLimitsLine(model)}
+                            {model.latency_ms != null && ` · ${Math.round(model.latency_ms)} ms`}
                           </span>
                         </button>
                       </li>

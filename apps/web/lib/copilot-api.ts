@@ -3,6 +3,7 @@ import {
   CreateSessionRequestSchema,
   FeedbackRequestSchema,
   FeedbackResponseSchema,
+  ModelProbeReportSchema,
   ModelsListResponseSchema,
   SessionsListResponseSchema,
   StylesListResponseSchema,
@@ -11,14 +12,16 @@ import {
   type CreateSessionRequest,
   type CopilotModelRecord,
   type FeedbackRequest,
+  type ModelProbeReport,
   type ModelsListResponse,
   type SessionSummary,
   type StylesListResponse,
   type UpdateSessionRequest,
 } from "./copilot-schema";
+import { parseRetryAfterSeconds } from "./copilot-model-probe";
 import { stripLegacyReasoningFromTitle } from "./copilot-session-legacy-title";
 
-export type { CopilotModelRecord, ModelsListResponse } from "./copilot-schema";
+export type { CopilotModelRecord, ModelProbeReport, ModelsListResponse } from "./copilot-schema";
 
 const DEFAULT_BASE = "";
 
@@ -60,6 +63,16 @@ export class CopilotApiError extends Error {
     this.status = status;
     this.code = code;
     this.body = body;
+  }
+}
+
+/** 429 from `POST /models/probe`; `retryAfterS` comes from Retry-After or `retry_after_s`. */
+export class CopilotProbeRateLimitError extends CopilotApiError {
+  readonly retryAfterS: number;
+
+  constructor(body: ApiErrorBody, retryAfterS: number) {
+    super(429, body, "probe_rate_limited");
+    this.retryAfterS = retryAfterS;
   }
 }
 
@@ -160,6 +173,10 @@ let mockFeedbackSeq = 0;
 
 export type CopilotApiClient = {
   fetchModels: (query?: string) => Promise<ModelsListResponse>;
+  /** `null` when the backend has no probe endpoint (older copilot). */
+  fetchModelProbeReport: () => Promise<ModelProbeReport | null>;
+  /** Forces a fresh OmniRoute probe; `null` when the backend has no probe endpoint. */
+  runModelProbe: () => Promise<ModelProbeReport | null>;
   fetchStyles: () => Promise<StylesListResponse>;
   submitFeedback: (body: FeedbackRequest) => Promise<{ id: string }>;
   listSessions: () => Promise<{ sessions: SessionSummary[] }>;
@@ -388,9 +405,34 @@ export function createCopilotApi(opts: CreateCopilotApiOptions = {}): CopilotApi
     return FeedbackResponseSchema.parse(json);
   };
 
+  const liveProbe = async (method: "GET" | "POST"): Promise<ModelProbeReport | null> => {
+    const res = await fetchImpl(`${baseUrl}/v1/copilot/models/probe`, { method });
+    // 404: older backend; 409 probe_disabled: probe off (env or non-OpenAI style).
+    if (res.status === 404) return null;
+    if (res.status === 409) {
+      const body = await readErrorBody(res);
+      if (body.code === "probe_disabled") return null;
+      throw new CopilotApiError(res.status, body, "models_probe_failed");
+    }
+    if (res.status === 429) {
+      const body = await readErrorBody(res);
+      throw new CopilotProbeRateLimitError(
+        body,
+        parseRetryAfterSeconds(res.headers.get("Retry-After"), body),
+      );
+    }
+    if (!res.ok) {
+      const body = await readErrorBody(res);
+      throw new CopilotApiError(res.status, body, "models_probe_failed");
+    }
+    return ModelProbeReportSchema.parse(await res.json());
+  };
+
   if (opts.forceMock) {
     return {
       fetchModels: async () => MOCK_MODELS_RESPONSE,
+      fetchModelProbeReport: async () => null,
+      runModelProbe: async () => null,
       fetchStyles: async () => MOCK_STYLES_RESPONSE,
       submitFeedback: mockFeedback,
       ...sessionsApi,
@@ -411,6 +453,8 @@ export function createCopilotApi(opts: CreateCopilotApiOptions = {}): CopilotApi
       const json = await res.json();
       return ModelsListResponseSchema.parse(json);
     },
+    fetchModelProbeReport: () => liveProbe("GET"),
+    runModelProbe: () => liveProbe("POST"),
     fetchStyles: liveStyles,
     submitFeedback: liveFeedback,
     ...sessionsApi,

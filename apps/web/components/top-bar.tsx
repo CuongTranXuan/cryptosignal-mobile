@@ -2,9 +2,11 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { normalizeSpotSymbol } from "../lib/binance";
+import type { CopilotApiClient } from "../lib/copilot-api";
 import { INTERVALS, type Interval } from "../lib/pattern-shape";
 import { feedBadgeLabel } from "../lib/terminal-controls";
 import { useChartStore } from "../lib/stores/chart-store";
+import { CopilotModelBar } from "./copilot/copilot-model-bar";
 
 const INTERVAL_LABELS: Record<Interval, string> = {
   "1m": "1m",
@@ -14,7 +16,7 @@ const INTERVAL_LABELS: Record<Interval, string> = {
   "1d": "1D",
 };
 
-export function TopBar() {
+export function TopBar({ api }: { api: CopilotApiClient }) {
   const symbol = useChartStore((s) => s.symbol);
   const interval = useChartStore((s) => s.interval);
   const tickerPercent = useChartStore((s) => s.tickerPercent);
@@ -99,20 +101,24 @@ export function TopBar() {
         </div>
       </div>
 
-      <div className="flex items-center gap-3 font-[family-name:var(--font-plex-mono)] text-[11px]">
-        <div className="flex items-center gap-1.5 rounded border border-[#2b313a] bg-[#1e2329] px-2.5 py-1">
-          <span
-            className={`h-2 w-2 rounded-full ${
-              connection === "live"
-                ? "bg-[#0ecb81]"
-                : connection === "reconnecting"
-                  ? "bg-[#f0b90b]"
-                  : "bg-[#f6465d]"
-            }`}
-          />
-          <span className="text-[#848e9c]">
-            Feed: <strong className="text-white">{feedLabel}</strong>
-          </span>
+      <div className="flex items-center gap-3">
+        <CopilotModelBar api={api} />
+        <div className="h-4 w-px bg-[#2b313a]" />
+        <div className="flex items-center gap-3 font-[family-name:var(--font-plex-mono)] text-[11px]">
+          <div className="flex items-center gap-1.5 rounded border border-[#2b313a] bg-[#1e2329] px-2.5 py-1">
+            <span
+              className={`h-2 w-2 rounded-full ${
+                connection === "live"
+                  ? "bg-[#0ecb81]"
+                  : connection === "reconnecting"
+                    ? "bg-[#f0b90b]"
+                    : "bg-[#f6465d]"
+              }`}
+            />
+            <span className="text-[#848e9c]">
+              Feed: <strong className="text-white">{feedLabel}</strong>
+            </span>
+          </div>
         </div>
       </div>
     </header>

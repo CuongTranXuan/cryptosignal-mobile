@@ -11,6 +11,7 @@ import { setCopilotFeedbackClient } from "../lib/copilot-feedback-host";
 import { useCopilotSessionStore } from "../lib/stores/copilot-session-store";
 import { createCopilotClient, type CopilotClient } from "../lib/use-copilot";
 import { ChartCanvas } from "./chart-canvas";
+import { CopilotModelBanner } from "./copilot/copilot-model-bar";
 import { CopilotPanel } from "./copilot-panel";
 import { PatternsTable } from "./patterns-table";
 import { TopBar } from "./top-bar";
@@ -100,7 +101,8 @@ export function TerminalShell() {
 
   return (
     <div className="flex h-screen w-screen flex-col bg-[#0b0e14] text-[#eaecef]">
-      <TopBar />
+      <TopBar api={copilotApi} />
+      <CopilotModelBanner api={copilotApi} />
       <Group
         orientation="horizontal"
         className="min-h-0 flex-1"

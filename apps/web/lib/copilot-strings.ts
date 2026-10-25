@@ -199,3 +199,43 @@ export function copilotRoleLabel(role: "user" | "agent", modelLabel?: string): s
   if (role === "user") return COPILOT_ROLE_USER;
   return modelLabel ? `${COPILOT_ROLE_AGENT} · ${modelLabel}` : COPILOT_ROLE_AGENT;
 }
+
+export const COPILOT_PROBE_CHECKED_AT = "Kiểm tra lúc {time} · {ago}";
+export const COPILOT_PROBE_NEVER = "Chưa kiểm tra model";
+export const COPILOT_PROBE_STALE = "cũ";
+export const COPILOT_PROBE_STALE_HINT = "Kết quả kiểm tra đã cũ — đang chờ kiểm tra lại";
+export const COPILOT_PROBE_IN_PROGRESS = "Đang kiểm tra…";
+export const COPILOT_PROBE_RETRY = "Kiểm tra lại";
+export const COPILOT_PROBE_RETRY_IN = "Thử lại sau {seconds}s";
+export const COPILOT_PROBE_FAILED = "Không kiểm tra lại được — thử lại sau.";
+export const COPILOT_PROBE_HIDDEN_TOGGLE = "{count} model bị ẩn";
+export const COPILOT_PROBE_HIDDEN_TITLE = "Model không qua kiểm tra OmniRoute";
+export const COPILOT_PROBE_JUST_NOW = "vừa xong";
+export const COPILOT_PROBE_MINUTES_AGO = "{n} phút trước";
+export const COPILOT_PROBE_HOURS_AGO = "{n} giờ trước";
+export const COPILOT_PROBE_DAYS_AGO = "{n} ngày trước";
+export const COPILOT_PROBE_REASON_UNKNOWN = "Không khả dụng";
+export const COPILOT_UPSTREAM_DOWN_TITLE = "Không kết nối được OmniRoute";
+export const COPILOT_UPSTREAM_DOWN_BODY =
+  "Chưa thể phân tích cho đến khi OmniRoute hoạt động lại.";
+export const COPILOT_NO_MODELS_TITLE = "Không có model nào khả dụng";
+export const COPILOT_NO_MODELS_BODY =
+  "Mọi model đều không qua kiểm tra OmniRoute. Xem danh sách model bị ẩn hoặc kiểm tra lại.";
+export const COPILOT_NO_MODELS_SHORT = "Không có model khả dụng";
+export const COPILOT_INPUT_NO_MODEL = "Chưa có model khả dụng — chưa thể phân tích";
+export const COPILOT_NOTICE_DISMISS = "Đóng thông báo";
+
+export function copilotModelSwitchedNotice(from: string, to: string, reason?: string): string {
+  const why = reason ? ` (${reason})` : "";
+  return `Model "${from}" không còn khả dụng${why} — đã chuyển sang "${to}".`;
+}
+
+export function copilotDefaultFallbackNotice(requested: string, fallback: string): string {
+  return `Model mặc định "${requested}" không qua kiểm tra — đang dùng "${fallback}".`;
+}
+
+export function copilotUnhealthyModelError(reason?: string): string {
+  return reason
+    ? `Copilot lỗi: model đã chọn không khả dụng (${reason}) — đang cập nhật danh sách model`
+    : "Copilot lỗi: model đã chọn không khả dụng — đang cập nhật danh sách model";
+}

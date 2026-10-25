@@ -15,9 +15,15 @@ import {
 import { mergeAnalyzeMeta } from "./sse-analyze-meta";
 import { isServerOverlayReadyText, joinStreamTextBlocks } from "./sse-stream-text";
 import { modelIdForAnalyzeRequest, modelLabelForSession } from "./copilot-model-defaults";
-import { findCachedModel, getDefaultModelId, getModelsList } from "./copilot-models-cache";
+import {
+  findCachedModel,
+  getCachedModelsResponse,
+  getDefaultModelId,
+  getModelsList,
+} from "./copilot-models-cache";
+import { probeStatusLabel, unhealthyModelFromError } from "./copilot-model-probe";
 import { reasoningEffortForAnalyze } from "./copilot-reasoning";
-import { resolveCopilotBaseUrl } from "./copilot-api";
+import { resolveCopilotBaseUrl, type ApiErrorBody } from "./copilot-api";
 import {
   AUTO_DRAW_PROMPT,
   COPILOT_ERROR,
@@ -28,6 +34,7 @@ import {
   copilotSkippedShapes,
   COPILOT_SCROLLED_TO_OVERLAYS,
   COPILOT_SERVER_PICKED_SHAPES,
+  copilotUnhealthyModelError,
 } from "./copilot-strings";
 import { useCopilotSessionStore } from "./stores/copilot-session-store";
 import { fetchKlines as defaultFetchKlines, type FetchKlines } from "./market-client";
@@ -79,13 +86,23 @@ export type CopilotClient = {
   dispose: () => void;
 };
 
-async function mapHttpErrorResponse(res: Response): Promise<string> {
+async function readHttpErrorBody(res: Response): Promise<ApiErrorBody> {
   try {
-    const body = (await res.json()) as import("./copilot-api").ApiErrorBody;
-    return mapCopilotHttpError(res.status, body);
+    return (await res.json()) as ApiErrorBody;
   } catch {
-    return mapCopilotHttpError(res.status, {});
+    return {};
   }
+}
+
+/** Maps an analyze HTTP error; an unhealthy-model 4xx also triggers a models refresh + auto-switch. */
+async function handleAnalyzeHttpError(res: Response): Promise<string> {
+  const body = await readHttpErrorBody(res);
+  const unhealthy = unhealthyModelFromError(res.status, body);
+  if (!unhealthy) return mapCopilotHttpError(res.status, body);
+  void useCopilotSessionStore.getState().handleUnhealthyModel();
+  return copilotUnhealthyModelError(
+    unhealthy.status ? probeStatusLabel(unhealthy.status) : undefined,
+  );
 }
 
 function closedCandlesFromChart(
@@ -543,6 +560,9 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
       return;
     }
 
+    // Probe says no model can serve: never send (covers auto-draw on closed klines too).
+    if (getCachedModelsResponse()?.models.length === 0) return;
+
     const chart = useChartStore.getState();
     const closedTimes = deps.getClosedTimes?.();
     const allClosed = closedCandlesFromChart(chart.candles, closedTimes);
@@ -614,7 +634,7 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
       });
 
       if (!res.ok) {
-        useAiStore.getState().fail(await mapHttpErrorResponse(res));
+        useAiStore.getState().fail(await handleAnalyzeHttpError(res));
         useCopilotSessionStore.getState().persistActiveSession();
         return;
       }
