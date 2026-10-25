@@ -24,6 +24,7 @@ from cryptosignal_copilot.app import create_app
 from cryptosignal_copilot.model_catalog import ModelsCatalog
 from cryptosignal_copilot.sessions_store import reset_sessions_store_for_tests
 from cryptosignal_copilot.analyze_prep import AnalyzePlan
+from cryptosignal_copilot.chart_response import aggregate_skipped, enrich_shapes_with_guardrails
 from cryptosignal_copilot.schema import PatternShape
 from tests.omniroute_fixtures import omniroute_models_payload
 
@@ -31,6 +32,9 @@ class FakeRunner:
     async def run(self, plan: AnalyzePlan):
         request = plan.request
         yield "text", {"delta": "Phân tích mẫu hình (stub). "}
+        candles = request.closedCandles
+        t0 = candles[0].time if candles else 1
+        t1 = candles[-1].time if candles else t0
         shape = PatternShape(
             id="s1",
             symbol=request.symbol,
@@ -40,11 +44,23 @@ class FakeRunner:
             status="preview",
             source="agent",
             confidence=0.7,
-            points=[{"time": 1, "price": 2}, {"time": 3, "price": 4}],
+            points=[{"time": t0, "price": 2}, {"time": t1, "price": 4}],
             priceLow=None,
             priceHigh=None,
         )
-        yield "shapes", {"shapes": [shape.model_dump()]}
+        regime = str((plan.meta or {}).get("intent_check", {}).get("detected_regime") or "range")
+        enriched, _anchors = enrich_shapes_with_guardrails(
+            [shape.model_dump()],
+            regime=regime,
+            symbol=request.symbol,
+            interval=request.interval,
+        )
+        skipped, skipped_count = aggregate_skipped([("s1", "low-conf")])
+        yield "shapes", {
+            "shapes": enriched,
+            "skipped": skipped,
+            "skipped_count": skipped_count,
+        }
         yield "done", {}
 
 async def _fetch_models(_cfg):
