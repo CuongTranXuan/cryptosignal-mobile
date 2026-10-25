@@ -25,6 +25,10 @@ describe("PatternShape", () => {
     expect(() => parsePatternShape({ ...fixture, side: "buy" })).toThrow();
   });
 
+  it("rejects backend sidecar keys leaked on the wire (e.g. _candidate_id)", () => {
+    expect(() => parsePatternShape({ ...fixture, _candidate_id: "cand-1" })).toThrow();
+  });
+
   it("rejects unknown keys on points and candles", () => {
     expect(() =>
       parsePatternShape({
