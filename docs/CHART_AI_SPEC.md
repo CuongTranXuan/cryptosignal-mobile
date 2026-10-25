@@ -757,7 +757,7 @@ Same 16 live Binance windows as C.1 (BTC/ETH/SOL/BNB × 15m/1h/4h/1d, 200 closed
 | # | Status | Evidence |
 |---|---|---|
 | 1 | fixed | rails `f"{type_label} upper/lower"` (`candidates.py:461-476`); channel rails renamed "Channel high/low rail" (`:505-519`) |
-| 2 | fixed | `enrich_resolved_shapes` (`drawing_intent.py:159-198`); `enrich_shapes_with_guardrails` keeps an existing guardrail that has evidence_against or invalidation (`chart_response.py:125-130`). Ids are hashed twice (`drw_` of `drw_`); this is deterministic and harmless. |
+| 2 | **open — corrected in C.6** | I marked this fixed by reading the code. Running the full agent path shows that `filter_preview_details` drops the guardrail key before `enrich_shapes_with_guardrails` runs, so detector guardrails never reach the client (see C.6 R1). |
 | 3 | fixed | `_candidate_id` carried from resolve to enrich (`drawing_intent.py:138, 154, 174`) |
 | 4 | partial | unknown id, too_many, duplicate and style_forbidden are checked (`agent_validate.py:26-55`). Regime_mismatch, bias_unsupported, evidence_uncited and invalidation_missing are still not checked (the schema has no fields for them, see D2). |
 | 5 | fixed | `example_ids = catalog.ids_for_style(style)[:3]` (`agent_validate.py:22`) |
@@ -799,3 +799,72 @@ Same 16 live Binance windows as C.1 (BTC/ETH/SOL/BNB × 15m/1h/4h/1d, 200 closed
 - **N4 (DT/DB neckline fallback):** a normal double top has a *single* trough between the tops. In that case `between_lows` has fewer than 2 lows and falls back to `lows[-2:]` (`candidates.py:276-277, 317-318`). That can include a low from before the first top, which gives a sloped neckline outside the pattern. Spec: horizontal neckline at the lowest low between the tops.
 - **N5 (filtering is silent):** the 25 % prefilter removal (`candidates.py:959-974`) is not in `meta`/`skipped`, so `gate_drop_rate` can no longer detect bad detectors. Report `prefilter_dropped` by reason.
 - **N6 (minor):** `enrich_resolved_shapes` contains dead code (`drawing_intent.py:170-171`).
+
+### C.6 Re-check at `c21a9384` (box, 2026-10-25, no LLM)
+"Before" = `625ecc82`, whose `apps/copilot` tree is identical to `5165aaf7` after the branch was rewritten. "After" = `c21a9384`. Same 16 Binance windows as C.1/C.5. Each source tree was exported with `git archive` and imported by path. "Real path" means the agent order `resolve_drawing_intents → enrich_resolved_shapes → schema.filter_preview_details (gate + cap) → enrich_shapes_with_guardrails` (`agent.py:205-236`), with the top 6 candidates of one style picked.
+
+| Metric | `625ecc82` | `c21a9384` |
+|---|---|---|
+| Raw candidates / pre-filter removed | 151 / 38 (25 %), not reported | 171 / **3 (1.8 %)**: H&S 2/3, double_bottom 1/24, triangles 0/16; listed in `meta.prefilter_*` |
+| Windows with 0 classic candidates | 1 (SOL 1d) | 0 |
+| All candidates resolved: real gate drops (cap excluded) | 0 | 6 / 245 (`triangle-structure`; the coder's replay mixes styles in its top 6 and gets 0) |
+| Real path, classic top 6: shapes in → out | 85 → 72 | 159 → 96 (always 6 per window) |
+| Real path, classic: real gate drops | 0 | **6 / 159 (3.8 %)**, all `triangle-structure` |
+| Real path, classic: cap drops / intents hit / intents split | 13 / 6 / 6 | 57 / 31 / **7** |
+| Real path, smc: drops | 0 / 57 | 0 / 59 |
+| Real path: shapes with detector invalidation, before → after the gate | 44 → **0** | 60 → **0** |
+| Real path: shapes with evidence_against, before → after the gate | 9 → 0 | 23 → 0 |
+| Regime | range 8, trend_down 5, trend_up 3 | same |
+| Prompt context, o200k tokens (median, min–max) | 1 603 (1 256–1 780) | 1 791 (1 442–2 018) |
+| pytest / ruff | 140 passed, 1 skipped / clean | 140 passed, 1 skipped / clean |
+
+**Quality of the classic candidates that remain** (geometry checked against the candles)
+- **Triangles: 15 of 16 are not triangles.** In 12 the rails cross inside the window or before the last bar. In 15, more than 10 % of the closes after both rails start lie more than 0.25·ATR outside the rails (typically 60–90 %). The cause: `_triangle_converges` (`candidates.py:474-484`) compares `|hu−lu|` with `|hl−ll|`, which are prices at *different times* and taken as absolute values. It never evaluates the two rails at the same time and never checks containment. The triangle score is `touches=4` with `size_atr = |hl−ll|/ATR` (`:541-546`), and size grows as the rails diverge, so these get the highest scores. **A triangle is the top-ranked classic candidate in 12 of 16 windows, and 11 of those 12 are invalid.** So "every window has a classic candidate" is met largely by filler. Example, SOL 1d: upper rail 90.73 at bar 9 → 75.00 at bar 75, lower rail 60.13 at bar 59 → 98.62 at bar 199, score 0.80, with the last close 102 above both rails.
+- **Double top/bottom: 15 of 23 have a same-side swing between the two tops (or bottoms) that exceeds both.** All 23 have at least one same-side swing between them. `_double_top_bottom` requires ≥ 2 opposite swings between the extremes (`candidates.py:323-325, 363-365`), which *excludes* the canonical one-trough double top. It never checks that the second extreme is the highest high (or lowest low) after the first. LMW DTOP: E_a is the highest high after E1 and lies within 1.5 % of E1, and the neckline is the lowest low between them.
+- **Fib:** the 0.382/0.5/0.618 lines and the pocket now run from window start to window end (`candidates.py:735`), i.e. from bar 0 even though the leg sits in the newest half. This passes min-span, but the levels are drawn across history the leg doesn't cover. Part B: from A to the right edge.
+
+**H&S: 2 of 3 dropped. Both are detector bugs, not correct rejections.**
+| Window | Swings (bar, price) | LMW check | Gate | Cause |
+|---|---|---|---|---|
+| ETH 4h | E1 47 2748.6, E2 51 2656.9, E3 64 2777.3, E4 66 2650.9, E5 79 2739.5; ATR 35.8 | passes: E3 > E1, E5; shoulders within 0.17 % of their mean; troughs within 0.11 %; height 3.4·ATR | `ancient` | neckline drawn only E2→E4 (bars 51→66, end fraction 0.33 < 0.35) |
+| SOL 4h | E1 53 122.83, E2 59 116.73, E3 63 123.76, E4 66 117.11, E5 79 122.29; ATR 1.67 | passes (shoulders within 0.22 %, troughs within 0.16 %, height 4.1·ATR) | `min-span` | neckline E2→E4 is only 7 bars |
+| BTC 1h (kept) | E1 38 … E5 81 | passes | ok | right shoulder at bar 81/200; the detector does not check whether the neckline has already been broken or invalidated since then |
+
+Detector issues (`candidates.py:644-703`):
+- (a) The neckline is not extended past E4 to the right shoulder or the right edge (`:680-687`).
+- (b) The in-play window is taken from `zz[0].t … zz[-1].t` (`:657-658`) instead of the candle window, so detector and gate disagree.
+- (c) There is no E2 ≈ E4 check (LMW requires the troughs within 1.5 % of their mean). Shoulder tolerance is 0.35·ATR versus Part B `min(1.5 %, 0.5·ATR)`.
+- (d) Inverse H&S (`:1122-1150`) still uses `lows[-3:]`, a made-up neck `max(shoulders)+ATR`, and has no in-play check.
+
+**Real-path regressions (R)**
+- **R1 (high):** `schema.filter_preview_details` → `coerce_agent_shape` drops unknown keys (`schema.py:508-520`), and `PatternShape` is `extra="forbid"` (`schema.py:40-54`). As a result, `guardrail` and `_candidate_id` are stripped before `enrich_shapes_with_guardrails` (`agent.py:232`), which then writes a default guardrail with `evidence_against=[]` and `invalidation=None`. Measured: 60 → 0 invalidations. This was already true at `625ecc82`, so C.5 #2 was wrong. Fix: carry `candidate_id` and the guardrail in a side map keyed by shape id, or re-attach them after the gate.
+- **R2 (high):** the intent-aware cap (`drawing_gate.py:1055-1110`) groups shapes by `_candidate_id`, which is stripped (R1). In the real path it splits 7 candidates (a fib keeps 0.382 but loses 0.5/0.618/pocket; a channel keeps one rail). No test drives the cap through `filter_preview_details` with `_candidate_id`. Also, `drop_key` drops every single-shape intent before any multi-shape group, whatever its confidence. And 6 intents × 1–4 shapes against `MAX_SHAPES = 6` always trims (31 of 96 classic intents were hit). Fix: cap intents to fit the shape budget *before* resolving, e.g. stop adding picks when the shape count would exceed 6, and tell the LLM the shape cost per candidate.
+- **R3 (medium):** the gate still pairs unrelated diagonals from *different* candidates as triangle rails, using names: `_role` treats "Support…" as lower and "…top neckline" as upper (`drawing_gate.py:55-56, 721-728, 873-930`). That is the source of the 6 `triangle-structure` drops (Support trendline + Double top neckline, Resistance trendline + Double bottom neckline). Fix: only pair rails within the same candidate, once R1 keeps that id.
+
+**Status of C.5 new bugs**
+- N1 triangle recency: fixed (ranked newest-first, in-play, overlap, `candidates.py:507-585`). Replaced by the geometry bug above.
+- N2 FVG id: fixed, `_cand_id("fvg", t0, tm, t2, side)` (`:827, 854`).
+- N3 BOS recency: fixed, a close break in the newest half (`:908-918`).
+- N4 DT neckline: changed, but now wrong in a different way (see above).
+- N5 pre-filter reporting: fixed (`analyze_prep.py:147-168`).
+- N6: fixed.
+
+**Eval test**
+`tests/eval/test_chart_replay.py` is no longer circular: it asserts the pre-filter rate on `raw_candidate_count`. It is still weak:
+- Its gate metric resolves the top 6 by score across *both* styles, so it never hits the classic cross-candidate drops (R3).
+- It checks the cap only by count, not that intents stay whole (R2).
+- "≥ 1 classic candidate" has no quality check.
+- It never checks that guardrails survive the gate (R1).
+
+Add per-style top-6 runs through the real path, an "intent split = 0" assertion, "invalidations out == in", and geometry assertions: triangle rails not crossed at the last bar and ≤ 10 % of closes outside; for a double top, no higher same-side swing between the tops.
+
+**Part C status at `c21a9384`** (only changes since C.5 are listed)
+- #2 open (R1).
+- #17 partial: H&S is searched with a recency rule but has issues (a)–(d).
+- #18 regressed: see doubles above.
+- #19 partial → bug: geometry invalid.
+- #20 partial: width ≥ 1.5·ATR and slope difference ≤ 0.35·ATR/bar (`candidates.py:594-604`). That slope tolerance is loose; Part B wants the opposite rail through ≥ 2 swings within tolerance.
+- #21 partial: geometry score.
+- #23 partial: leg ≥ 3·ATR in the newest half, pocket zone; levels span the full window.
+- #24 partial: `_geometry_score` (`candidates.py:103-114`), but `fit` is always the 0.5 default and `touches` is hard-coded to 4 for triangles, doubles and channels, so the score does not measure fit.
+- Unchanged: #9, #13, #14, #15, #16, #25, #26, #27, #30, #32, D6.
