@@ -16,6 +16,7 @@ export function CopilotAnalysisSummary({ analysis }: CopilotAnalysisSummaryProps
     <div
       className="rounded border border-[#2b313a] bg-[#1e2329] px-2 py-1.5 text-xs leading-relaxed text-[#eaecef]"
       role="status"
+      data-testid="copilot-analysis-summary"
     >
       <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[#848e9c]">
         {COPILOT_ANALYSIS_CARD_TITLE}

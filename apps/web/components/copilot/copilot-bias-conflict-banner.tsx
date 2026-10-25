@@ -14,6 +14,7 @@ export function CopilotBiasConflictBanner({ intentCheck }: CopilotBiasConflictBa
     <div
       className="rounded border border-[#f0b90b]/50 bg-[#f0b90b]/10 px-2 py-1.5 text-xs text-[#f0b90b]"
       role="status"
+      data-testid="copilot-bias-conflict"
     >
       {text}
     </div>

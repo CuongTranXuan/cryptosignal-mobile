@@ -13,6 +13,8 @@ export const COPILOT_ACTION_HEAD_SHOULDERS = "Vai đầu vai";
 
 export const COPILOT_STYLE_LABEL = "Phong cách phân tích";
 export const COPILOT_BIAS_LABEL = "Xu hướng (tùy chọn)";
+export const COPILOT_HORIZON_LABEL = "Khung thời gian (tùy chọn)";
+export const COPILOT_HORIZON_NONE = "Mặc định";
 export const COPILOT_BIAS_NONE = "Không chọn";
 export const COPILOT_PATTERN_LABEL = "Mẫu yêu cầu (tùy chọn)";
 export const COPILOT_PATTERN_ANY = "Bất kỳ";

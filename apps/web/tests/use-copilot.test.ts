@@ -209,7 +209,8 @@ describe("use-copilot / createCopilotClient", () => {
     const fetchMock = vi.fn(async () =>
       streamResponse([
         sseChunk("regime", {
-          regime: "trend_down",
+          ltf: { regime: "trend_down" },
+          htf: {},
           intent_check: {
             detected_regime: "trend_down",
             bias_conflict: true,

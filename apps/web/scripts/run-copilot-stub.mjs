@@ -20,71 +20,78 @@ os.environ.setdefault("COPILOT_RUN_DB_MIGRATIONS", "true")
 from cryptosignal_copilot.config import sqlite_url_for_path
 db = Path(tempfile.gettempdir()) / "cryptosignal-copilot-e2e.sqlite3"
 os.environ["DATABASE_URL"] = sqlite_url_for_path(db)
-from cryptosignal_copilot import intent_prep as _intent_prep
-
-_orig_build_intent_check = _intent_prep.build_intent_check
-
-def _e2e_build_intent_check(request, intent):
-    out = _orig_build_intent_check(request, intent)
-    if intent.bias == "bullish":
-        return {
-            **out,
-            "detected_regime": "trend_down",
-            "bias_conflict": True,
-            "message": "Xu hướng tăng trái với chế độ giảm (stub e2e).",
-        }
-    return out
-
-_intent_prep.build_intent_check = _e2e_build_intent_check
 
 from cryptosignal_copilot.app import create_app
 from cryptosignal_copilot.model_catalog import ModelsCatalog
 from cryptosignal_copilot.sessions_store import reset_sessions_store_for_tests
 from cryptosignal_copilot.analyze_prep import AnalyzePlan
-from cryptosignal_copilot.chart_real_path import run_real_path
+from cryptosignal_copilot.chart_real_path import run_real_path, simulate_llm_top_intents
 from cryptosignal_copilot.chart_response import aggregate_skipped
+from cryptosignal_copilot.analysis_events import build_regime_event, build_analysis_event
 from tests.omniroute_fixtures import omniroute_models_payload
 
 class FakeRunner:
     async def run(self, plan: AnalyzePlan):
         request = plan.request
-        yield "text", {"delta": "Phân tích mẫu hình (stub). "}
         catalog = plan.candidate_catalog
         style = (request.intent.style if request.intent else "classic") or "classic"
         intent_check = (plan.meta or {}).get("intent_check") or {}
-        regime = str(intent_check.get("detected_regime") or "range")
-        yield "regime", {"regime": regime, "intent_check": intent_check}
+        meta = dict(plan.meta or {})
+
+        yield "text", {
+            "delta": f"Stub LLM ({len(request.closedCandles)} nến) — chọn nhiều mẫu để kiểm tra giới hạn 6 hình…\\n\\n",
+        }
+
+        if catalog is not None:
+            yield "regime", build_regime_event(
+                catalog,
+                intent_check,
+                htf=meta.get("htf"),
+            )
+
         if catalog is None:
             yield "shapes", {"shapes": [], "skipped": [], "skipped_count": 0}
-            yield "analysis", {"bias": "neutral", "no_valid_pattern": True, "intent_check": intent_check}
+            yield "analysis", {
+                "bias": "neutral",
+                "no_valid_pattern": True,
+                "evidence_for": [],
+                "evidence_against": [],
+                "invalidation": None,
+                "confidence": None,
+                "intent_check": intent_check,
+            }
             yield "done", {}
             return
+
+        intents = simulate_llm_top_intents(catalog, style, max_intents=12)
         wire_shapes, metrics = run_real_path(
             catalog,
             request.closedCandles,
             symbol=request.symbol,
             interval=request.interval,
             style=style,
+            intents=intents,
         )
+
+        meta["intent_budget_fallback"] = True
+        meta["preview_shape_budget"] = 6
+        yield "meta", meta
+
         dropped_for_skip = [("", "cap") for _ in range(metrics.cap_dropped)]
         for reason, count in metrics.gate_reasons.items():
             dropped_for_skip.extend([("", reason)] * count)
         skipped, skipped_count = aggregate_skipped(dropped_for_skip)
+
         yield "shapes", {
             "shapes": wire_shapes,
             "skipped": skipped,
             "skipped_count": skipped_count,
         }
-        bias = (request.intent.bias if request.intent else None) or "neutral"
-        yield "analysis", {
-            "bias": bias,
-            "no_valid_pattern": len(wire_shapes) == 0,
-            "evidence_for": [],
-            "evidence_against": [],
-            "invalidation": None,
-            "confidence": None,
-            "intent_check": intent_check,
-        }
+        yield "analysis", build_analysis_event(
+            catalog,
+            wire_shapes,
+            intent_check,
+        )
         yield "done", {}
 
 async def _fetch_models(_cfg):

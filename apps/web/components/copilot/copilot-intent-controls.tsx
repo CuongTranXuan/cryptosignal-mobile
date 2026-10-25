@@ -9,10 +9,13 @@ import {
   labelForStyle,
   sanitizeIntentForStyle,
 } from "../../lib/copilot-chart-ai";
-import type { AnalyzeIntent, ChartBias, ChartStyleId } from "../../lib/copilot-schema";
+import type { AnalyzeIntent, ChartBias, ChartHorizon, ChartStyleId } from "../../lib/copilot-schema";
+import { labelForHorizon } from "../../lib/copilot-chart-ai";
 import {
   COPILOT_BIAS_LABEL,
   COPILOT_BIAS_NONE,
+  COPILOT_HORIZON_LABEL,
+  COPILOT_HORIZON_NONE,
   COPILOT_PATTERN_ANY,
   COPILOT_PATTERN_LABEL,
   COPILOT_STYLE_LABEL,
@@ -27,6 +30,7 @@ type CopilotIntentControlsProps = {
 };
 
 const BIAS_OPTIONS: (ChartBias | null)[] = [null, "bullish", "bearish", "neutral"];
+const HORIZON_OPTIONS: (ChartHorizon | null)[] = [null, "scalp", "swing", "position"];
 
 const FALLBACK_STYLE_IDS: ChartStyleId[] = ["classic", "smc", "elliott", "wyckoff"];
 
@@ -84,7 +88,7 @@ export function CopilotIntentControls({ api, sessionId, disabled }: CopilotInten
   };
 
   return (
-    <div className="flex flex-col gap-2 text-xs">
+    <div className="flex flex-col gap-2 text-xs" data-testid="copilot-intent-controls">
       {stylesError && (
         <p className="text-[#f6465d]" role="status">
           Không tải được danh sách phong cách từ máy chủ.
@@ -131,6 +135,26 @@ export function CopilotIntentControls({ api, sessionId, disabled }: CopilotInten
           {BIAS_OPTIONS.map((bias) => (
             <option key={bias ?? "none"} value={bias ?? ""}>
               {bias ? labelForBias(bias) : COPILOT_BIAS_NONE}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label className="flex flex-col gap-1 text-[#848e9c]">
+        <span>{COPILOT_HORIZON_LABEL}</span>
+        <select
+          disabled={disabled || !sessionId}
+          value={display.horizon ?? ""}
+          onChange={(e) => {
+            const raw = e.target.value;
+            const horizon = raw === "" ? undefined : (raw as ChartHorizon);
+            commitIntent({ ...display, horizon });
+          }}
+          className="rounded border border-[#2b313a] bg-[#1e2329] px-2 py-1.5 text-[#eaecef] disabled:opacity-40"
+        >
+          {HORIZON_OPTIONS.map((horizon) => (
+            <option key={horizon ?? "none"} value={horizon ?? ""}>
+              {horizon ? labelForHorizon(horizon) : COPILOT_HORIZON_NONE}
             </option>
           ))}
         </select>

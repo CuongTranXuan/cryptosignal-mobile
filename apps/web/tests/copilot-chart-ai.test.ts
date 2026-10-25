@@ -12,6 +12,8 @@ import {
   formatSkippedBreakdown,
   isAnalysisSseEmpty,
   parseAnalysisSseEvent,
+  formatMetaHtfLine,
+  labelForHorizon,
   labelForPattern,
   labelForSkippedReason,
   labelForStyle,
@@ -139,6 +141,20 @@ describe("copilot-chart-ai", () => {
     expect(text).toContain("Giảm");
     expect(text).toContain("volume yếu");
     expect(text).toContain("42");
+  });
+
+  it("labels horizon and formats meta htf line when present", () => {
+    expect(labelForHorizon("swing")).toBe("Swing");
+    expect(formatMetaHtfLine(null)).toBeNull();
+    expect(
+      formatMetaHtfLine({
+        model: "m",
+        candle_count_requested: 1,
+        candle_count_used: 1,
+        clamped: false,
+        htf: { interval: "4h", regime: "trend_up" },
+      }),
+    ).toContain("4h");
   });
 
   it("accepts meta with cap skipped and intent_budget_fallback", () => {

@@ -35,6 +35,8 @@ import { CopilotModelPicker } from "./copilot/copilot-model-picker";
 import { CopilotReasoningControl } from "./copilot/copilot-reasoning-control";
 import { CopilotAnalysisSummary } from "./copilot/copilot-analysis-summary";
 import { CopilotBiasConflictBanner } from "./copilot/copilot-bias-conflict-banner";
+import { CopilotIntentBudgetNote } from "./copilot/copilot-intent-budget-note";
+import { CopilotMetaHtfLine } from "./copilot/copilot-meta-htf-line";
 import { CopilotRegimeEarlyBadge } from "./copilot/copilot-regime-early-badge";
 import { CopilotIntentControls } from "./copilot/copilot-intent-controls";
 import { CopilotSessionSidebar } from "./copilot/copilot-session-sidebar";
@@ -239,6 +241,8 @@ export function CopilotPanel({ client, api }: CopilotPanelProps) {
           </div>
         )}
         <CopilotRegimeEarlyBadge regime={lastDetectedRegime} />
+        <CopilotMetaHtfLine meta={lastAnalyzeMeta} />
+        <CopilotIntentBudgetNote meta={lastAnalyzeMeta} />
         <CopilotBiasConflictBanner
           intentCheck={lastAnalyzeMeta?.intent_check ?? streamingIntentCheck}
         />

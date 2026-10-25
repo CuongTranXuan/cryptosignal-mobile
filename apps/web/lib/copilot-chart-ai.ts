@@ -3,7 +3,9 @@ import {
   SkippedEntrySchema,
   type AnalysisSseEvent,
   type AnalyzeIntent,
+  type AnalyzeMetaEvent,
   type ChartBias,
+  type ChartHorizon,
   type ChartStyleId,
   type DrawingRegime,
   type KnownSkippedReasonCode,
@@ -164,11 +166,33 @@ function humanizeId(id: string): string {
 export const DEFAULT_ANALYZE_INTENT: AnalyzeIntent = { style: "classic" };
 
 /** Request body `intent` — style defaults to classic; omit empty optional fields. */
+const HORIZON_LABELS_VI: Record<ChartHorizon, string> = {
+  scalp: "Lướt ngắn",
+  swing: "Swing",
+  position: "Vị thế dài",
+};
+
+export function labelForHorizon(horizon: ChartHorizon): string {
+  return HORIZON_LABELS_VI[horizon];
+}
+
+export function formatMetaHtfLine(meta: AnalyzeMetaEvent | null | undefined): string | null {
+  const htf = meta?.htf;
+  if (!htf || typeof htf !== "object") return null;
+  const interval = typeof htf.interval === "string" ? htf.interval : null;
+  const regime = typeof htf.regime === "string" ? labelForRegime(htf.regime) : null;
+  if (!interval && !regime) return null;
+  if (interval && regime) return `Khung cao hơn (${interval}): ${regime}.`;
+  if (interval) return `Khung cao hơn: ${interval}.`;
+  return `Khung cao hơn: ${regime}.`;
+}
+
 export function serializeAnalyzeIntent(intent: AnalyzeIntent): Record<string, unknown> {
   const style = intent.style ?? "classic";
   const out: Record<string, unknown> = { style };
   if (intent.bias) out.bias = intent.bias;
   if (intent.requested_pattern) out.requested_pattern = intent.requested_pattern;
+  if (intent.horizon) out.horizon = intent.horizon;
   return out;
 }
 

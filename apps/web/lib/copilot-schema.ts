@@ -44,10 +44,19 @@ const optionalPatternId = z
   .optional()
   .transform((value) => (value == null ? undefined : value));
 
+export const ChartHorizonSchema = z.enum(["scalp", "swing", "position"]);
+export type ChartHorizon = z.infer<typeof ChartHorizonSchema>;
+
+const optionalHorizon = z
+  .union([ChartHorizonSchema, z.null()])
+  .optional()
+  .transform((value) => (value == null ? undefined : value));
+
 export const AnalyzeIntentSchema = z.object({
   style: ChartStyleIdSchema.default("classic"),
   bias: optionalBias,
   requested_pattern: optionalPatternId,
+  horizon: optionalHorizon,
 });
 
 export type AnalyzeIntent = z.infer<typeof AnalyzeIntentSchema>;
@@ -72,7 +81,10 @@ export type DrawingGuardrail = z.infer<typeof DrawingGuardrailSchema>;
 export const IntentCheckSchema = z.object({
   detected_regime: DrawingRegimeSchema,
   bias_conflict: z.boolean(),
-  message: z.string().optional(),
+  message: z
+    .union([z.string(), z.null()])
+    .optional()
+    .transform((value) => (value == null ? undefined : value)),
 });
 
 export type IntentCheck = z.infer<typeof IntentCheckSchema>;
@@ -121,6 +133,15 @@ export const AnalyzeMetaEventSchema = z.object({
   prompt_candle_reduction_pct: z.number().optional(),
   preview_shape_budget: z.number().int().positive().optional(),
   intent_budget_fallback: z.boolean().optional(),
+  htf: z
+    .object({
+      interval: z.string().optional(),
+      regime: DrawingRegimeSchema.optional(),
+    })
+    .passthrough()
+    .nullable()
+    .optional(),
+  horizon: ChartHorizonSchema.nullable().optional(),
   skipped: z.array(SkippedEntrySchema).optional(),
   skipped_count: z.number().int().nonnegative().optional(),
 });

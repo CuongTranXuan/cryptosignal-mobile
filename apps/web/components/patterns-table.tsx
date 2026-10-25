@@ -119,14 +119,15 @@ export function PatternsTable() {
                 <td className="py-1.5">{s.interval}</td>
                 <td className="py-1.5">{s.kind}</td>
                 <td className="py-1.5 text-[#0ecb81]">{Math.round(s.confidence * 100)}%</td>
-                <td className="max-w-[12rem] py-1.5">
+                <td className="max-w-[12rem] py-1.5" data-testid="patterns-guardrail-cell">
                   <GuardrailDetails shape={s} />
                 </td>
-                <td className="py-1.5 whitespace-nowrap">
+                <td className="py-1.5 whitespace-nowrap" data-testid="patterns-feedback-cell">
                   {s.source === "agent" && feedbackDone[s.id] !== "kept" && (
                     <>
                       <button
                         type="button"
+                        data-testid="feedback-keep"
                         className="mr-2 text-[#0ecb81] hover:underline"
                         onClick={() => onKeep(s)}
                       >
@@ -134,6 +135,7 @@ export function PatternsTable() {
                       </button>
                       <button
                         type="button"
+                        data-testid="feedback-reject"
                         className="mr-2 text-[#f6465d] hover:underline"
                         onClick={() => onReject(s)}
                       >
