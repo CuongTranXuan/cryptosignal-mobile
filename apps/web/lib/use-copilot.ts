@@ -3,9 +3,15 @@ import { mapCopilotHttpError, mapCopilotSseErrorPayload } from "./copilot-errors
 import {
   formatBiasConflictNotice,
   formatSkippedBreakdown,
+  isAnalysisSseEmpty,
+  parseAnalysisSseEvent,
   parseSkippedFromPayload,
 } from "./copilot-chart-ai";
-import { AnalyzeMetaEventSchema } from "./copilot-schema";
+import {
+  AnalyzeMetaEventSchema,
+  RegimeSseEventSchema,
+  type AnalyzeMetaEvent,
+} from "./copilot-schema";
 import { modelIdForAnalyzeRequest, modelLabelForSession } from "./copilot-model-defaults";
 import { findCachedModel, getDefaultModelId, getModelsList } from "./copilot-models-cache";
 import { reasoningEffortForAnalyze } from "./copilot-reasoning";
@@ -19,6 +25,7 @@ import {
   copilotSkippedMarkers,
   copilotSkippedShapes,
   COPILOT_SCROLLED_TO_OVERLAYS,
+  COPILOT_INTENT_BUDGET_FALLBACK,
 } from "./copilot-strings";
 import { useCopilotSessionStore } from "./stores/copilot-session-store";
 import { fetchKlines as defaultFetchKlines, type FetchKlines } from "./market-client";
@@ -157,6 +164,21 @@ function appendIntentCheckNote(meta: { intent_check?: { bias_conflict: boolean; 
   useAiStore.getState().appendText(formatBiasConflictNotice(meta.intent_check.message));
 }
 
+function appendIntentBudgetFallbackNote(meta: AnalyzeMetaEvent): void {
+  if (!meta.intent_budget_fallback) return;
+  useAiStore.getState().appendText(COPILOT_INTENT_BUDGET_FALLBACK);
+}
+
+function mergeIntentCheckIntoLastMeta(intentCheck: AnalyzeMetaEvent["intent_check"]): void {
+  if (!intentCheck) return;
+  const prev = useCopilotSessionStore.getState().lastAnalyzeMeta;
+  if (!prev) return;
+  useCopilotSessionStore.getState().setLastAnalyzeMeta({
+    ...prev,
+    intent_check: intentCheck,
+  });
+}
+
 function noteDroppedMarkers(ids: string[]): void {
   if (ids.length === 0) return;
   useAiStore.getState().appendText(copilotSkippedMarkers(ids.length));
@@ -189,6 +211,8 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
 
     type SseEvent =
       | "meta"
+      | "regime"
+      | "analysis"
       | "text"
       | "shapes"
       | "markers"
@@ -198,6 +222,8 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
       | "done";
     const isSseEvent = (value: string): value is SseEvent =>
       value === "meta" ||
+      value === "regime" ||
+      value === "analysis" ||
       value === "text" ||
       value === "shapes" ||
       value === "markers" ||
@@ -214,6 +240,7 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
         if (parsed.success) {
           useCopilotSessionStore.getState().setLastAnalyzeMeta(parsed.data);
           appendIntentCheckNote(parsed.data);
+          appendIntentBudgetFallbackNote(parsed.data);
           appendServerSkippedNote(parsed.data);
           const messages = useAiStore.getState().messages.slice();
           for (let i = messages.length - 1; i >= 0; i--) {
@@ -236,6 +263,28 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
               useAiStore.setState({ messages });
               break;
             }
+          }
+        }
+        return "ok";
+      }
+      case "regime": {
+        const parsed = RegimeSseEventSchema.safeParse(data);
+        if (parsed.success) {
+          useCopilotSessionStore.getState().setLastDetectedRegime(parsed.data.regime);
+          if (parsed.data.intent_check) {
+            useCopilotSessionStore.getState().setStreamingIntentCheck(parsed.data.intent_check);
+            mergeIntentCheckIntoLastMeta(parsed.data.intent_check);
+          }
+        }
+        return "ok";
+      }
+      case "analysis": {
+        const analysis = parseAnalysisSseEvent(data);
+        if (analysis && !isAnalysisSseEmpty(analysis)) {
+          useCopilotSessionStore.getState().setLastAnalysisEvent(analysis);
+          if (analysis.intent_check) {
+            useCopilotSessionStore.getState().setStreamingIntentCheck(analysis.intent_check);
+            mergeIntentCheckIntoLastMeta(analysis.intent_check);
           }
         }
         return "ok";
@@ -442,6 +491,7 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
     const model = findCachedModel(analyzeModelId ?? sessionState.modelId);
 
     analyzing = true;
+    useCopilotSessionStore.getState().clearAnalyzeStreamState();
     useAiStore.getState().appendUser(prompt);
     useAiStore.getState().startAgent({
       modelId: model?.id ?? displayModelId,

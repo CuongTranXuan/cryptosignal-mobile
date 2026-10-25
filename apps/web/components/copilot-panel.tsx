@@ -33,7 +33,9 @@ import { CopilotAnalyzeProgress } from "./copilot/copilot-analyze-progress";
 import { CopilotCandleControl } from "./copilot/copilot-candle-control";
 import { CopilotModelPicker } from "./copilot/copilot-model-picker";
 import { CopilotReasoningControl } from "./copilot/copilot-reasoning-control";
+import { CopilotAnalysisSummary } from "./copilot/copilot-analysis-summary";
 import { CopilotBiasConflictBanner } from "./copilot/copilot-bias-conflict-banner";
+import { CopilotRegimeEarlyBadge } from "./copilot/copilot-regime-early-badge";
 import { CopilotIntentControls } from "./copilot/copilot-intent-controls";
 import { CopilotSessionSidebar } from "./copilot/copilot-session-sidebar";
 
@@ -56,6 +58,9 @@ export function CopilotPanel({ client, api }: CopilotPanelProps) {
   const candleCount = useCopilotSessionStore((s) => s.candleCount);
   const customCandleCount = useCopilotSessionStore((s) => s.customCandleCount);
   const lastAnalyzeMeta = useCopilotSessionStore((s) => s.lastAnalyzeMeta);
+  const lastDetectedRegime = useCopilotSessionStore((s) => s.lastDetectedRegime);
+  const streamingIntentCheck = useCopilotSessionStore((s) => s.streamingIntentCheck);
+  const lastAnalysisEvent = useCopilotSessionStore((s) => s.lastAnalysisEvent);
   const candleClampHint = useCopilotSessionStore((s) => s.candleClampHint);
   const setModelId = useCopilotSessionStore((s) => s.setModelId);
   const setCandleCountPreset = useCopilotSessionStore((s) => s.setCandleCountPreset);
@@ -233,7 +238,11 @@ export function CopilotPanel({ client, api }: CopilotPanelProps) {
             {sessionsError}
           </div>
         )}
-        <CopilotBiasConflictBanner intentCheck={lastAnalyzeMeta?.intent_check} />
+        <CopilotRegimeEarlyBadge regime={lastDetectedRegime} />
+        <CopilotBiasConflictBanner
+          intentCheck={lastAnalyzeMeta?.intent_check ?? streamingIntentCheck}
+        />
+        <CopilotAnalysisSummary analysis={lastAnalysisEvent} />
         <CopilotAnalyzeProgress inFlight={inFlight} />
         {messages.length === 0 && (
               <p className="text-xs text-[#474d57]">{COPILOT_EMPTY_STATE}</p>

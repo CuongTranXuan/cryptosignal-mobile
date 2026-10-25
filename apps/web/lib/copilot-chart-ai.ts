@@ -1,10 +1,13 @@
 import {
+  AnalysisSseEventSchema,
   SkippedEntrySchema,
+  type AnalysisSseEvent,
   type AnalyzeIntent,
   type ChartBias,
   type ChartStyleId,
+  type DrawingRegime,
+  type KnownSkippedReasonCode,
   type SkippedEntry,
-  type SkippedReasonCode,
 } from "./copilot-schema";
 
 export const KNOWN_PATTERN_IDS = [
@@ -69,13 +72,21 @@ const REGIME_LABELS_VI: Record<string, string> = {
   volatile: "biến động mạnh",
 };
 
-const SKIPPED_REASON_VI: Record<SkippedReasonCode, string> = {
+const SKIPPED_REASON_VI: Record<KnownSkippedReasonCode, string> = {
   low_confidence: "độ tin cậy thấp",
   out_of_window: "ngoài khung thời gian",
   invalid_geometry: "hình học không hợp lệ",
   no_candidate: "không có mẫu phù hợp",
   unsupported_pattern: "mẫu không được hỗ trợ",
+  cap: "vượt giới hạn 6 hình",
 };
+
+export function labelForSkippedReason(reasonCode: string): string {
+  if (reasonCode in SKIPPED_REASON_VI) {
+    return SKIPPED_REASON_VI[reasonCode as KnownSkippedReasonCode];
+  }
+  return humanizeId(reasonCode);
+}
 
 export function labelForStyle(id: ChartStyleId | string): string {
   if (id in STYLE_LABELS_VI) return STYLE_LABELS_VI[id as ChartStyleId];
@@ -93,6 +104,57 @@ export function labelForPattern(id: string): string {
 
 export function labelForRegime(regime: string): string {
   return REGIME_LABELS_VI[regime] ?? humanizeId(regime);
+}
+
+/** Parse `analysis` SSE payload; never throws — returns null when unrecoverable. */
+export function parseAnalysisSseEvent(data: Record<string, unknown>): AnalysisSseEvent | null {
+  const parsed = AnalysisSseEventSchema.safeParse(data);
+  if (parsed.success) return parsed.data;
+  return null;
+}
+
+export function isAnalysisSseEmpty(analysis: Partial<AnalysisSseEvent>): boolean {
+  if (analysis.no_valid_pattern) return false;
+  const bias = analysis.bias;
+  const hasBias = bias != null && bias !== "neutral";
+  const hasEvidence =
+    (analysis.evidence_for?.length ?? 0) > 0 || (analysis.evidence_against?.length ?? 0) > 0;
+  const hasConfidence = analysis.confidence != null && Number.isFinite(analysis.confidence);
+  const hasInvalidation = analysis.invalidation != null;
+  return !hasBias && !hasEvidence && !hasConfidence && !hasInvalidation;
+}
+
+/** Compact Vietnamese summary for the analysis card; null when nothing to show. */
+export function formatAnalysisSummaryVi(analysis: AnalysisSseEvent): string | null {
+  if (isAnalysisSseEmpty(analysis)) return null;
+  const lines: string[] = [];
+  if (analysis.no_valid_pattern) {
+    lines.push("Không có mẫu hình hợp lệ trong cửa sổ này.");
+  }
+  if (analysis.bias && analysis.bias !== "neutral") {
+    lines.push(`Bias phát hiện: ${labelForBias(analysis.bias)}.`);
+  }
+  if (analysis.confidence != null && Number.isFinite(analysis.confidence)) {
+    lines.push(`Độ tin cậy tổng hợp: ${Math.round(analysis.confidence * 100)}%.`);
+  }
+  const forLines = analysis.evidence_for ?? [];
+  if (forLines.length > 0) {
+    lines.push(`Bằng chứng thuận: ${forLines.join("; ")}`);
+  }
+  const againstLines = analysis.evidence_against ?? [];
+  if (againstLines.length > 0) {
+    lines.push(`Bằng chứng ngược: ${againstLines.join("; ")}`);
+  }
+  const inv = analysis.invalidation;
+  if (inv != null) {
+    const cond = inv.condition ? ` (${inv.condition})` : "";
+    lines.push(`Vô hiệu hóa: ${inv.price}${cond}`);
+  }
+  return lines.join("\n");
+}
+
+export function formatDetectedRegimeLabel(regime: DrawingRegime | string): string {
+  return labelForRegime(regime);
 }
 
 function humanizeId(id: string): string {
@@ -127,9 +189,7 @@ export function formatSkippedBreakdown(entries: SkippedEntry[]): string | null {
   const normalized = normalizeSkippedEntries(entries);
   if (normalized.length === 0) return null;
   const total = normalized.reduce((sum, e) => sum + e.count, 0);
-  const parts = normalized.map(
-    (e) => `${e.count} ${SKIPPED_REASON_VI[e.reason_code] ?? e.reason_code}`,
-  );
+  const parts = normalized.map((e) => `${e.count} ${labelForSkippedReason(e.reason_code)}`);
   return `\n\nBỏ qua ${total} hình: ${parts.join(", ")}.`;
 }
 
@@ -150,7 +210,16 @@ export function parseSkippedFromPayload(data: Record<string, unknown>): SkippedE
   const entries: SkippedEntry[] = [];
   for (const item of raw) {
     const parsed = SkippedEntrySchema.safeParse(item);
-    if (parsed.success) entries.push(parsed.data);
+    if (parsed.success) {
+      entries.push(parsed.data);
+      continue;
+    }
+    if (item && typeof item === "object") {
+      const row = item as Record<string, unknown>;
+      const code = typeof row.reason_code === "string" ? row.reason_code : "";
+      const count = typeof row.count === "number" ? row.count : 0;
+      if (code && count > 0) entries.push({ reason_code: code, count });
+    }
   }
   return normalizeSkippedEntries(entries);
 }

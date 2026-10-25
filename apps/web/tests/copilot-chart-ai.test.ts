@@ -7,9 +7,13 @@ import {
 } from "../lib/copilot-schema";
 import { PatternShapeSchema } from "../lib/pattern-shape";
 import {
+  formatAnalysisSummaryVi,
   formatBiasConflictNotice,
   formatSkippedBreakdown,
+  isAnalysisSseEmpty,
+  parseAnalysisSseEvent,
   labelForPattern,
+  labelForSkippedReason,
   labelForStyle,
   normalizeSkippedEntries,
   parseSkippedFromPayload,
@@ -102,11 +106,53 @@ describe("copilot-chart-ai", () => {
     expect(text).toContain("Bỏ qua 3 hình");
     expect(text).toContain("2 độ tin cậy thấp");
     expect(text).toContain("1 ngoài khung thời gian");
+    expect(labelForSkippedReason("cap")).toBe("vượt giới hạn 6 hình");
+    expect(formatSkippedBreakdown([{ reason_code: "cap", count: 2 }])).toContain(
+      "vượt giới hạn 6 hình",
+    );
 
     const fromPayload = parseSkippedFromPayload({
       skipped_count: 5,
     });
     expect(formatSkippedBreakdown(fromPayload)).toContain("Bỏ qua 5 hình");
+
+    const unknown = parseSkippedFromPayload({
+      skipped: [{ reason_code: "future_reason", count: 1 }],
+    });
+    expect(formatSkippedBreakdown(unknown)).toContain("future reason");
+  });
+
+  it("treats empty analysis SSE as hidden and formats filled analysis in Vietnamese", () => {
+    expect(isAnalysisSseEmpty({})).toBe(true);
+    expect(parseAnalysisSseEvent({})).not.toBeNull();
+    const emptyParsed = parseAnalysisSseEvent({});
+    expect(emptyParsed && formatAnalysisSummaryVi(emptyParsed)).toBeNull();
+
+    const filled = parseAnalysisSseEvent({
+      bias: "bearish",
+      evidence_against: ["volume yếu"],
+      confidence: 0.72,
+      invalidation: { price: 42_000, condition: "close_below" },
+    });
+    expect(filled).not.toBeNull();
+    const text = formatAnalysisSummaryVi(filled!);
+    expect(text).toContain("Giảm");
+    expect(text).toContain("volume yếu");
+    expect(text).toContain("42");
+  });
+
+  it("accepts meta with cap skipped and intent_budget_fallback", () => {
+    const meta = AnalyzeMetaEventSchema.parse({
+      model: "m",
+      candle_count_requested: 50,
+      candle_count_used: 50,
+      clamped: false,
+      preview_shape_budget: 6,
+      intent_budget_fallback: true,
+      skipped: [{ reason_code: "cap", count: 3 }],
+    });
+    expect(meta.preview_shape_budget).toBe(6);
+    expect(meta.intent_budget_fallback).toBe(true);
   });
 
   it("formats bias conflict notice with optional server message", () => {

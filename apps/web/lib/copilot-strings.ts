@@ -101,6 +101,10 @@ export const COPILOT_EFFECTIVE_CANDLES = "Đã dùng {count} nến";
 export const COPILOT_EFFECTIVE_CANDLES_CLAMPED = "Đã dùng {count} nến (đã giới hạn)";
 export const COPILOT_META_CLAMPED_DETAIL =
   "Máy chủ đã giảm từ {requested} xuống {used} nến (giới hạn token hoặc thử lại tự động)";
+export const COPILOT_INTENT_BUDGET_FALLBACK =
+  "\n\nLưu ý: máy chủ đã thay lựa chọn mẫu vì vượt giới hạn 6 hình.";
+export const COPILOT_DETECTED_REGIME_EARLY = "Chế độ phát hiện";
+export const COPILOT_ANALYSIS_CARD_TITLE = "Tóm tắt phân tích";
 export const COPILOT_CANDLE_CLAMPED_TO_MAX =
   "Đã giới hạn xuống {max} nến (tối đa mô hình)";
 export const COPILOT_ANALYZING_ELAPSED = "Đã chạy {seconds} giây";

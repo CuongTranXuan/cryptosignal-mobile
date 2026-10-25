@@ -24,7 +24,15 @@ import {
 import { CopilotApiError } from "../copilot-api";
 import { mapCopilotHttpError } from "../copilot-errors";
 import { migrateLegacyChartIntentLocalStorage } from "../copilot-intent-migration";
-import type { AnalyzeIntent, AnalyzeMetaEvent, CopilotSessionV1, SessionSummary } from "../copilot-schema";
+import type {
+  AnalysisSseEvent,
+  AnalyzeIntent,
+  AnalyzeMetaEvent,
+  CopilotSessionV1,
+  DrawingRegime,
+  IntentCheck,
+  SessionSummary,
+} from "../copilot-schema";
 import {
   agentMessageModelLabel,
   apiSessionToClient,
@@ -90,6 +98,9 @@ type CopilotSessionState = {
   customCandleCount: number | null;
   candleClampHint: string | null;
   lastAnalyzeMeta: AnalyzeMetaEvent | null;
+  lastDetectedRegime: DrawingRegime | null;
+  streamingIntentCheck: IntentCheck | null;
+  lastAnalysisEvent: AnalysisSseEvent | null;
   chartFrom: number;
   chartTo: number;
   reasoningEffort: string | null;
@@ -106,6 +117,10 @@ type CopilotSessionState = {
   setCustomCandleCount: (count: number) => void;
   getRequestedCandleCount: (closedAvailable?: number) => number;
   setLastAnalyzeMeta: (meta: AnalyzeMetaEvent | null) => void;
+  clearAnalyzeStreamState: () => void;
+  setLastDetectedRegime: (regime: DrawingRegime | null) => void;
+  setStreamingIntentCheck: (check: IntentCheck | null) => void;
+  setLastAnalysisEvent: (analysis: AnalysisSseEvent | null) => void;
   createSession: () => Promise<void>;
   switchSession: (id: string) => Promise<void>;
   renameSession: (id: string, title: string) => Promise<void>;
@@ -190,6 +205,9 @@ export const useCopilotSessionStore = create<CopilotSessionState>((set, get) => 
   customCandleCount: null,
   candleClampHint: null,
   lastAnalyzeMeta: null,
+  lastDetectedRegime: null,
+  streamingIntentCheck: null,
+  lastAnalysisEvent: null,
   chartFrom: 0,
   chartTo: 0,
   reasoningEffort: null,
@@ -438,6 +456,26 @@ export const useCopilotSessionStore = create<CopilotSessionState>((set, get) => 
     get().persistActiveSession();
   },
 
+  clearAnalyzeStreamState: () => {
+    set({
+      lastDetectedRegime: null,
+      streamingIntentCheck: null,
+      lastAnalysisEvent: null,
+    });
+  },
+
+  setLastDetectedRegime: (regime) => {
+    set({ lastDetectedRegime: regime });
+  },
+
+  setStreamingIntentCheck: (check) => {
+    set({ streamingIntentCheck: check });
+  },
+
+  setLastAnalysisEvent: (analysis) => {
+    set({ lastAnalysisEvent: analysis });
+  },
+
   createSession: async () => {
     const api = get().api;
     await get().flushPersist();
@@ -459,6 +497,9 @@ export const useCopilotSessionStore = create<CopilotSessionState>((set, get) => 
       sessions: [optimisticRow, ...previousSessions],
       activeSessionId: draft.id,
       lastAnalyzeMeta: null,
+      lastDetectedRegime: null,
+      streamingIntentCheck: null,
+      lastAnalysisEvent: null,
       sessionCache: { ...get().sessionCache, [draft.id]: draft },
     });
     useAiStore.setState({ messages: [], lastError: null, inFlight: false });
@@ -525,6 +566,9 @@ export const useCopilotSessionStore = create<CopilotSessionState>((set, get) => 
       candleCount: session.chart.candle_count,
       customCandleCount: null,
       lastAnalyzeMeta: null,
+      lastDetectedRegime: null,
+      streamingIntentCheck: null,
+      lastAnalysisEvent: null,
       reasoningEffort: resetReasoningForModel(model, session.reasoning_effort ?? null),
     });
     applySessionToUi({ ...session, model_id: resolvedId ?? session.model_id });

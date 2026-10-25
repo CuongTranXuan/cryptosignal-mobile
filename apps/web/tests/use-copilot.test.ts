@@ -107,6 +107,9 @@ async function resetStores() {
     reasoningEffort: "low",
     customCandleCount: null,
     lastAnalyzeMeta: null,
+    lastDetectedRegime: null,
+    streamingIntentCheck: null,
+    lastAnalysisEvent: null,
   });
   useChartStore.setState({
     symbol: "BTCUSDT",
@@ -200,6 +203,53 @@ describe("use-copilot / createCopilotClient", () => {
     );
     expect(body.reasoning_effort).toBe("low");
     expect(body.candle_count).toBe(3);
+  });
+
+  it("shows detected regime from SSE before model text arrives", async () => {
+    const fetchMock = vi.fn(async () =>
+      streamResponse([
+        sseChunk("regime", {
+          regime: "trend_down",
+          intent_check: {
+            detected_regime: "trend_down",
+            bias_conflict: true,
+            message: "conflict",
+          },
+        }),
+        sseChunk("text", { delta: "late reply" }),
+        sseChunk("done", {}),
+      ]),
+    );
+    const client = createCopilotClient({
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      getClosedTimes: () => new Set([c0.time, c1.time, c2.time]),
+    });
+    await client.analyze("hi");
+    expect(useCopilotSessionStore.getState().lastDetectedRegime).toBe("trend_down");
+    expect(useCopilotSessionStore.getState().streamingIntentCheck?.bias_conflict).toBe(true);
+    const agent = useAiStore.getState().messages.find((m) => m.role === "agent");
+    expect(agent?.content).not.toContain("Chế độ thị trường");
+  });
+
+  it("stores analysis SSE when filled and ignores empty analysis", async () => {
+    const fetchMock = vi.fn(async () =>
+      streamResponse([
+        sseChunk("analysis", { bias: "neutral", evidence_for: [], evidence_against: [] }),
+        sseChunk("analysis", {
+          bias: "bullish",
+          evidence_for: ["breakout"],
+          confidence: 0.6,
+        }),
+        sseChunk("done", {}),
+      ]),
+    );
+    const client = createCopilotClient({
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      getClosedTimes: () => new Set([c0.time, c1.time, c2.time]),
+    });
+    await client.analyze("hi");
+    expect(useCopilotSessionStore.getState().lastAnalysisEvent?.bias).toBe("bullish");
+    expect(useCopilotSessionStore.getState().lastAnalysisEvent?.evidence_for).toContain("breakout");
   });
 
   it("applies SSE meta candle_count_used to session store", async () => {

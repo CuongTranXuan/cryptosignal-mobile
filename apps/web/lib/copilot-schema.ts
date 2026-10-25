@@ -34,10 +34,20 @@ export type ChartStyleId = z.infer<typeof ChartStyleIdSchema>;
 export const ChartBiasSchema = z.enum(["bullish", "bearish", "neutral"]);
 export type ChartBias = z.infer<typeof ChartBiasSchema>;
 
+const optionalBias = z
+  .union([ChartBiasSchema, z.null()])
+  .optional()
+  .transform((value) => (value == null ? undefined : value));
+
+const optionalPatternId = z
+  .union([z.string().min(1), z.null()])
+  .optional()
+  .transform((value) => (value == null ? undefined : value));
+
 export const AnalyzeIntentSchema = z.object({
   style: ChartStyleIdSchema.default("classic"),
-  bias: ChartBiasSchema.optional(),
-  requested_pattern: z.string().min(1).optional(),
+  bias: optionalBias,
+  requested_pattern: optionalPatternId,
 });
 
 export type AnalyzeIntent = z.infer<typeof AnalyzeIntentSchema>;
@@ -67,15 +77,21 @@ export const IntentCheckSchema = z.object({
 
 export type IntentCheck = z.infer<typeof IntentCheckSchema>;
 
-export const SkippedReasonCodeSchema = z.enum([
+export const KnownSkippedReasonCodeSchema = z.enum([
   "low_confidence",
   "out_of_window",
   "invalid_geometry",
   "no_candidate",
   "unsupported_pattern",
+  "cap",
 ]);
 
-export type SkippedReasonCode = z.infer<typeof SkippedReasonCodeSchema>;
+export type KnownSkippedReasonCode = z.infer<typeof KnownSkippedReasonCodeSchema>;
+
+/** Wire `reason_code` — unknown codes are kept for display, not rejected. */
+export const SkippedReasonCodeSchema = z.string().min(1);
+
+export type SkippedReasonCode = string;
 
 export const SkippedEntrySchema = z.object({
   reason_code: SkippedReasonCodeSchema,
@@ -88,7 +104,10 @@ export const IntentSourceSchema = z.enum(["rules", "llm"]);
 
 export const AnalyzeMetaEventSchema = z.object({
   model: z.string(),
-  candle_count_requested: z.number(),
+  candle_count_requested: z
+    .union([z.number(), z.null()])
+    .optional()
+    .transform((value) => (value == null ? 0 : value)),
   candle_count_used: z.number(),
   clamped: z.boolean(),
   max_tokens: z.number().optional(),
@@ -100,11 +119,50 @@ export const AnalyzeMetaEventSchema = z.object({
   feature_sheet: z.record(z.unknown()).optional(),
   candidates: z.array(z.unknown()).optional(),
   prompt_candle_reduction_pct: z.number().optional(),
+  preview_shape_budget: z.number().int().positive().optional(),
+  intent_budget_fallback: z.boolean().optional(),
   skipped: z.array(SkippedEntrySchema).optional(),
   skipped_count: z.number().int().nonnegative().optional(),
 });
 
 export type AnalyzeMetaEvent = z.infer<typeof AnalyzeMetaEventSchema>;
+
+const RegimeSseEventCoreSchema = z.object({
+  regime: DrawingRegimeSchema.optional(),
+  intent_check: IntentCheckSchema.optional(),
+  ltf: z
+    .object({
+      regime: DrawingRegimeSchema.optional(),
+      strength: z.number().optional(),
+    })
+    .optional(),
+});
+
+export const RegimeSseEventSchema = RegimeSseEventCoreSchema.transform((data) => {
+  const regime = data.regime ?? data.ltf?.regime ?? "range";
+  return { regime, intent_check: data.intent_check };
+});
+
+export type RegimeSseEvent = z.infer<typeof RegimeSseEventSchema>;
+
+const optionalBiasWire = z
+  .union([ChartBiasSchema, z.null()])
+  .optional()
+  .transform((value) => (value == null ? undefined : value));
+
+export const AnalysisSseEventSchema = z
+  .object({
+    bias: optionalBiasWire,
+    no_valid_pattern: z.boolean().optional(),
+    evidence_for: z.array(z.string()).optional().default([]),
+    evidence_against: z.array(z.string()).optional().default([]),
+    invalidation: DrawingInvalidationSchema.nullable().optional(),
+    confidence: z.number().nullable().optional(),
+    intent_check: IntentCheckSchema.optional(),
+  })
+  .passthrough();
+
+export type AnalysisSseEvent = z.infer<typeof AnalysisSseEventSchema>;
 
 export const StylePatternRefSchema = z.object({
   id: z.string().min(1),

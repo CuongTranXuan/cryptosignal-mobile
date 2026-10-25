@@ -20,46 +20,70 @@ os.environ.setdefault("COPILOT_RUN_DB_MIGRATIONS", "true")
 from cryptosignal_copilot.config import sqlite_url_for_path
 db = Path(tempfile.gettempdir()) / "cryptosignal-copilot-e2e.sqlite3"
 os.environ["DATABASE_URL"] = sqlite_url_for_path(db)
+from cryptosignal_copilot import intent_prep as _intent_prep
+
+_orig_build_intent_check = _intent_prep.build_intent_check
+
+def _e2e_build_intent_check(request, intent):
+    out = _orig_build_intent_check(request, intent)
+    if intent.bias == "bullish":
+        return {
+            **out,
+            "detected_regime": "trend_down",
+            "bias_conflict": True,
+            "message": "Xu hướng tăng trái với chế độ giảm (stub e2e).",
+        }
+    return out
+
+_intent_prep.build_intent_check = _e2e_build_intent_check
+
 from cryptosignal_copilot.app import create_app
 from cryptosignal_copilot.model_catalog import ModelsCatalog
 from cryptosignal_copilot.sessions_store import reset_sessions_store_for_tests
 from cryptosignal_copilot.analyze_prep import AnalyzePlan
-from cryptosignal_copilot.chart_response import aggregate_skipped, enrich_shapes_with_guardrails
-from cryptosignal_copilot.schema import PatternShape
+from cryptosignal_copilot.chart_real_path import run_real_path
+from cryptosignal_copilot.chart_response import aggregate_skipped
 from tests.omniroute_fixtures import omniroute_models_payload
 
 class FakeRunner:
     async def run(self, plan: AnalyzePlan):
         request = plan.request
         yield "text", {"delta": "Phân tích mẫu hình (stub). "}
-        candles = request.closedCandles
-        t0 = candles[0].time if candles else 1
-        t1 = candles[-1].time if candles else t0
-        shape = PatternShape(
-            id="s1",
+        catalog = plan.candidate_catalog
+        style = (request.intent.style if request.intent else "classic") or "classic"
+        intent_check = (plan.meta or {}).get("intent_check") or {}
+        regime = str(intent_check.get("detected_regime") or "range")
+        yield "regime", {"regime": regime, "intent_check": intent_check}
+        if catalog is None:
+            yield "shapes", {"shapes": [], "skipped": [], "skipped_count": 0}
+            yield "analysis", {"bias": "neutral", "no_valid_pattern": True, "intent_check": intent_check}
+            yield "done", {}
+            return
+        wire_shapes, metrics = run_real_path(
+            catalog,
+            request.closedCandles,
             symbol=request.symbol,
             interval=request.interval,
-            kind="trendline",
-            name="Test line",
-            status="preview",
-            source="agent",
-            confidence=0.7,
-            points=[{"time": t0, "price": 2}, {"time": t1, "price": 4}],
-            priceLow=None,
-            priceHigh=None,
+            style=style,
         )
-        regime = str((plan.meta or {}).get("intent_check", {}).get("detected_regime") or "range")
-        enriched, _anchors = enrich_shapes_with_guardrails(
-            [shape.model_dump()],
-            regime=regime,
-            symbol=request.symbol,
-            interval=request.interval,
-        )
-        skipped, skipped_count = aggregate_skipped([("s1", "low-conf")])
+        dropped_for_skip = [("", "cap") for _ in range(metrics.cap_dropped)]
+        for reason, count in metrics.gate_reasons.items():
+            dropped_for_skip.extend([("", reason)] * count)
+        skipped, skipped_count = aggregate_skipped(dropped_for_skip)
         yield "shapes", {
-            "shapes": enriched,
+            "shapes": wire_shapes,
             "skipped": skipped,
             "skipped_count": skipped_count,
+        }
+        bias = (request.intent.bias if request.intent else None) or "neutral"
+        yield "analysis", {
+            "bias": bias,
+            "no_valid_pattern": len(wire_shapes) == 0,
+            "evidence_for": [],
+            "evidence_against": [],
+            "invalidation": None,
+            "confidence": None,
+            "intent_check": intent_check,
         }
         yield "done", {}
 

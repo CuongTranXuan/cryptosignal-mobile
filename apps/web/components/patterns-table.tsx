@@ -7,11 +7,9 @@ import { shapeFeedbackSnapshot } from "../lib/copilot-shape-snapshot";
 import {
   COPILOT_FEEDBACK_KEEP,
   COPILOT_FEEDBACK_REJECT,
-  COPILOT_GUARDRAIL_CONFIDENCE,
   COPILOT_GUARDRAIL_EVIDENCE,
   COPILOT_GUARDRAIL_INVALIDATION,
   COPILOT_GUARDRAIL_NONE,
-  COPILOT_GUARDRAIL_REGIME,
   PATTERNS_TABLE_ACTIONS,
   PATTERNS_TABLE_DELETE,
   PATTERNS_TABLE_EDIT,
@@ -32,32 +30,27 @@ function GuardrailDetails({ shape }: { shape: PatternShape }) {
       ? `${g.invalidation.price}${g.invalidation.condition ? ` — ${g.invalidation.condition}` : ""}`
       : "—";
   return (
-    <details className="text-[#848e9c]">
-      <summary className="cursor-pointer text-[#eaecef] hover:text-[#f0b90b]">
+    <div className="space-y-1 text-[#848e9c]">
+      <div className="text-[#eaecef]">
         {labelForRegime(g.regime)} · {Math.round(g.confidence * 100)}%
-      </summary>
-      <ul className="mt-1 list-disc pl-4">
-        <li>
-          {COPILOT_GUARDRAIL_REGIME}: {labelForRegime(g.regime)}
-        </li>
-        <li>
-          {COPILOT_GUARDRAIL_CONFIDENCE}: {Math.round(g.confidence * 100)}%
-        </li>
-        {g.evidence_against.length > 0 && (
-          <li>
-            {COPILOT_GUARDRAIL_EVIDENCE}:
-            <ul className="list-disc pl-4">
-              {g.evidence_against.map((line) => (
-                <li key={line}>{line}</li>
-              ))}
-            </ul>
-          </li>
+      </div>
+      <div>
+        <span className="text-[#848e9c]">{COPILOT_GUARDRAIL_EVIDENCE}: </span>
+        {g.evidence_against.length > 0 ? (
+          <ul className="mt-0.5 list-disc pl-4 text-[#eaecef]">
+            {g.evidence_against.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+        ) : (
+          <span>—</span>
         )}
-        <li>
-          {COPILOT_GUARDRAIL_INVALIDATION}: {inv}
-        </li>
-      </ul>
-    </details>
+      </div>
+      <div>
+        <span className="text-[#848e9c]">{COPILOT_GUARDRAIL_INVALIDATION}: </span>
+        <span className="text-[#eaecef]">{inv}</span>
+      </div>
+    </div>
   );
 }
 
