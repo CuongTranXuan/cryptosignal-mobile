@@ -1065,3 +1065,41 @@ Before = `405c7360`, after = `f73ab160`. Same 16 frozen windows (4 symbols × 15
 **Remaining (prioritized for coder):** N12 (retry_plan drops catalog → unvalidated sycophantic text, 0 shapes) → HTF close-time filter (D6) → N10 (S/R role from last close) → N13/N14/N15 (replace prose regex with a structured `direction` field + narrower descriptive allow-list) → N11 (triangle completed state) → trendline invalidation test fixture. Earlier opens: #13, #21, #24, #27.
 
 **Readiness:** UI integration can continue (wire contract 100% Zod-valid, SSE order `text, regime, [meta], text…, shapes, analysis, text, markers, done` stable). **Not ready for user testing** until N12 and the HTF lookahead are fixed: N12 streams the exact sycophantic/trade-call text the validator exists to block, with an empty chart.
+
+### C.11 Re-check at `7c03c618` (box, 2026-10-25, scripted model only — Mac offline, OmniRoute e2e skipped)
+
+Before = `f73ab160`. Same 16 windows; wide scan = all 80 series, 200-bar windows step 100 (≈ the C.10 scan) **and** 100-bar step 50.
+
+| Metric | f73ab160 | 7c03c618 |
+|---|---|---|
+| Harness classic picks / shapes / gate drop / splits | 48 / 82 / 0 / 0 | 48 / 84 / 0 / 0 |
+| LLM-like top-6 classic: shapes in→out (cap) / windows over budget | 116→90 (26) / 10 | 114→90 (24) / 9 |
+| Web Zod strict (harness + LLM-like + 5 SSE runs) | 284/284 | **286/286 + 30/30** |
+| S/R role contradicting last close, 200-bar / 100-bar | 79/209 / 31/110 flipped | **0/447 / 0/359** |
+| S/R labelled "(flipped)" but price never crossed the zone (200-bar) | — | **223/441 (51%)** (label + ×0.95 score on never-flipped zones) |
+| Asc/desc triangles already broken out but offered, 200-bar / 100-bar | 14 / 28 | **0 / 0** (prefilter `completed`: 62 / 60) |
+| Other families broken >0.25×ATR after anchor (wide) | 0 except triangles | 0 |
+| H&S/IHS offered W100 / W200 (completed/unbroken) | 7/17, 8/16 | unchanged |
+| HTF SOL 4h→1d lookahead | 72,000 s (unclosed 1d included) | **0** (bars 119, last_closed_time = close 1788566400 = LTF open, ≤ LTF close) |
+| ruff check / format | clean | clean (95 files) |
+| pytest (box) | 155 / 3 skip | 176 passed / 2 skipped (Postgres; Zod without node_modules). With `CI=true` + `pnpm install --frozen-lockfile`: wire Zod + invalidation tests 7/7 incl. trendline fixture |
+
+**Verdicts**
+
+1. **N12 — fixed.** Scripted model always "Tăng mạnh, mua ngay!": 6 model calls (3 at 100 candles, 3 at 50), then the deterministic fallback with a server Vietnamese summary. Same for forced over-budget picks (cost 7 > 6, 200 bars). The streamed text never contained model output. Streaming order is safe: the summary is yielded only after `agent.run` returns a validated result (`agent.py`, "Mô hình đã xong" → summary). No token streaming. Remaining issues:
+   - **N16 (medium):** fallback flags never reach the client. `meta["intent_budget_fallback"]` and `["validator_fallback"]` are set after the only `meta` event (the retry meta) was emitted. Every run showed a single meta with both flags `None`, so `CopilotIntentBudgetNote` (reads `meta.intent_budget_fallback`) never renders. Emit a final `meta` (or add the flags to `shapes`/`analysis`).
+   - **N17 (low):** a validator fallback reuses the budget note "Đã áp dụng lớp phủ dự phòng (ngân sách shape ≤6); các pick LLM vượt ngân sách…" and `skipped: cap` even when the cause was the language/direction check. Use a separate reason. After a candle retry, the `regime` event comes from 100 candles but the fallback catalog/analysis comes from 50 (ATR 788.5 vs 776.0), so the regime could disagree.
+2. **HTF — fixed** (`analyze_prep.py`, `c.time + htf_sec <= end_time_s + ltf_sec`). `data-api.binance.vision` is reachable.
+3. **N10 — role fixed; label wrong.** `_sr_role_from_last_close` gives a correct role on every zone (0 wrong of 447 / 359 on the full scan). But the "(flipped)" tag and `role from close` evidence are applied whenever the close is outside the zone: 223/441 zones (51%) price never crossed are called "flipped" and lose 5% score. Tag "flipped" only if closes exist on both sides after the first touch.
+4. **N13/N14 — not fixed (blocklist overfit to the C.10 test phrases).**
+   - 10/12 original phrases now retry. "đặt stop ở 65k" and "chốt lời ở 70k" now **pass** — a regression: `chốt lời`/`cắt lỗ`/`take profit`/`stop loss` were dropped.
+   - Trivial variants pass 20/22: "Có thể long tại…", "Canh short ở…", "Nên mua ở 60k", "Mua vào quanh…", "Bán ở 70k", "Short ở 70k", "Buy the dips", "Go short", "Stop-loss 65k", "SL: 65k", "SL=65k", "Take profit at 70k", "Target 70k, stop 65k", "Cắt lỗ ở…", "Buy here", "Sell at 70k", "Nên mua", "Canh mua".
+   - **`summary_direction` is gameable.** With `direction=bearish` under trend_down, all 4 bullish narratives pass, e.g. "phe mua đã kiểm soát; giá sẽ sớm đảo chiều lên và vượt đỉnh cũ" streamed and reached `analysis.summary_direction=bearish`. `direction=conditional` skips the check entirely ("Tăng mạnh sắp tới, giá sẽ lên đỉnh mới" passed). Only an honest `bullish` retries.
+   - Suggested fix: don't show the LLM's free text as the directional verdict at all. Render server text for direction/bias, and keep the LLM summary to per-candidate explanations. Or run a second cheap classifier pass on the summary to get its direction, and require `conditional` text to contain an if/then clause with a price.
+5. **N15 — mostly fixed, new false positives.** 9/13 legit lines pass (ATR tăng mạnh, breakdown/breakout invalidation, "không phải tín hiệu entry", giá mục tiêu H&S, cắt lỗ phe bán, dao động). Rejected: "Thanh khoản long ở dưới 60k" (`long\s+ở`), "Phe short tại vùng 70k bị ép" (`short\s+tại`), "Lực bán ngay sau đỉnh…" (`bán ngay`), "Volume TP 1h thấp" (`TP\s+\d`). These come from the bare-phrase regexes.
+6. **N11 — fixed:** 0 broken-out triangles on the full scan (coder's "2" was the small subset; mine was 14/28 → 0).
+7. `bias_conflict` text is now Vietnamese; `analysis.bias` = bearish for bull and bear prompts (same window).
+
+**Remaining (priority):** N14 (gameable `summary_direction`/`conditional`; directional free text still reaches the user) → N13 (blocklist overfit + `chốt lời`/`cắt lỗ` regression; use pattern classes such as `(long|short|mua|bán)\s+(ở|tại|quanh)\s*\d` plus `(sl|tp|stop[- ]?loss|take profit|cắt lỗ|chốt lời)\W*\d`) → N16 (fallback meta flags not emitted) → N10 label → N17 → N15 false positives. Earlier opens: #13, #21, #24, #27.
+
+**Readiness:** wire contract, invalidation, HTF and the N12 failure path are now sound. That is enough for **internal/alpha user testing with a visible "not financial advice" banner**. It is **not ready for general user testing**: a model can still stream a bullish narrative or a trade instruction ("Nên mua ở 60k", "SL: 65k") under a bearish regime. Re-check with real OmniRoute e2e (neutral + bullish prompt) once the Mac is online.
