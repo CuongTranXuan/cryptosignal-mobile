@@ -54,7 +54,7 @@ from cryptosignal_copilot.schema import (
 from cryptosignal_copilot.server_summary import compose_stream_summary
 from cryptosignal_copilot.vi_text import EV_NO_CATALOG, display_name_vi, evidence_items, regime_vi
 from cryptosignal_copilot.wire_marker import markers_for_wire
-from cryptosignal_copilot.wire_shape import shapes_for_wire
+from cryptosignal_copilot.wire_shape import ai_shape_flags, shapes_for_wire
 
 # LANGUAGE: require Vietnamese for `summary` and chat-facing text the user sees.
 # System scaffolding stays English. Heavy Vietnamese scaffolding here plus full-VI
@@ -339,7 +339,7 @@ class PydanticAiRunner:
                 },
             )
 
-        wire_shapes = shapes_for_wire(valid_shapes)
+        wire_shapes = [ai_shape_flags(s) for s in shapes_for_wire(valid_shapes)]
         yield (
             "shapes",
             {

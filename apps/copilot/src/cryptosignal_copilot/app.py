@@ -15,6 +15,7 @@ from pydantic import ValidationError
 
 from cryptosignal_copilot.agent import AgentRunner, PydanticAiRunner
 from cryptosignal_copilot.analyze_prep import AnalyzePrepError, prepare_analyze
+from cryptosignal_copilot.chart_autosave import AnalyzeRecorder
 from cryptosignal_copilot.chart_state import (
     ChartKeyError,
     ChartStateNotFoundError,
@@ -483,6 +484,10 @@ def create_app(
                         continue
 
                     yield sse("meta", run_plan.meta)
+                    # With a session, the run is saved as that session's chart history.
+                    recorder = (
+                        AnalyzeRecorder(current, run_plan.meta) if current.session_id else None
+                    )
 
                     queue: asyncio.Queue[tuple[str, str | None, dict | BaseException | None]] = (
                         asyncio.Queue()
@@ -518,6 +523,12 @@ def create_app(
                                 assert isinstance(payload, BaseException)
                                 raise payload
                             assert isinstance(name, str) and isinstance(payload, dict)
+                            if recorder is not None and name == "done":
+                                final_meta = await recorder.save(charts)
+                                if final_meta is not None:
+                                    yield sse("meta", final_meta)
+                            elif recorder is not None:
+                                recorder.observe(name, payload)
                             yield sse(name, payload)
                     finally:
                         if not task.done():

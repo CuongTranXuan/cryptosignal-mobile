@@ -1,0 +1,153 @@
+{
+  "code": "revision_conflict",
+  "message": "Biểu đồ đã được lưu ở nơi khác",
+  "current": {
+    "symbol": "BTCUSDT",
+    "interval": "4h",
+    "revision": 2,
+    "updated_at": 1790100003.0,
+    "shapes": [
+      {
+        "id": "user-1",
+        "symbol": "BTCUSDT",
+        "interval": "4h",
+        "kind": "trendline",
+        "name": "Đường tôi vẽ",
+        "status": "committed",
+        "source": "human",
+        "confidence": 0.7,
+        "points": [
+          {
+            "time": 1790000000,
+            "price": 100.0
+          },
+          {
+            "time": 1790144000,
+            "price": 110.0
+          }
+        ],
+        "priceLow": null,
+        "priceHigh": null,
+        "origin": "user",
+        "kept": false,
+        "edited": false
+      },
+      {
+        "id": "ai-kept",
+        "symbol": "BTCUSDT",
+        "interval": "4h",
+        "kind": "trendline",
+        "name": "Support trendline",
+        "status": "committed",
+        "source": "agent",
+        "confidence": 0.7,
+        "points": [
+          {
+            "time": 1790000000,
+            "price": 100.0
+          },
+          {
+            "time": 1790144000,
+            "price": 110.0
+          }
+        ],
+        "priceLow": null,
+        "priceHigh": null,
+        "origin": "ai",
+        "kept": true,
+        "edited": false
+      },
+      {
+        "id": "ai-edited",
+        "symbol": "BTCUSDT",
+        "interval": "4h",
+        "kind": "trendline",
+        "name": "Resistance trendline",
+        "status": "committed",
+        "source": "agent",
+        "confidence": 0.7,
+        "points": [
+          {
+            "time": 1790000000,
+            "price": 100.0
+          },
+          {
+            "time": 1790144000,
+            "price": 110.0
+          }
+        ],
+        "priceLow": null,
+        "priceHigh": null,
+        "origin": "ai",
+        "kept": false,
+        "edited": true
+      },
+      {
+        "id": "ai-new-1",
+        "symbol": "BTCUSDT",
+        "interval": "4h",
+        "kind": "trendline",
+        "name": "Support trendline",
+        "status": "preview",
+        "source": "agent",
+        "confidence": 0.7,
+        "points": [
+          {
+            "time": 1790000000,
+            "price": 100.0
+          },
+          {
+            "time": 1790144000,
+            "price": 110.0
+          }
+        ],
+        "priceLow": null,
+        "priceHigh": null,
+        "origin": "ai",
+        "kept": false,
+        "edited": false
+      }
+    ],
+    "markers": [
+      {
+        "id": "anchor-ai-kept",
+        "symbol": "BTCUSDT",
+        "interval": "4h",
+        "time": 1790000000,
+        "side": "neutral",
+        "position": "belowBar",
+        "shape": "circle",
+        "confidence": 0.7,
+        "source": "agent",
+        "drawing_id": "ai-kept"
+      },
+      {
+        "id": "anchor-ai-new-1",
+        "symbol": "BTCUSDT",
+        "interval": "4h",
+        "time": 1790000000,
+        "side": "neutral",
+        "position": "belowBar",
+        "shape": "circle",
+        "confidence": 0.7,
+        "source": "agent",
+        "drawing_id": "ai-new-1"
+      }
+    ],
+    "analysis": {
+      "bias": "bullish",
+      "confidence": 0.7,
+      "evidence_for": [
+        "x"
+      ]
+    },
+    "summary_text": "Đang phân tích… Thiên hướng tăng.",
+    "model": "agentrouter/deepseek-v4-flash",
+    "analyzed_at": 1790100002.0,
+    "view": {
+      "from": 1789280000,
+      "to": 1790864000
+    },
+    "chart_state_revision": 2
+  }
+}
