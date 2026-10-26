@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from cryptosignal_copilot.symbol_tick import tick_size_for_symbol
+from cryptosignal_copilot.symbol_tick import tick_from_magnitude, tick_size_for_symbol
 
 
 def _decimal_places(tick_size: float) -> int:
@@ -21,17 +21,9 @@ def format_market_price(price: float, symbol: str) -> str:
     rounded = round(price / tick) * tick if tick > 0 else price
     if rounded == 0 and price != 0:
         rounded = price
-        decimals = max(decimals, _decimal_places(_tick_from_display(price)))
+        decimals = max(decimals, _decimal_places(tick_from_magnitude(abs(price))))
     formatted = f"{rounded:,.{decimals}f}"
     if formatted in {"0.00", "0.0000", "0"} and price != 0:
         sig = f"{price:.8g}"
         return sig
     return formatted
-
-
-def _tick_from_display(price: float) -> float:
-    import math
-
-    if price <= 0:
-        return 0.01
-    return 10 ** max(math.floor(math.log10(abs(price))) - 2, -8)

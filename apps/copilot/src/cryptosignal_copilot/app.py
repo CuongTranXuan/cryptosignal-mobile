@@ -42,6 +42,7 @@ from cryptosignal_copilot.sessions_store import (
     SessionsStore,
     get_sessions_store,
 )
+from cryptosignal_copilot.symbol_tick import get_tick_cache, prefetch_tick_size
 
 
 def sse(event: str, data: dict) -> str:
@@ -75,6 +76,8 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        # Slim tick cache: one small local file read; refreshes happen per symbol later.
+        get_tick_cache().load()
         # Warm the probe cache in the background; never block startup on the upstream.
         try:
             cfg = load_llm_config()
@@ -299,6 +302,7 @@ def create_app(
             analyze_req = AnalyzeRequest.model_validate(body)
         except ValidationError as exc:
             return JSONResponse({"detail": exc.errors()}, status_code=422)
+        prefetch_tick_size(analyze_req.symbol)
 
         try:
             session_intent = None

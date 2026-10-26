@@ -43,6 +43,22 @@ def pytest_configure(config: pytest.Config) -> None:
 
 
 @pytest.fixture(autouse=True)
+def hermetic_tick_cache():
+    """No test may reach Binance: tick lookups use the magnitude fallback unless a test
+    installs its own cache with a mock transport."""
+    from cryptosignal_copilot.symbol_tick import (
+        TickSizeCache,
+        get_tick_cache,
+        set_tick_cache_for_tests,
+    )
+
+    previous = get_tick_cache()
+    set_tick_cache_for_tests(TickSizeCache(enabled=False))
+    yield
+    set_tick_cache_for_tests(previous)
+
+
+@pytest.fixture(autouse=True)
 def isolate_model_catalog_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Ignore host-exported catalog overrides unless a test fixture sets them."""
     for key in _CATALOG_ENV_KEYS:

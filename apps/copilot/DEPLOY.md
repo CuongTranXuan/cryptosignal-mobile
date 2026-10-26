@@ -66,6 +66,9 @@ Copilot normalizes `/models` ids (`models/gemini-2.5-flash` → `gemini-2.5-flas
 | `COPILOT_MODEL_PROBE_FIRST_WAIT_S` | no | `3` | How long a GET that had to start a probe waits before answering with the partial (in-progress) view |
 | `COPILOT_MODEL_PROBE_REFRESH_MIN_INTERVAL_S` | no | `30` | Minimum gap between probe starts for a forced refresh; otherwise `429` + `Retry-After` |
 | `COPILOT_MODELS_FETCH_TIMEOUT_S` | no | `10` | Timeout of the upstream `/models` list call |
+| `COPILOT_TICK_FETCH` | no | `true` | Refresh Binance tick/step sizes per symbol in the background (`exchangeInfo?symbol=X`); `false` keeps only the disk cache + magnitude fallback |
+| `COPILOT_TICK_CACHE_PATH` | no | `$COPILOT_DATA_DIR/symbol_ticks.json`, else `apps/copilot/data/symbol_ticks.json` (gitignored) | Slim persisted cache `{symbol: {tick_size, step_size, fetched_at}}`, loaded at startup; stale entries are served while a refresh runs; requests never wait on the network |
+| `COPILOT_TICK_CACHE_TTL_S` | no | `86400` | Age after which a cached symbol is refreshed in the background |
 | `COPILOT_DEFAULT_CANDLE_COUNT` | no | `100` | Default session/analyze window |
 | `COPILOT_DEFAULT_MODEL_CONTEXT` | no | `32000` | Catalog fallback when provider omits limits |
 | `COPILOT_DEFAULT_MODEL_MAX_OUTPUT` | no | `4096` | Max-output fallback when provider omits limits |
