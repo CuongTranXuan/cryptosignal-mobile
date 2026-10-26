@@ -96,6 +96,8 @@ If the upstream `/models` call fails (connection refused, DNS, timeout, 5xx, aut
 1. **New install:** set `DATABASE_URL`, then `COPILOT_RUN_DB_MIGRATIONS=true` or run `alembic upgrade head` from `apps/copilot`.
 2. **Legacy sqlite (`copilot_sessions` with JSON `payload` only):** point `DATABASE_URL` or `COPILOT_SESSIONS_DB` at the existing file; migration `20251014_0001` adds `reasoning_effort` if missing. If the schema already matches, `alembic stamp 20251014_0001` then `alembic upgrade head`.
 3. **Postgres / Turso:** use `postgresql+psycopg://…` or `sqlite+libsql://…` (install optional `[libsql]` extra). Same Alembic revision.
+4. **Chart history (`20261026_0003`):** adds `chart_states` (one JSON doc per session/symbol/interval, docs/CHART_HISTORY_SPEC.md). Additive; no backfill. Session deletes remove their charts in the same transaction, so SQLite needs no `PRAGMA foreign_keys`.
+5. **Logging:** in-process upgrades (`COPILOT_RUN_DB_MIGRATIONS=true`) no longer run alembic's `fileConfig`, so uvicorn/app loggers and request tracebacks stay enabled.
 
 ### Docker
 

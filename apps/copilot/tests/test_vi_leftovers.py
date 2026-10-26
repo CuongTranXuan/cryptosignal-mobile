@@ -154,37 +154,34 @@ async def test_no_english_leftovers_across_replay_fixtures(llm_env, monkeypatch)
     runs = [(f, style, False) for f in FIXTURES for style in ("classic", "smc")]
     runs += [(f, "classic", True) for f in FIXTURES[::4]]  # rules path sample
     for fixture, style, rules in runs:
-        if True:
-            events = await _run(fixture, style, monkeypatch, rules=rules)
-            kinds = [k for k, _ in events]
-            assert "analysis" in kinds and kinds[-1] == "done", (fixture, kinds)
-            for text in _user_texts(events):
-                for match in ENGLISH.finditer(text):
-                    leftovers.setdefault(match.group(0), set()).add(text[:120])
-            for kind, data in events:
-                if kind == "analysis":
-                    for key in ("evidence_for_items", "evidence_against_items"):
-                        assert len(data[key]) == len(data[key.removesuffix("_items")])
-                        for item in data[key]:
-                            _assert_coded(item)
-                            seen_codes.add(item["code"])
-                    inv = data.get("invalidation")
-                    if inv:
-                        assert inv["code"] in INVALIDATION_CODES
-                        assert inv["params"] == {"price": inv["price"]}
-                if kind == "shapes":
-                    assert set(data["labels"]) == {s["id"] for s in data["shapes"]}
-                    for shape in data["shapes"]:
-                        guard = shape["guardrail"]
-                        assert len(guard["evidence_against_items"]) == len(
-                            guard["evidence_against"]
-                        )
-                        for item in guard["evidence_against_items"]:
-                            _assert_coded(item)
-                        if guard.get("invalidation"):
-                            assert guard["invalidation"]["code"] in INVALIDATION_CODES
-                            # The raw condition is a snake_case code too (was "close beyond").
-                            assert guard["invalidation"]["condition"] in INVALIDATION_CODES
+        events = await _run(fixture, style, monkeypatch, rules=rules)
+        kinds = [k for k, _ in events]
+        assert "analysis" in kinds and kinds[-1] == "done", (fixture, kinds)
+        for text in _user_texts(events):
+            for match in ENGLISH.finditer(text):
+                leftovers.setdefault(match.group(0), set()).add(text[:120])
+        for kind, data in events:
+            if kind == "analysis":
+                for key in ("evidence_for_items", "evidence_against_items"):
+                    assert len(data[key]) == len(data[key.removesuffix("_items")])
+                    for item in data[key]:
+                        _assert_coded(item)
+                        seen_codes.add(item["code"])
+                inv = data.get("invalidation")
+                if inv:
+                    assert inv["code"] in INVALIDATION_CODES
+                    assert inv["params"] == {"price": inv["price"]}
+            if kind == "shapes":
+                assert set(data["labels"]) == {s["id"] for s in data["shapes"]}
+                for shape in data["shapes"]:
+                    guard = shape["guardrail"]
+                    assert len(guard["evidence_against_items"]) == len(guard["evidence_against"])
+                    for item in guard["evidence_against_items"]:
+                        _assert_coded(item)
+                    if guard.get("invalidation"):
+                        assert guard["invalidation"]["code"] in INVALIDATION_CODES
+                        # The raw condition is a snake_case code too (was "close beyond").
+                        assert guard["invalidation"]["condition"] in INVALIDATION_CODES
     assert not leftovers, {k: sorted(v)[:3] for k, v in leftovers.items()}
     assert {"few_touches", "atr_value"} <= seen_codes
 

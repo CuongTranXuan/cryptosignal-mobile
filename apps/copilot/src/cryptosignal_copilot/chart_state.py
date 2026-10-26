@@ -44,9 +44,9 @@ _OPTIONAL_DOC_FIELDS = ("markers", "analysis", "summary_text", "model", "analyze
 class ChartShape(SessionShape):
     """A wire shape plus the chart-history flags. Pinned = user-drawn, kept or edited."""
 
-    origin: Literal["ai", "user"]  # type: ignore[assignment]
-    kept: bool = False  # type: ignore[assignment]
-    edited: bool = False  # type: ignore[assignment]
+    origin: Literal["ai", "user"]
+    kept: bool = False
+    edited: bool = False
 
     @model_validator(mode="before")
     @classmethod
