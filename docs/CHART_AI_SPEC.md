@@ -1286,3 +1286,93 @@ Items 3-5 are rendered via template, now prefixed "AI đánh giá:". Nothing els
 **Readiness:**
 - (a) **Internal alpha — ready.**
 - (b) **General user testing — close; not yet.** No model text or signal reaches the user any more (the anti-sycophancy and safety blockers are closed). The remaining blockers are UX/perf rather than safety: N24 stacks duplicate overlays on every re-run, N25 can stall the first request after a cold start by ~4 s+ (worse on Render), and the analysis panel shows English evidence. Fix N24/N25 + i18n and run the real OmniRoute e2e once the Mac is online, then it is ready.
+
+### C.15 Re-check at `61b86fc5` (box, 2026-10-26, scripted model; Mac 681617df online but OmniRoute down, so the e2e was skipped)
+
+**What landed vs what was claimed.** PR #5 tip: `61b86fc5` ← `7b8da6ba` ← `e9daf04a` ← `fa1fd868` ← `5a3ad597` (C.14 doc).
+- `e9daf04a`: "session PATCH accepts wire guardrail on shapes and markers" (adds `wire_guardrail.py`; `SessionShape`/`AgentMarker.guardrail` become typed).
+- `7b8da6ba`: "structured probe_status on 422 model_unavailable" (`model_probe.py` +751, `analyze_prep` 422 when the probe marks the model unhealthy).
+- `61b86fc5`: web N24.
+- **The coder's claimed N25 / translation-at-source / N10 / legacy-key strip are not in any commit.** `symbol_tick.py`, `evidence_i18n.py`, `candidates.py`, `output_parsing.py`, `server_summary.py`, `analysis_events.py` and `drawing_intent.py` are byte-identical to `7bf69181`.
+- Part of that work sits only as an uncommitted stash on the dev Mac: `stash@{0}` "c14-wip-2", 2026-10-25 12:11 +07:00. I read it read-only and did not apply it.
+  - Async per-symbol `exchangeInfo?symbol=` cache with exponential backoff; `_sr_flipped` (a flip needs a prior close on the opposite side); evidence constants.
+  - It imports a `vi_text` module that is **not in the stash** (untracked), so it would not run as stashed.
+  - It has no `output_parsing` legacy strip, no summary/analysis translation and no `close_above` wording.
+
+**Metrics (before = `7bf69181`, after = `61b86fc5`)**
+
+| Check | Before | After |
+|---|---|---|
+| 16-window harness classic / smc | 84/84, 56/56 shapes, 0 gate/cap drops | same |
+| 16-window LLM-like classic | 114→90 (24 cap), 9 windows over budget | same |
+| Broken >0.25×ATR, 16 windows | 2/98 (S/R only) | 2/98 |
+| Broken >0.25×ATR, 80 series | 210/4202 (all S/R zones, by design) | 210/4202 |
+| N10 flipped label vs actual cross (228) | 218 ok / **10 rejection-as-flip** | **10 (unchanged)**; SOL 4h "S/R resistance (flipped) 83.33" still present |
+| S/R role vs last close | 447/447 consistent | same |
+| Triangles breakout side | 463 all inside | same |
+| H&S offered W100 / W200 | 7+17 / 8+16 | same |
+| HTF SOL 4h lookahead | none (last_closed_time ≤ to) | none |
+| Injection battery 55 probes × 9 kinds | 0 model text in SSE; all hostile payloads → 6 calls → fallback | same (one hit is the server disclaimer "…tín hiệu vào lệnh", which is a false positive) |
+| Invariance, 72 windows × 4 biases | 72/72 | 72/72 |
+| Zod shapes (wire dump + scripted clean + fallback) | all pass | 286/286, 6/6, 6/6 |
+| Zod anchors (AgentMarkerSchema with typed guardrail) | pass | 6/6 |
+| Evidence strings still English (summary) | 102 / 68 / 3 / 2 | same |
+| `analysis` event evidence | untranslated | untranslated ("only N touches" 108, "role from close: …" 68) |
+| Candidate names in server summary | English | English |
+| N25 cold tick lookup | sync urllib, 17.8 MB, 4.3 s | sync urllib, **17,795,060 B, 2.7 s**, unchanged code |
+| N25 fetch failure | `_FETCHED_ALL=True` forever | same: after a simulated failure and network restore, PEPE stays 0.01 and 0 bytes are refetched |
+| Legacy `"markers": []` / `"summary": ""` / `"pick_notes": []` | 6 calls + fallback | **6 calls + fallback** (clean payload: 1 call) |
+| Web tsc (Node 22) | 0 | 0 |
+| Web vitest (Node 22) | not recorded | **195/195** |
+| copilot ruff / format / pytest | clean, 257 pass | clean, 116 formatted, 257 pass / 1 skip |
+
+**N24 web replay** (real backend SSE from the scripted runs, BTCUSDT 4h, 100 closed candles, one client, sequential runs):
+
+| Run | Shapes (unique) | Anchors (unique, orphans) |
+|---|---|---|
+| 1 normal | 6 (6) | 6 (6, 0) |
+| 2 identical | 6 (6) | 6 (6, 0) |
+| 3 server fallback | 6 (6) | 6 (6, 0) |
+| 4 HTTP 500 | 6 kept | 6 |
+| 5 `error` event after text | 6 kept | 6 |
+| 6 network throw | 6 kept | 6 |
+| 7 stream truncated before `shapes` | 6 kept | 6 |
+| 8 after pin(A) + edit(B), same run again | 6, edited points of B kept, A present | 6 |
+| 9 shapes event where every shape fails the closed-window filter | **2** (only pinned/edited remain) | 2 |
+| 10 `shapes: []` | 2 | 2 |
+
+- All 10 request bodies (existingShapes 0/6/…/2, guardrail stripped) validate against the backend `AnalyzeRequest` (extra=forbid), so there is no second-run 422.
+- Chat copy: "Đã đặt 6 điểm neo."; the skipped notice reads "(Bỏ qua N điểm neo không hợp lệ.)".
+
+**Verdicts**
+1. **N24: fixed.** Re-runs replace AI shapes, the IDs are deduplicated, anchors follow their shapes, and pinned or edited shapes survive. Transport failures, error events and truncated streams never wipe.
+   - Nit: a *successful* stream whose shapes are all dropped client-side (run 9) clears the previous unpinned overlays, while the server summary still lists 6 drawings. Consider "no valid shapes → keep the previous set, show a note".
+   - Known limit: pins are lost on reload (`pinnedIds` is not persisted).
+2. **Web defence in depth (60d28403): done.** All agent markers render with `NEUTRAL_MARKER_COLOR` (`marker-map.ts`), `coerceAgentMarker` maps long/short/unknown → neutral, and the chat copy says "điểm neo".
+3. **e9daf04a / 7b8da6ba: OK** (pytest 257 pass; the anchor guardrail stays Zod-valid on the wire).
+   - Observation on the Mac backend: the first `/v1/copilot/models` call returned a cached list (default `ddgw/tinfoil/gpt-oss-120b`, not the requested `agentrouter/deepseek-v4-flash`). The next call re-probed and returned 0 models with `upstream_reachable:false`, `connect_error`.
+   - Check that a stale cache and an unreachable probe give a clear UI state rather than an empty picker.
+4. **N25: not fixed in the PR** (it is only in the Mac stash). The cold request still blocks the event loop for ~2.7–4.3 s on a 17.8 MB download, and one failure disables tick lookups until restart.
+5. **Translation at source: not fixed.** The summary evidence, the analysis panel, `close_above` and the server-summary names are unchanged.
+6. **N10: not fixed.** It is still 10/228. The stash's `_sr_flipped` has the right rule but is uncommitted.
+7. **Legacy-key strip: not fixed.** `"markers": []`, `"summary": ""` and `"pick_notes": []` each still cost 6 calls and end in fallback.
+8. The safety properties hold: invariance, no model text in the stream, Zod, broken lines, HTF.
+
+**OmniRoute e2e:** not run.
+- The Mac copilot backend is up (`127.0.0.1:8100`, `/health` ok, model `agentrouter/deepseek-v4-flash`, upstream base host 127.0.0.1).
+- OmniRoute is **not running**: there is no listener at the configured upstream, and the backend reports `upstream_reachable:false` (`connect_error`) at 14:01 +07.
+
+**Remaining (priority):**
+1. Commit and push the coder's N25 + N10 work (including the missing `vi_text.py`).
+2. Translation at source: analysis panel, summary evidence, `close_above`, names.
+3. Strip legacy keys before validation.
+4. N24 nit: all-dropped run.
+5. Persist pins.
+6. Real OmniRoute e2e (start OmniRoute on the Mac).
+7. Earlier open items: #13, #21, #24, #27.
+
+**Readiness:**
+- (a) **Internal alpha: ready.**
+- (b) **General user testing: not yet.**
+  - N24 is closed, but N25 (cold-start stall plus permanent tick fallback after one failure) and English evidence in the analysis panel remain.
+  - No real-model e2e has been run on this tip.
