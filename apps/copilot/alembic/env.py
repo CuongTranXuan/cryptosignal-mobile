@@ -13,8 +13,12 @@ from cryptosignal_copilot.config import load_database_url  # noqa: E402
 from cryptosignal_copilot.db.models import Base  # noqa: E402
 
 config = context.config
-if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+# Only the alembic CLI configures logging from alembic.ini. In-process upgrades
+# (app startup, tests) pass configure_logger=False: fileConfig's default
+# disable_existing_loggers=True silenced uvicorn.error and every app logger, so
+# request tracebacks never reached the log. Even the CLI keeps existing loggers.
+if config.config_file_name is not None and config.attributes.get("configure_logger", True):
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
 

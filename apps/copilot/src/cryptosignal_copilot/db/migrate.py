@@ -15,6 +15,8 @@ def alembic_config(database_url: str | None = None) -> Config:
     cfg.set_main_option("script_location", str(root / "alembic"))
     url = database_url or load_database_url()
     cfg.set_main_option("sqlalchemy.url", url)
+    # In-process upgrades must not reconfigure logging (see alembic/env.py).
+    cfg.attributes["configure_logger"] = False
     return cfg
 
 
