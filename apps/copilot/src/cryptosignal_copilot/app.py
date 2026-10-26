@@ -104,6 +104,9 @@ def create_app(
     drain_done = asyncio.Event()
     drain_done.set()
 
+    # `/health` is the bare liveness/readiness alias (same body and codes) for probes and
+    # humans hitting the API port directly; every other route lives under /v1/copilot.
+    @app.get("/health")
     @app.get("/v1/copilot/health")
     async def health():
         try:

@@ -50,6 +50,16 @@ async def test_health_ok(llm_env, test_app):
 
 
 @pytest.mark.asyncio
+async def test_bare_health_alias(llm_env, test_app):
+    app = test_app(FakeRunner())
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        bare = await client.get("/health")
+        prefixed = await client.get("/v1/copilot/health")
+    assert bare.status_code == 200
+    assert bare.json() == prefixed.json()
+
+
+@pytest.mark.asyncio
 async def test_health_missing(monkeypatch):
     monkeypatch.delenv("LLM_API_KEY", raising=False)
     monkeypatch.delenv("LLM_API_STYLE", raising=False)
@@ -60,7 +70,9 @@ async def test_health_missing(monkeypatch):
     app = create_app(runner=FakeRunner())
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         res = await client.get("/v1/copilot/health")
+        bare = await client.get("/health")
     assert res.status_code == 503
+    assert bare.status_code == 503
 
 
 @pytest.mark.asyncio

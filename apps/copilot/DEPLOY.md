@@ -8,7 +8,7 @@
 
 | Item | Value |
 |---|---|
-| Health | `GET /v1/copilot/health` |
+| Health | `GET /v1/copilot/health` (alias `GET /health`, same body and codes) |
 | Migrations | `cd apps/copilot && alembic upgrade head` |
 | Compose (web + copilot) | `deploy/DEPLOY.md` |
 | Cloud Run | `deploy/cloudrun/deploy.sh` |
@@ -103,7 +103,7 @@ docker run --rm -p 8000:8000 --env-file .env \
   -e COPILOT_RUN_DB_MIGRATIONS=true cryptosignal-copilot
 ```
 
-Image runs as non-root, honors `PORT`, uvicorn `--proxy-headers --forwarded-allow-ips='*'`, healthcheck on `/v1/copilot/health`.
+Image runs as non-root, honors `PORT`, uvicorn `--proxy-headers --forwarded-allow-ips='*'`, healthcheck on `/v1/copilot/health`. `GET /health` is a bare alias for local checks and load balancers (before it existed every route lived under `/v1/copilot`, so `/health` was a 404).
 
 ### Cloud Run
 
