@@ -87,7 +87,7 @@ Presets above `hard_max` are hidden in the UI; `custom` input shows `max = hard_
 | unknown (defaults) | 4 096 | assume reasoning; no param |
 JSON answer itself is ≤ ~2 000 tokens (≤ 10 shapes + VI summary).
 
-Reasoning tiers exposed to the user: exactly `capabilities.effort_tiers` (normalized `reasoning_efforts`), in provider order. Models without tiers show no picker (server sends no effort). UI labels: `none`=Tắt, `low`=Thấp (mặc định), `medium`=Vừa, `high`=Cao, `xhigh`/`max`=Rất cao/Tối đa, with a hint that high tiers are slower and may run out of output budget.
+Reasoning tiers exposed to the user: exactly `capabilities.effort_tiers` (normalized `reasoning_efforts`), in provider order. Models without tiers show no picker (server sends no effort). A model with `supports_reasoning: false` (e.g. the provider's `capabilities.reasoning: false`) always gets `reasoning_efforts: []`, even when the table lists tiers for its family. UI labels: `none`=Tắt, `low`=Thấp (mặc định), `medium`=Vừa, `high`=Cao, `xhigh`/`max`=Rất cao/Tối đa, with a hint that high tiers are slower and may run out of output budget.
 
 Retry rule (fallback to lower tier): on empty text / `UnexpectedModelBehavior` / finish_reason=`length` with no output → retry **once** with `reasoning_effort` = next lower tier present in `effort_tiers` (`max→xhigh→high→medium→low→none`), and `candle_count` = previous preset below the current value (≥50), `max_tokens` unchanged. Second failure → `empty_model_output`. `meta` reports `reasoning_effort_requested`, `reasoning_effort_used`, `retried:true`. (`run_settings.lower_reasoning_effort` today maps high→low and has no xhigh/max step — coder should switch it to the generic "next lower tier in the list" rule.)
 

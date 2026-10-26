@@ -327,6 +327,11 @@ def normalize_model_row(
             out = override.max_output_tokens
             sources.max_output_tokens = "provider"
 
+    if not reasoning and efforts:
+        # A non-reasoning model has no tiers to pick (MODEL_SELECTION_SPEC §2): the table
+        # must not hand efforts to a model the provider marks `reasoning: false`.
+        efforts = []
+
     if override and override.request_max_tokens is not None:
         request_max = override.request_max_tokens
     elif structured_mode == "text_json":
