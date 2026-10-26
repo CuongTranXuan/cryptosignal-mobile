@@ -1419,3 +1419,67 @@ Also in this pass:
 - **N10:** a zone is only "flipped" after a close on the opposite side, then a close back through (test: SOL 4h ~83.33 rejection, plus every replay fixture).
 - **Legacy output keys:** `markers`, `summary` and `pick_notes` are stripped before validation in both output modes, so they validate on the first call.
 - **Server text:** the summary, drop note and budget note are now fully Vietnamese (no "detector / overlay / range / bias / pick / geometry").
+
+### C.17 Re-check at `b07eee5c` — round C.16 (box, 2026-10-26, scripted model + stub e2e; Mac 681617df online, OmniRoute down, so the real-model e2e was skipped)
+
+Tip = Mac-local `feat/copilot-actionable-drawings` `b07eee5c` (not pushed; fetched to the box via `git bundle`). Range `61b86fc5..b07eee5c`, 14 commits:
+- docs: `093782ea` (C.15), `94686397` (auto-analysis spec + VPS plan).
+- `dbdb4f29` probe all models, `36eed450` /health alias, `7699530b` + `2fc2fdc5` N25, `900d554a` CI, `0e8e8e92` /models when upstream down, `d2a832e7` legacy-key strip, `f4a7c699` i18n at the source + N10, `5d1c5318` cleanup, `b07eee5c` 503.
+- web: `f6259017`, `162a9f6d`.
+- All the claimed SHAs are present. Uncommitted web WIP on the Mac (patterns-table, top-bar, analysis-window, chart-state…) was not reviewed.
+
+**Metrics (before = `61b86fc5`, after = `b07eee5c`)**
+
+| Check | Before | After |
+|---|---|---|
+| 16-window harness classic / smc | 84/84, 56/56 | same |
+| 16-window LLM-like classic | 114→90 (24 cap), 9 over budget | same |
+| Broken >0.25×ATR, 16 windows / 80 series | 2/98 / 210/4202 (S/R zones only, by design) | 2/98 / 212/4202 (S/R only; the role re-labelling moved 2) |
+| **N10, flipped label but never crossed** | **10/228** | **0** (218 flipped, all actually crossed; 225 plain never crossed; 4 plain-but-crossed = touch-through without an opposite-side close, which is correct) |
+| S/R role vs last close | 447 consistent | 447 consistent |
+| Triangles breakout side | 463 inside | same |
+| H&S offered W100 / W200 | 7+17 / 8+16 | 24 / 24 offered (my script counted "completed" by the English string; the totals are unchanged) |
+| HTF SOL 4h lookahead | none | none |
+| Injection battery 55 × 9 = 495 | 0 model text; all 9 kinds → 6 calls → fallback | 0 model text; `markers`/`summary`/`pick_notes` are now **stripped, 1 call, no fallback**; the other 6 hostile kinds still 6 calls → fallback. The only probe hit is the server disclaimer "…tín hiệu vào lệnh" (false positive) |
+| **Legacy `markers: []` / `summary: ""` / `pick_notes: []`** | 6 calls + fallback | **1 call, no fallback** |
+| Invariance, 72 windows × 4 biases | 72/72 | 72/72 |
+| Leftover English in user-facing SSE strings (740 runs: 16 + 8 low-price + 160 big windows × classic/smc × clean/garbage; every string in text/regime/analysis/shapes/markers, including evidence, `*_items[].text` and invalidation `text`) | 102+68+3+2 in the summary; analysis panel untranslated; `close_above` raw; English names | **0**. Only coded `params.role` values ("support"/"resistance") remain, which are machine fields. `meta.*` debug fields and `summary_direction` enums stay English (not rendered) |
+| Zod: shapes (SSE 2666 + harness wire 286), markers 2666, analysis 740, regime 1110 | pass | **all pass** (`evidence_*` = string \| `{code, params, text}`; the guardrail's extra `evidence_against_items` is stripped by the non-strict nested object) |
+| N25 cold tick lookup | sync, 17.8 MB, 2.7–4.3 s | **0.0000 s**, never blocks; background `exchangeInfo?symbol=` = 5.3 KB |
+| N25 failure / backoff | permanent fallback | 30, 60, 120, 240, 480, 960, 1920, 3600, 3600 s; no fetch before `retry_at`; recovers (failures → 0); a stale tick is kept after TTL + failure; the file persists and reloads |
+| PEPE cold | 0.01 after failure | magnitude 1e-8 → "0.00000376"; exchange 1e-8 after the fetch |
+| /models, upstream down (box server, closed port) | stale healthy list | `models: []`, `default_model: null`, `upstream_reachable: false`, `connect_error` |
+| analyze, upstream down | 500 / long wait | **503 `upstream_unreachable`** in 0.01 s, Vietnamese message; re-probe when down every 15 s (`down_ttl_s`) |
+| Web: empty list / 503 | — | `modelsAvailability` → "down" → banner "Không kết nối được OmniRoute"; input placeholder "Chưa có model khả dụng…"; 503 → `lastError` "Không kết nối được cổng mô hình AI — thử lại sau" |
+| Web tsc / vitest (Node 22) | 0 / 195 | **0 / 231 of 231** |
+| e2e-chart-ai-proxy.sh (stub :8765, next dev :3300 on the box) | — | 5/5 script steps PASS. Corepack can't write on the box, so the script's two `pnpm`/`pip` steps were run by hand: e2e SSE Zod vitest 1/1, feedback keep/reject/edit/delete 201, wire Zod pytest 1/1 → **7/7** |
+| copilot ruff / format / pytest | clean / 257 | clean, 121 formatted / **328 pass, 1 skip** |
+
+**Verdicts**
+1. **N25: fixed.** It never blocks, fetches per symbol (KB, not MB), backs off 30 s → 3600 s, keeps a stale tick, recovers, and persists to a small file.
+   - Note: on Render the default `apps/copilot/data` is ephemeral, so the cache refills after each deploy. That is harmless because the magnitude fallback is correct for USDT pairs.
+2. **N10: fixed.** 0/228 rejections are labelled as flips, and SOL 4h 83.33 is no longer "(flipped)".
+3. **Legacy-key strip: fixed.** 1 call. Strip-and-ignore means the stripped text never reaches the stream (0 probe hits in 165 runs).
+4. **i18n at the source: fixed for the backend.** Summary, analysis event, evidence, invalidation, regime and intent_check are Vietnamese, with codes and params alongside.
+5. **Upstream-down behaviour: fixed.** /models returns [] with a null default, analyze returns 503 quickly, and the web shows a clear "OmniRoute down" state.
+6. **Web i18n: mostly done.** Leftovers (low):
+   - `displayShapeName` has no rule for "H&S neckline", "Inverse H&S neckline" or "Fib pocket 0.5–0.618", so these show in English in the patterns table and the chat overlay list. "Order block" is kept as jargon.
+   - The model-bar banner detail appends the backend's English `upstream_error.message` ("Upstream unreachable (connection failed)"). Map it by `code`.
+   - Pre-existing: the wire shape `name` for S/R zones uses `f"S/R {price:.2f}"` (`candidates.py` `_level_clusters`), so PEPE is "S/R 0.00" and DOGE "S/R 0.10" (the candidate name is correct). It isn't visible because the web maps S/R to a generic label, but sessions store it; use `format_market_price`.
+7. **Deferred by the UI developer:** the N24 case where every shape is dropped, and pin persistence (moved to chart-history work).
+8. The safety properties hold: no model text, invariance, Zod, broken lines, triangles, HTF.
+
+**OmniRoute e2e: not run.** The Mac copilot backend is up (127.0.0.1:8100, `/health` ok, model `agentrouter/deepseek-v4-flash`). OmniRoute is **down**: /models returned `[]` with `upstream_reachable:false` (`connect_error`) at 14:30 +07. A real-model run on this tip is still outstanding.
+
+**Remaining (priority):**
+1. Real OmniRoute e2e on the Mac.
+2. Push the 14 local commits after the user approves.
+3. `displayShapeName` rules for H&S, IH&S and Fib pocket.
+4. Map `upstream_error` by code.
+5. S/R shape-name `.2f`.
+6. Deferred: the all-dropped run and pin persistence.
+7. Earlier open items: #13, #21, #24, #27.
+
+**Readiness:**
+- (a) **Internal alpha: ready.**
+- (b) **General user testing: ready on the code side, pending one gate.** All the C.14/C.15 blockers (N24, N25, i18n, N10, legacy keys) are closed. The gate is a real-model e2e with deepseek-v4-flash (latency, leaks, Zod) once OmniRoute is up. The leftovers above are cosmetic.
