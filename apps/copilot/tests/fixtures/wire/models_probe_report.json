@@ -8,6 +8,8 @@
     "skipped_count": 0,
     "skipped_ids": [],
     "complete": true,
+    "total": 4,
+    "pending_count": 0,
     "results": [
       {
         "id": "agentrouter/deepseek-v4-flash",
@@ -53,6 +55,8 @@
     "skipped_count": 0,
     "skipped_ids": [],
     "complete": true,
+    "total": 4,
+    "pending_count": 0,
     "results": [
       {
         "id": "agentrouter/deepseek-v4-flash",
@@ -101,6 +105,8 @@
     "skipped_count": 0,
     "skipped_ids": [],
     "complete": true,
+    "total": 0,
+    "pending_count": 0,
     "results": [],
     "probe_in_progress": false
   }

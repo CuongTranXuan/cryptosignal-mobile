@@ -356,12 +356,19 @@ async def test_first_request_does_not_block_and_publishes_progress(
         assert body["probe_in_progress"] is True
         assert [m["id"] for m in body["models"]] == ["m/fast"]
         assert body["default_model"] == "m/fast"
+        total = len(service.partial_report().results) + body["pending_count"]  # type: ignore[union-attr]
+        assert body["total"] == total and body["pending_count"] >= 1
         report = (await client.get("/v1/copilot/models/probe")).json()
         assert report["complete"] is False and report["probe_in_progress"] is True
+        assert report["total"] == total
+        assert report["pending_count"] == total - len(report["results"])
         gate.set()
         await service._task  # type: ignore[misc]
         done = (await client.get("/v1/copilot/models")).json()
+        final = (await client.get("/v1/copilot/models/probe")).json()
     assert done["probe_in_progress"] is False
+    assert "total" not in done and "pending_count" not in done
+    assert final["total"] == len(final["results"]) == total and final["pending_count"] == 0
     assert [m["id"] for m in done["models"]] == ["m/fast", "m/slow"]
 
 
@@ -449,6 +456,10 @@ async def test_ttl_cache_and_stale_while_revalidate(probe_env):
     body = service.models_body(stale)
     assert body["stale"] is True
     assert body["probe_in_progress"] is True
+    # Progress describes the run in flight, not the stale report being served.
+    running = service.partial_report()
+    expected = (running.total, running.pending_count) if running else (None, None)
+    assert (body["total"], body["pending_count"]) == expected
     # Stale: requested default m/auth failed → no substitute default from stale data.
     assert body["default_model"] is None and body["default_fallback"] is False
     assert body["requested_default"] == "m/auth"

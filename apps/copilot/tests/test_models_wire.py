@@ -78,8 +78,15 @@ REPORT_FIELDS: dict[str, tuple[type | None, ...]] = {
     "skipped_count": (int,),
     "skipped_ids": (list,),
     "complete": (bool,),
+    "total": (int, None),
+    "pending_count": (int, None),
     "probe_in_progress": (bool,),
     "results": (list,),
+}
+# Present on /models only while a probe runs (probe_in_progress=true).
+MODELS_PROGRESS_FIELDS: dict[str, tuple[type | None, ...]] = {
+    "total": (int, None),
+    "pending_count": (int, None),
 }
 RESULT_FIELDS: dict[str, tuple[type | None, ...]] = {
     "id": (str,),
@@ -115,7 +122,10 @@ def _check(obj: Any, fields: dict[str, tuple[type | None, ...]], where: str) -> 
 
 
 def check_models_body(body: dict[str, Any], where: str) -> None:
-    _check(body, MODELS_FIELDS, where)
+    fields = MODELS_FIELDS
+    if body.get("probe_in_progress"):
+        fields = {**MODELS_FIELDS, **MODELS_PROGRESS_FIELDS}
+    _check(body, fields, where)
     for i, item in enumerate(body["models"]):
         _check(item, MODEL_ITEM_FIELDS, f"{where}.models[{i}]")
         assert item["status"] == "ok"

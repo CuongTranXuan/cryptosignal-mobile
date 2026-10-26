@@ -334,10 +334,18 @@ class ProbeReport:
     skipped_ids: tuple[str, ...] = ()
     allowlist: tuple[str, ...] = field(default_factory=tuple)
     complete: bool = True
+    # Ids probed in this run; None while the upstream /models list is still loading.
+    total: int | None = 0
 
     @property
     def skipped_count(self) -> int:
         return len(self.skipped_ids)
+
+    @property
+    def pending_count(self) -> int | None:
+        if self.total is None:
+            return None
+        return max(self.total - len(self.results), 0)
 
     @property
     def upstream_reachable(self) -> bool:
@@ -387,6 +395,8 @@ class ProbeReport:
             "skipped_count": self.skipped_count,
             "skipped_ids": list(self.skipped_ids),
             "complete": self.complete,
+            "total": self.total,
+            "pending_count": self.pending_count,
             "results": [r.to_api_dict() for r in self.results],
         }
 
@@ -705,6 +715,7 @@ class ModelProbeService:
             results=(),
             requested_default=normalize_upstream_model_id(cfg.model),
             complete=False,
+            total=None,
         )
 
     async def _run(self, cfg: LlmConfig) -> ProbeReport:
@@ -769,6 +780,7 @@ class ModelProbeService:
             skipped_ids=skipped_ids,
             allowlist=allowlist,
             complete=False,
+            total=len(candidates),
         )
         self._partial = partial
 
@@ -819,6 +831,7 @@ class ModelProbeService:
             snapshot=snapshot,
             skipped_ids=skipped_ids,
             allowlist=allowlist,
+            total=len(candidates),
         )
 
     # ------------------------------------------------------------------ API bodies
@@ -859,6 +872,7 @@ class ModelProbeService:
             "ttl_s": int(settings.ttl_s),
             "stale": stale,
             "probe_in_progress": self.in_progress,
+            **self._progress_fields(),
             "upstream_reachable": report.upstream_reachable if report else False,
             "upstream_error": (
                 report.upstream_error.to_api_dict() if report and report.upstream_error else None
@@ -868,4 +882,15 @@ class ModelProbeService:
     def report_body(self, report: ProbeReport) -> dict[str, Any]:
         body = report.to_api_dict(self.settings.ttl_s)
         body["probe_in_progress"] = self.in_progress
+        body.update(self._progress_fields())
         return body
+
+    def _progress_fields(self) -> dict[str, int | None]:
+        """`total`/`pending_count` of the run in flight (a stale report may be served
+        meanwhile, so its own counts would read as done). Empty when nothing runs."""
+        if not self.in_progress:
+            return {}
+        running = self._partial
+        if running is None:
+            return {"total": None, "pending_count": None}
+        return {"total": running.total, "pending_count": running.pending_count}

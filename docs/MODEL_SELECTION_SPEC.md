@@ -149,6 +149,8 @@ type ModelsResponse = {
   ttl_s: number;
   stale: boolean;                    // cached report past TTL; refresh running
   probe_in_progress: boolean;        // true → `models` holds the healthy ids found so far
+  total?: number | null;             // only while probe_in_progress: ids in the running probe (null until its /models list loads)
+  pending_count?: number | null;     // only while probe_in_progress: total − results published so far
   upstream_reachable: boolean;
   upstream_error: { code: string; message: string } | null;
 };
@@ -160,6 +162,8 @@ type ProbeReport = {
   skipped_count: number;             // = skipped_ids.length (0 with the default MAX_MODELS=0)
   skipped_ids: string[];             // candidates over COPILOT_MODEL_PROBE_MAX_MODELS, never probed
   complete: boolean;                 // false → partial report of a running probe
+  total: number | null;              // ids probed in this run (0 when no probe ran: upstream down/config missing; null = list still loading)
+  pending_count: number | null;      // total − results.length; while a refresh runs both describe the run in flight
   probe_in_progress: boolean;
   results: { id: string;             // completion order of the running/last probe
     status: "ok"|"auth_error"|"quota_or_rate_limited"|"not_found"|"provider_unconfigured"|"timeout"|"upstream_error";
