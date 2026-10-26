@@ -344,6 +344,8 @@ class PydanticAiRunner:
             "shapes",
             {
                 "shapes": wire_shapes,
+                # Vietnamese display name per shape id; `name` stays the canonical id.
+                "labels": {s["id"]: display_name_vi(str(s.get("name", ""))) for s in wire_shapes},
                 "dropped": [{"id": shape_id, "reason": reason} for shape_id, reason in dropped],
                 "skipped": skipped,
                 "skipped_count": skipped_count,

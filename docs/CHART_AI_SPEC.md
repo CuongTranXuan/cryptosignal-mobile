@@ -1386,8 +1386,11 @@ Every evidence line and invalidation condition the client shows now has a stable
 - Shape and marker `guardrail`: `evidence_against` (Vietnamese `string[]`) plus `evidence_against_items`. `invalidation` gets the same `code` / `params` / `text`.
 - Legacy English detector strings (stored sessions, older guardrails) map to the same codes and come back out in Vietnamese. Unknown text gets `code: "note"`.
 - Shape `name` stays the canonical English id (the web maps it with `displayShapeName`). Server text uses Vietnamese names (`vi_text.display_name_vi`).
+- The `shapes` SSE event adds `labels: {<shape id>: <Vietnamese display name>}` (additive, top-level on the event, so the strict shape schema is untouched). The client can show `labels[id]` instead of mapping `name` itself.
+- Invalidation `condition` is always a snake_case code (`close_above` / `close_below` / `close_beyond`); the detector no longer emits `"close beyond"`.
+- Every gate drop code (`off-grid`, `no-anchor`, `impulse`, `schema:*`, …) has a Vietnamese label for the drop note (`vi_text.GATE_REASON_VI`); the machine codes stay in `shapes.dropped`.
 
-Source of truth: `apps/copilot/src/cryptosignal_copilot/vi_text.py`. Fixture: `apps/copilot/tests/fixtures/wire/analyze_coded_text.json`. Test: `tests/test_vi_leftovers.py` scans every user-facing string over the 16 replay fixtures × classic/SMC (scripted model) and fails on any English leftover or any uncoded item.
+Source of truth: `apps/copilot/src/cryptosignal_copilot/vi_text.py`. Fixture: `apps/copilot/tests/fixtures/wire/analyze_coded_text.json`. Test: `tests/test_vi_leftovers.py` scans every user-facing string (text deltas, analysis, guardrails, `labels`) over the 16 replay fixtures × classic/SMC (scripted model) plus a rules-path sample, the Elliott/Wyckoff messages and every gate drop code, and scans the source for the old English templates; it fails on any English leftover or any uncoded item.
 
 | code | params | text (vi) |
 |---|---|---|

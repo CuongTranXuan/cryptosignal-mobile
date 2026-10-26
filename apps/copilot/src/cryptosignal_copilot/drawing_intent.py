@@ -124,7 +124,7 @@ def confidence_from_score(score: float, touches: int) -> float | None:
 
 def invalidation_condition(cand: DrawingCandidate, last_close: float) -> str:
     if cand.invalidation_price is None:
-        return "close beyond"
+        return "close_beyond"
     if cand.invalidation_price < last_close:
         return "close_below"
     return "close_above"
@@ -142,7 +142,7 @@ def guardrail_for_candidate(
     confidence = confidence_from_score(cand.score, touches)
     if confidence is None:
         return None
-    condition = "close beyond"
+    condition = "close_beyond"
     if cand.invalidation_price is not None and last_close is not None:
         condition = invalidation_condition(cand, last_close)
     inv = (

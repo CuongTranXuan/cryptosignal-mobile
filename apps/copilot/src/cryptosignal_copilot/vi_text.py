@@ -216,12 +216,29 @@ GATE_REASON_VI: dict[str, str] = {
     "unpaired-triangle": "tam giác thiếu cạnh",
     "triangle-structure": "cấu trúc tam giác sai",
     "fib-no-C": "Fibonacci thiếu điểm C",
+    "fib-not-horizontal": "Fibonacci không nằm ngang",
     "cap": "vượt giới hạn 6 hình",
     "gate-error": "lỗi kiểm tra",
+    "off-grid": "lệch lưới thời gian",
+    "off-candle": "không khớp nến",
+    "before-window": "trước cửa sổ phân tích",
+    "interval-mismatch": "sai khung thời gian",
+    "no-anchor": "thiếu điểm neo",
+    "zone-without-time": "vùng thiếu mốc thời gian",
+    "mixed-side": "lẫn đỉnh và đáy",
+    "multiple-future": "nhiều điểm tương lai",
+    "future-not-endpoint": "điểm tương lai không ở cuối",
+    "human-future": "hình vẽ tay có điểm tương lai",
+    "impulse": "thiếu nhịp đẩy giữa các lần chạm",
+    "kind": "loại hình không hỗ trợ",
 }
+SCHEMA_REASON_VI = "sai cấu trúc dữ liệu"
 
 
 def gate_reason_vi(reason: str) -> str:
+    """Vietnamese label for a gate drop code (`schema:<field>` codes share one label)."""
+    if reason.startswith("schema:"):
+        return SCHEMA_REASON_VI
     return GATE_REASON_VI.get(reason, "không hợp lệ")
 
 

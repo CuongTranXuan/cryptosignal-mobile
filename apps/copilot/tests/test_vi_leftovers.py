@@ -3,12 +3,18 @@ invalidation carries a stable `{code, params, text}`.
 
 Runs the real runner with a scripted model over all 16 replay fixtures (classic + SMC)
 and scans everything the analysis panel and summary show: SSE `text` deltas, the
-`analysis` event, shape/marker guardrails. Canonical shape `name`s stay English ids by
-contract (the web maps them with `displayShapeName`), so they are not scanned.
+`analysis` event, shape/marker guardrails, and the per-shape Vietnamese `labels` map
+of the `shapes` event. Canonical shape `name`s stay English ids by contract (`labels`
+carries the display text), so `name` itself is not scanned.
+
+Also covered: the rules path (no LLM call), Elliott/Wyckoff intent messages, every gate
+drop code, and a source scan for the English templates that used to ship.
 """
 
 from __future__ import annotations
 
+import ast
+import dataclasses
 import re
 from pathlib import Path
 from types import SimpleNamespace
@@ -18,13 +24,19 @@ import pytest
 from pydantic_ai import Agent
 
 from cryptosignal_copilot.agent import PydanticAiRunner
+from cryptosignal_copilot.drawing_gate import format_drop_note
 from cryptosignal_copilot.drawing_intent import (
     AnalyzeResultLlm,
     PickAssessment,
     build_deterministic_fallback,
+    enrich_resolved_shapes,
+    resolve_drawing_intents,
 )
+from cryptosignal_copilot.intent_prep import build_intent_check
+from cryptosignal_copilot.schema import AnalyzeIntent
 from cryptosignal_copilot.vi_text import (
     EVIDENCE_CODES,
+    GATE_REASON_VI,
     INVALIDATION_CODES,
     evidence_item,
     localize_guardrail,
@@ -66,10 +78,25 @@ def _scripted_output(catalog: Any, style: str) -> AnalyzeResultLlm:
     )
 
 
-async def _run(fixture: str, style: str, monkeypatch) -> list[tuple[str, dict]]:
+async def _run(
+    fixture: str, style: str, monkeypatch, *, rules: bool = False
+) -> list[tuple[str, dict]]:
     plan = _plan_from_fixture(fixture, candle_count=200)
     plan.request.intent.style = style  # type: ignore[union-attr]
     catalog = plan.candidate_catalog
+    if rules:
+        # Rules-first path: shapes from the top picks, no model call at all.
+        picks = build_deterministic_fallback(catalog, style)
+        shapes, _ = resolve_drawing_intents(picks.drawing_intents, catalog)
+        last = float(plan.request.closedCandles[-1].close)
+        step = dataclasses.replace(
+            plan.intent_step,
+            use_llm=False,
+            rule_shapes=enrich_resolved_shapes(shapes, catalog, last_close=last),
+            rule_intents=list(picks.drawing_intents),
+            intent_source="rules",
+        )
+        plan = dataclasses.replace(plan, intent_step=step)
 
     async def scripted(self, prompt, model_settings=None):
         return SimpleNamespace(output=_scripted_output(catalog, style))
@@ -105,6 +132,7 @@ def _user_texts(events: list[tuple[str, dict]]) -> list[str]:
         elif kind == "shapes":
             for shape in data["shapes"]:
                 texts += _guard_texts(shape.get("guardrail") or {})
+            texts += [str(v) for v in (data.get("labels") or {}).values()]
         elif kind == "markers":
             for marker in data["markers"]:
                 texts.append(str(marker.get("label") or ""))
@@ -123,9 +151,11 @@ def _assert_coded(item: dict[str, Any]) -> None:
 async def test_no_english_leftovers_across_replay_fixtures(llm_env, monkeypatch):
     leftovers: dict[str, set[str]] = {}
     seen_codes: set[str] = set()
-    for fixture in FIXTURES:
-        for style in ("classic", "smc"):
-            events = await _run(fixture, style, monkeypatch)
+    runs = [(f, style, False) for f in FIXTURES for style in ("classic", "smc")]
+    runs += [(f, "classic", True) for f in FIXTURES[::4]]  # rules path sample
+    for fixture, style, rules in runs:
+        if True:
+            events = await _run(fixture, style, monkeypatch, rules=rules)
             kinds = [k for k, _ in events]
             assert "analysis" in kinds and kinds[-1] == "done", (fixture, kinds)
             for text in _user_texts(events):
@@ -143,6 +173,7 @@ async def test_no_english_leftovers_across_replay_fixtures(llm_env, monkeypatch)
                         assert inv["code"] in INVALIDATION_CODES
                         assert inv["params"] == {"price": inv["price"]}
                 if kind == "shapes":
+                    assert set(data["labels"]) == {s["id"] for s in data["shapes"]}
                     for shape in data["shapes"]:
                         guard = shape["guardrail"]
                         assert len(guard["evidence_against_items"]) == len(
@@ -152,6 +183,8 @@ async def test_no_english_leftovers_across_replay_fixtures(llm_env, monkeypatch)
                             _assert_coded(item)
                         if guard.get("invalidation"):
                             assert guard["invalidation"]["code"] in INVALIDATION_CODES
+                            # The raw condition is a snake_case code too (was "close beyond").
+                            assert guard["invalidation"]["condition"] in INVALIDATION_CODES
     assert not leftovers, {k: sorted(v)[:3] for k, v in leftovers.items()}
     assert {"few_touches", "atr_value"} <= seen_codes
 
@@ -213,3 +246,78 @@ def test_localize_guardrail_codes_invalidation():
 def test_code_tables_are_snake_case():
     for code in (*EVIDENCE_CODES, *INVALIDATION_CODES):
         assert re.fullmatch(r"[a-z][a-z0-9_]*", code)
+
+
+@pytest.mark.parametrize("style", ["elliott", "wyckoff"])
+def test_unsupported_style_message_is_vietnamese(style):
+    plan = _plan_from_fixture(FIXTURES[0], candle_count=200)
+    message = build_intent_check(plan.request, AnalyzeIntent(style=style))["message"]
+    assert message and "chưa có bộ phát hiện" in message
+    english = [m.group(0) for m in ENGLISH.finditer(message)]
+    assert english == [], english
+
+
+def _gate_drop_codes() -> set[str]:
+    src = (Path(__file__).parents[1] / "src/cryptosignal_copilot/drawing_gate.py").read_text()
+    tree = ast.parse(src)
+    codes: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Return) and isinstance(node.value, ast.Tuple):
+            elts = node.value.elts
+            # `return None, "<drop code>"`
+            if (
+                len(elts) == 2
+                and isinstance(elts[0], ast.Constant)
+                and elts[0].value is None
+                and isinstance(elts[1], ast.Constant)
+                and isinstance(elts[1].value, str)
+            ):
+                codes.add(elts[1].value)
+        if isinstance(node, ast.Return) and isinstance(node.value, ast.Constant):
+            value = node.value.value
+            if isinstance(value, str) and re.fullmatch(r"[a-z]+(-[a-zA-Z0-9+]+)+", value):
+                codes.add(value)
+    return codes - {"upper", "lower"}
+
+
+def test_every_gate_drop_code_has_a_vietnamese_label():
+    codes = _gate_drop_codes()
+    assert {"off-grid", "no-anchor", "min-span", "apex+3"} & codes
+    missing = sorted(codes - set(GATE_REASON_VI))
+    assert missing == [], missing
+    note = format_drop_note([(f"s{i}", c) for i, c in enumerate(sorted(codes))])
+    note += format_drop_note([("x", "schema:points:count")])
+    assert "không hợp lệ (" in note and "không hợp lệ)" not in note
+    assert [m.group(0) for m in ENGLISH.finditer(note)] == []
+
+
+# Templates the UI developer found at HEAD before f4a7c699. They may only survive as
+# legacy-input regexes in vi_text.py (which maps old English evidence to codes).
+LEGACY_TEMPLATES = (
+    "role from close",
+    "only 2 touches",
+    "only 2 swing touches",
+    "neckline not broken",
+    "pattern completed",
+    "close beyond",
+    "has no live v1",
+    "Chi tiết pick",
+    "Vô hiệu hóa (detector)",
+    "chế độ trend_",
+    "sideway",
+)
+
+
+def test_source_has_no_legacy_english_templates():
+    root = Path(__file__).parents[1] / "src/cryptosignal_copilot"
+    hits: list[str] = []
+    for path in sorted(root.glob("*.py")):
+        if path.name == "vi_text.py":
+            continue
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                for template in LEGACY_TEMPLATES:
+                    if template.lower() in node.value.lower():
+                        hits.append(f"{path.name}:{node.lineno}: {template!r}")
+    assert hits == [], hits
