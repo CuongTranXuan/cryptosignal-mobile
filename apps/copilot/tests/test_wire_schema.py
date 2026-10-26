@@ -53,6 +53,24 @@ console.log("ok", markers.length);
 """
 
 
+def _require_web_zod() -> None:
+    """Run the Zod contract only where apps/web deps are installed.
+
+    Skips when node or apps/web/node_modules/zod is missing (e.g. a Python-only job);
+    `COPILOT_REQUIRE_WEB_ZOD=1` turns a missing dependency into a failure instead.
+    """
+    missing = None
+    if shutil.which("node") is None or shutil.which("npx") is None:
+        missing = "node/npx is not installed"
+    elif not (WEB_ROOT / "node_modules" / "zod" / "package.json").is_file():
+        missing = "apps/web deps not installed (node_modules/zod missing; run pnpm install)"
+    if missing is None:
+        return
+    if os.environ.get("COPILOT_REQUIRE_WEB_ZOD", "").lower() in {"1", "true", "yes"}:
+        raise AssertionError(missing)
+    pytest.skip(missing)
+
+
 def _load() -> tuple[str, str, list[Candle]]:
     payload = json.loads(FIXTURE.read_text())
     candles = [Candle.model_validate(row) for row in payload["candles"]]
@@ -70,15 +88,7 @@ def test_wire_shape_keys_match_web_contract():
 
 
 def test_wire_shapes_pass_web_zod_when_node_available():
-    ci = os.environ.get("CI", "").lower() in {"1", "true", "yes"}
-    if shutil.which("node") is None:
-        if ci:
-            raise AssertionError("node is required in CI for wire Zod contract test")
-        pytest.skip("node is not installed")
-    if not (WEB_ROOT / "package.json").exists():
-        if ci:
-            raise AssertionError("apps/web package.json not found in CI")
-        pytest.skip("apps/web package.json not found")
+    _require_web_zod()
     symbol, interval, candles = _load()
     catalog = build_candidate_catalog(candles, symbol=symbol, interval=interval)  # type: ignore[arg-type]
     valid, _ = run_real_path(catalog, candles, symbol=symbol, interval=interval, style="classic")
@@ -89,13 +99,6 @@ def test_wire_shapes_pass_web_zod_when_node_available():
         capture_output=True,
         timeout=120,
     )
-    if proc.returncode != 0 and (
-        b"Cannot find" in proc.stderr or b"ERR_MODULE_NOT_FOUND" in proc.stderr
-    ):
-        msg = f"web deps not installed: {proc.stderr.decode()}"
-        if ci:
-            raise AssertionError(msg)
-        pytest.skip(msg)
     assert proc.returncode == 0, proc.stderr.decode()
 
 
@@ -114,15 +117,7 @@ def test_wire_marker_keys_match_contract():
 
 
 def test_wire_markers_pass_web_zod_when_node_available():
-    ci = os.environ.get("CI", "").lower() in {"1", "true", "yes"}
-    if shutil.which("node") is None:
-        if ci:
-            raise AssertionError("node is required in CI for wire Zod contract test")
-        pytest.skip("node is not installed")
-    if not (WEB_ROOT / "package.json").exists():
-        if ci:
-            raise AssertionError("apps/web package.json not found in CI")
-        pytest.skip("apps/web package.json not found")
+    _require_web_zod()
     symbol, interval, candles = _load()
     catalog = build_candidate_catalog(candles, symbol=symbol, interval=interval)  # type: ignore[arg-type]
     valid, _ = run_real_path(catalog, candles, symbol=symbol, interval=interval, style="classic")
@@ -137,13 +132,6 @@ def test_wire_markers_pass_web_zod_when_node_available():
         capture_output=True,
         timeout=120,
     )
-    if proc.returncode != 0 and (
-        b"Cannot find" in proc.stderr or b"ERR_MODULE_NOT_FOUND" in proc.stderr
-    ):
-        msg = f"web deps not installed: {proc.stderr.decode()}"
-        if ci:
-            raise AssertionError(msg)
-        pytest.skip(msg)
     assert proc.returncode == 0, proc.stderr.decode()
 
 
