@@ -35,6 +35,16 @@ export const PATTERNS_TABLE_TITLE = "Mẫu hình & lớp vẽ";
 export const PATTERNS_TABLE_TOTAL = "Hình đang hoạt động";
 export const PATTERNS_TABLE_EMPTY = "Chưa có hình đã xác nhận";
 export const PATTERNS_TABLE_ACTIONS = "Thao tác";
+export const PATTERNS_TABLE_PATTERN = "Mẫu";
+export const PATTERNS_TABLE_INTERVAL = "Khung";
+export const PATTERNS_TABLE_KIND = "Loại";
+export const PATTERNS_TABLE_CONFIDENCE = "Tin cậy";
+export const PATTERNS_TABLE_GUARDRAIL = "Kiểm soát rủi ro";
+export const SHAPE_KIND_LABELS = {
+  trendline: "đường",
+  polyline: "đa tuyến",
+  zone: "vùng",
+} as const;
 export const PATTERNS_TABLE_EDIT = "Sửa";
 export const PATTERNS_TABLE_DELETE = "Xóa";
 export const COPILOT_ACTION_DRAW_ON_CHART = "Vẽ lên biểu đồ";

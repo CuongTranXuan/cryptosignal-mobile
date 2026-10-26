@@ -15,11 +15,17 @@ import {
   COPILOT_GUARDRAIL_NONE,
   COPILOT_GUARDRAIL_NO_EVIDENCE,
   PATTERNS_TABLE_ACTIONS,
+  PATTERNS_TABLE_CONFIDENCE,
+  PATTERNS_TABLE_GUARDRAIL,
+  PATTERNS_TABLE_INTERVAL,
+  PATTERNS_TABLE_KIND,
+  PATTERNS_TABLE_PATTERN,
   PATTERNS_TABLE_DELETE,
   PATTERNS_TABLE_EDIT,
   PATTERNS_TABLE_EMPTY,
   PATTERNS_TABLE_TITLE,
   PATTERNS_TABLE_TOTAL,
+  SHAPE_KIND_LABELS,
 } from "../lib/copilot-strings";
 import type { PatternShape } from "../lib/pattern-shape";
 import { useChartStore } from "../lib/stores/chart-store";
@@ -102,11 +108,11 @@ export function PatternsTable() {
         <table className="w-full text-left">
           <thead className="border-b border-[#2b313a] text-[#848e9c]">
             <tr>
-              <th className="pb-1 font-medium">Mẫu</th>
-              <th className="pb-1 font-medium">TF</th>
-              <th className="pb-1 font-medium">Loại</th>
-              <th className="pb-1 font-medium">Tin cậy</th>
-              <th className="pb-1 font-medium">Guardrail</th>
+              <th className="pb-1 font-medium">{PATTERNS_TABLE_PATTERN}</th>
+              <th className="pb-1 font-medium">{PATTERNS_TABLE_INTERVAL}</th>
+              <th className="pb-1 font-medium">{PATTERNS_TABLE_KIND}</th>
+              <th className="pb-1 font-medium">{PATTERNS_TABLE_CONFIDENCE}</th>
+              <th className="pb-1 font-medium">{PATTERNS_TABLE_GUARDRAIL}</th>
               <th className="pb-1 font-medium">{PATTERNS_TABLE_ACTIONS}</th>
             </tr>
           </thead>
@@ -127,7 +133,7 @@ export function PatternsTable() {
               >
                 <td className="py-1.5 text-white">{displayShapeName(s.name)}</td>
                 <td className="py-1.5">{s.interval}</td>
-                <td className="py-1.5">{s.kind}</td>
+                <td className="py-1.5">{SHAPE_KIND_LABELS[s.kind] ?? s.kind}</td>
                 <td className="py-1.5 text-[#0ecb81]">{Math.round(s.confidence * 100)}%</td>
                 <td className="max-w-[12rem] py-1.5" data-testid="patterns-guardrail-cell">
                   <GuardrailDetails shape={s} />
