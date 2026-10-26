@@ -23,6 +23,14 @@ from cryptosignal_copilot.features import (
 )
 from cryptosignal_copilot.gate_policy import anchor_in_play, prefilter_candidate
 from cryptosignal_copilot.schema import Candle, Interval
+from cryptosignal_copilot.vi_text import (
+    EV_NECKLINE_NOT_BROKEN,
+    EV_ONLY_TWO_BOTTOMS,
+    EV_ONLY_TWO_TOPS,
+    EV_ONLY_TWO_TOUCHES,
+    EV_PATTERN_COMPLETED,
+    ev_role_flip,
+)
 
 StyleId = Literal["classic", "smc"]
 PatternId = str
@@ -195,31 +203,36 @@ def _sr_zone_start_time(cand: DrawingCandidate) -> int:
     return int(cand.break_time or 0)
 
 
-def _sr_crossed_above(candles: list[Candle], high_f: float, start_t: int) -> bool:
-    """Bar-to-bar close cross above the zone high (break-through, not mere bounce inside)."""
-    after = [float(c.close) for c in candles if c.time > start_t]
-    prev: float | None = None
-    for close in after:
-        if prev is not None and prev <= high_f and close > high_f:
-            return True
-        prev = close
-    return False
-
-
-def _sr_crossed_below(candles: list[Candle], low_f: float, start_t: int) -> bool:
-    after = [float(c.close) for c in candles if c.time > start_t]
-    prev: float | None = None
-    for close in after:
-        if prev is not None and prev >= low_f and close < low_f:
-            return True
-        prev = close
-    return False
-
-
-def _sr_price_crossed_zone(
-    candles: list[Candle], low_f: float, high_f: float, start_t: int
+def _sr_flipped(
+    candles: list[Candle],
+    low_f: float,
+    high_f: float,
+    start_t: int,
+    *,
+    to_role: Literal["support", "resistance"],
 ) -> bool:
-    return _sr_crossed_above(candles, high_f, start_t) or _sr_crossed_below(candles, low_f, start_t)
+    """True only for a real role change after the zone formed.
+
+    Support flip: a close below `low` first (price was under the zone, so it acted
+    as resistance), then a later close above `high`. Resistance flip mirrors it.
+    A dip into the zone followed by a drop (a rejection) is not a flip.
+    """
+    seen_opposite = False
+    for candle in candles:
+        if candle.time <= start_t:
+            continue
+        close = float(candle.close)
+        if to_role == "support":
+            if close < low_f:
+                seen_opposite = True
+            elif seen_opposite and close > high_f:
+                return True
+        else:
+            if close > high_f:
+                seen_opposite = True
+            elif seen_opposite and close < low_f:
+                return True
+    return False
 
 
 def _sr_role_from_last_close(cand: DrawingCandidate, candles: list[Candle]) -> DrawingCandidate:
@@ -239,11 +252,11 @@ def _sr_role_from_last_close(cand: DrawingCandidate, candles: list[Candle]) -> D
     price_label = format_market_price(base_price, sym)
     start_t = _sr_zone_start_time(cand)
     if close > high_f:
-        flipped = _sr_crossed_above(candles, high_f, start_t)
+        flipped = _sr_flipped(candles, low_f, high_f, start_t, to_role="support")
         role = "support"
         inv = low_f
     elif close < low_f:
-        flipped = _sr_crossed_below(candles, low_f, start_t)
+        flipped = _sr_flipped(candles, low_f, high_f, start_t, to_role="resistance")
         role = "resistance"
         inv = high_f
     else:
@@ -267,7 +280,7 @@ def _sr_role_from_last_close(cand: DrawingCandidate, candles: list[Candle]) -> D
         name = f"S/R {price_label}"
     evidence = list(cand.evidence_against)
     if flipped:
-        evidence.append(f"role from close: {role}")
+        evidence.append(ev_role_flip(role))
     return DrawingCandidate(
         id=cand.id,
         pattern_id=cand.pattern_id,
@@ -318,7 +331,7 @@ def _candidate_stale(
 ) -> bool:
     if cand.pattern_id not in ("head_and_shoulders", "inverse_head_and_shoulders"):
         return False
-    if "pattern completed" not in cand.evidence_against:
+    if EV_PATTERN_COMPLETED not in cand.evidence_against:
         return False
     break_t = cand.break_time or _last_anchor_time(cand)
     if not bar_sec or not break_t:
@@ -517,7 +530,7 @@ def _level_clusters(
                         )
                     ],
                     invalidation_price=band_low if cluster[0].side == "low" else band_high,
-                    evidence_against=["only 2 touches"] if len(cluster) < 3 else [],
+                    evidence_against=[EV_ONLY_TWO_TOUCHES] if len(cluster) < 3 else [],
                 )
             )
     return out
@@ -656,7 +669,7 @@ def _double_top_bottom(
                 name="Double top",
                 shapes=[neck_shape],
                 invalidation_price=max(e1.price, e2.price) + 0.25 * atr,
-                evidence_against=["only 2 swing touches on tops"],
+                evidence_against=[EV_ONLY_TWO_TOPS],
             )
         )
         break
@@ -714,7 +727,7 @@ def _double_top_bottom(
                 name="Double bottom",
                 shapes=[neck_shape],
                 invalidation_price=min(e1.price, e2_low.price) - 0.25 * atr,
-                evidence_against=["only 2 swing touches on bottoms"],
+                evidence_against=[EV_ONLY_TWO_BOTTOMS],
             )
         )
         break
@@ -1156,9 +1169,9 @@ def _head_shoulders(
         )
         evidence: list[str] = []
         if not broken and last_close >= neck_at_right:
-            evidence.append("neckline not broken")
+            evidence.append(EV_NECKLINE_NOT_BROKEN)
         if broken:
-            evidence.append("pattern completed")
+            evidence.append(EV_PATTERN_COMPLETED)
         recency = (right.t - window_start) / max(window_end - window_start, 1)
         touches = 3 + len(between_lows)
         fit = min(1.0, touches / 5.0)
@@ -1248,9 +1261,9 @@ def _inverse_head_shoulders(
         )
         evidence: list[str] = []
         if not broken and last_close <= neck_at_right:
-            evidence.append("neckline not broken")
+            evidence.append(EV_NECKLINE_NOT_BROKEN)
         if broken:
-            evidence.append("pattern completed")
+            evidence.append(EV_PATTERN_COMPLETED)
         recency = (right.t - window_start) / max(window_end - window_start, 1)
         touches = 3 + len(between_highs)
         fit = min(1.0, touches / 5.0)

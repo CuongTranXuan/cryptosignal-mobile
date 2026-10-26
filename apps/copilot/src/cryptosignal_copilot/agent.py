@@ -52,6 +52,7 @@ from cryptosignal_copilot.schema import (
     filter_preview_details,
 )
 from cryptosignal_copilot.server_summary import compose_stream_summary
+from cryptosignal_copilot.vi_text import EV_NO_CATALOG, display_name_vi, evidence_items, regime_vi
 from cryptosignal_copilot.wire_marker import markers_for_wire
 from cryptosignal_copilot.wire_shape import shapes_for_wire
 
@@ -125,7 +126,8 @@ class PydanticAiRunner:
         if step is not None and catalog is not None and not step.use_llm:
             summary = (
                 f"Phát hiện {request.symbol} {request.interval}: "
-                f"chế độ {catalog.regime}, chọn mẫu theo quy tắc (không gọi LLM)."
+                f"chế độ {regime_vi(str(catalog.regime))}, chọn mẫu theo quy tắc "
+                "(không gọi mô hình AI)."
             )
             yield "text", {"delta": summary + "\n\n"}
             raw_shapes = list(step.rule_shapes)
@@ -331,8 +333,8 @@ class PydanticAiRunner:
                 "text",
                 {
                     "delta": (
-                        "\n\nĐã áp dụng lớp phủ dự phòng (ngân sách shape ≤6); "
-                        "các pick LLM vượt ngân sách đã được thay thế.\n"
+                        "\n\nĐã áp dụng lớp phủ dự phòng (tối đa 6 hình); "
+                        "các lựa chọn của mô hình vượt giới hạn đã được thay thế.\n"
                     )
                 },
             )
@@ -372,8 +374,10 @@ class PydanticAiRunner:
             else {
                 "bias": "neutral",
                 "no_valid_pattern": len(wire_shapes) == 0,
-                "evidence_for": ["Không có catalog ứng viên"],
-                "evidence_against": ["Không có catalog ứng viên"],
+                "evidence_for": [EV_NO_CATALOG],
+                "evidence_against": [EV_NO_CATALOG],
+                "evidence_for_items": evidence_items([EV_NO_CATALOG]),
+                "evidence_against_items": evidence_items([EV_NO_CATALOG]),
                 "invalidation": None,
                 "confidence": 0.5,
                 "intent_check": intent_check,
@@ -383,7 +387,7 @@ class PydanticAiRunner:
             analysis_payload["summary_direction"] = stream_summary_direction
         yield "analysis", analysis_payload
         if valid_shapes:
-            names = ", ".join(str(s.get("name", "?")) for s in valid_shapes[:5])
+            names = ", ".join(display_name_vi(str(s.get("name", "?"))) for s in valid_shapes[:5])
             more = f" (+{len(valid_shapes) - 5} nữa)" if len(valid_shapes) > 5 else ""
             yield "text", {"delta": f"\n\nLớp phủ sẵn sàng: {len(valid_shapes)} — {names}{more}."}
 
@@ -392,7 +396,7 @@ class PydanticAiRunner:
             if dropped_marker_ids:
                 yield (
                     "text",
-                    {"delta": f"\n\nĐã bỏ qua {len(dropped_marker_ids)} marker không hợp lệ."},
+                    {"delta": f"\n\nĐã bỏ qua {len(dropped_marker_ids)} điểm neo không hợp lệ."},
                 )
             if valid_markers:
                 yield "markers", {"markers": markers_for_wire(valid_markers)}

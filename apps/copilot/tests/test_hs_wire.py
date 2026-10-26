@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from cryptosignal_copilot.vi_text import EV_PATTERN_COMPLETED
+
 from unittest.mock import patch
 
 from cryptosignal_copilot.candidates import build_candidate_catalog
@@ -37,4 +39,4 @@ def test_broken_head_shoulders_passes_prefilter_and_wire(_mock_stale: object) ->
     )
     assert wire
     assert metrics.gate_dropped == 0
-    assert "pattern completed" in hs[0].evidence_against
+    assert EV_PATTERN_COMPLETED in hs[0].evidence_against

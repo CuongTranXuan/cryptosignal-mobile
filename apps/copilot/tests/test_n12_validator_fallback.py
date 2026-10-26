@@ -109,4 +109,4 @@ async def test_runner_fallback_after_validator_exhaustion_never_streams_bad_summ
     shape_payloads = [d for kind, d in events if kind == "shapes"]
     assert shape_payloads
     assert len(shape_payloads[0]["shapes"]) > 0
-    assert "fallback" in text.lower() or "máy chủ" in text.lower() or "detector" in text.lower()
+    assert "bộ phát hiện" in text or "máy chủ" in text

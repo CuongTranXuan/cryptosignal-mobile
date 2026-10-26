@@ -5,6 +5,7 @@ from cryptosignal_copilot.chart_response import IntentCheck
 from cryptosignal_copilot.chart_styles import validate_pattern_for_style, validate_style
 from cryptosignal_copilot.prep_errors import AnalyzePrepError
 from cryptosignal_copilot.schema import AnalyzeIntent, AnalyzeRequest
+from cryptosignal_copilot.vi_text import BIAS_CONFLICT_VI
 
 
 def assert_valid_intent(intent: AnalyzeIntent) -> AnalyzeIntent:
@@ -58,11 +59,11 @@ def build_intent_check(request: AnalyzeRequest, intent: AnalyzeIntent) -> dict[s
     conflict = bias_conflicts_regime(intent.bias, regime)
     message: str | None = None
     if conflict:
-        message = "Thiên kiến người dùng không khớp chế độ detector; lớp phủ theo chế độ detector."
+        message = BIAS_CONFLICT_VI
     elif intent.style in ("elliott", "wyckoff"):
         message = (
-            f"Style {intent.style} has no live v1 detectors; use classic/SMC candidates or "
-            "no_valid_pattern when nothing fits."
+            f"Phong cách {intent.style.capitalize()} chưa có bộ phát hiện trực tiếp; dùng ứng "
+            "viên Cổ điển/SMC hoặc báo không có mẫu hình hợp lệ khi không có gì phù hợp."
         )
     check = IntentCheck(
         detected_regime=regime,

@@ -1376,3 +1376,42 @@ Items 3-5 are rendered via template, now prefixed "AI đánh giá:". Nothing els
 - (b) **General user testing: not yet.**
   - N24 is closed, but N25 (cold-start stall plus permanent tick fallback after one failure) and English evidence in the analysis panel remain.
   - No real-model e2e has been run on this tip.
+
+### C.16 Coded, Vietnamese-at-source text (backend)
+
+Every evidence line and invalidation condition the client shows now has a stable machine `code` (snake_case) plus `params` (numbers/strings), with the human `text` in Vietnamese. The change is additive, so both the committed and the in-progress web Zod schemas parse it:
+
+- `analysis` SSE event: `evidence_for` / `evidence_against` stay `string[]` (now Vietnamese) and gain the parallel `evidence_for_items` / `evidence_against_items: {code, params, text}[]` (same order and length). `invalidation` keeps `price` / `condition` and gains `code`, `params: {price}` and `text`.
+- Shape and marker `guardrail`: `evidence_against` (Vietnamese `string[]`) plus `evidence_against_items`. `invalidation` gets the same `code` / `params` / `text`.
+- Legacy English detector strings (stored sessions, older guardrails) map to the same codes and come back out in Vietnamese. Unknown text gets `code: "note"`.
+- Shape `name` stays the canonical English id (the web maps it with `displayShapeName`). Server text uses Vietnamese names (`vi_text.display_name_vi`).
+
+Source of truth: `apps/copilot/src/cryptosignal_copilot/vi_text.py`. Fixture: `apps/copilot/tests/fixtures/wire/analyze_coded_text.json`. Test: `tests/test_vi_leftovers.py` scans every user-facing string over the 16 replay fixtures × classic/SMC (scripted model) and fails on any English leftover or any uncoded item.
+
+| code | params | text (vi) |
+|---|---|---|
+| `few_touches` | `{n}` | chỉ {n} lần chạm |
+| `few_top_touches` | `{n}` | chỉ {n} lần chạm đỉnh |
+| `few_bottom_touches` | `{n}` | chỉ {n} lần chạm đáy |
+| `role_from_close` | `{role: "support"\|"resistance"}` | đổi vai theo giá đóng cửa: nay là hỗ trợ / kháng cự |
+| `neckline_not_broken` | `{}` | chưa phá đường viền cổ |
+| `pattern_completed` | `{}` | mô hình đã hoàn tất |
+| `no_structural_warning` | `{}` | Không có cảnh báo cấu trúc trên các hình đã chọn |
+| `no_catalog` | `{}` | Không có danh mục ứng viên |
+| `regime_from_closed` | `{}` | Chế độ thị trường xác định từ nến đã đóng |
+| `higher_highs_lows` | `{}` | Đỉnh/đáy cao hơn trên các nhịp sóng gần đây |
+| `lower_highs_lows` | `{}` | Đỉnh/đáy thấp hơn trên các nhịp sóng gần đây |
+| `price_above_ema` | `{}` | Giá trên EMA50, độ dốc EMA20 dương |
+| `price_below_ema` | `{}` | Giá dưới EMA50, độ dốc EMA20 âm |
+| `atr_elevated` | `{}` | ATR cao so với trung vị gần đây |
+| `mixed_structure` | `{}` | Cấu trúc đỉnh/đáy hỗn hợp, chưa rõ xu hướng |
+| `atr_value` | `{period, value}` | Biên độ dao động ATR{period} ≈ {value, symbol tick} |
+| `note` | `{}` | (fallback: unrecognised text, passed through) |
+| invalidation `close_above` | `{price}` | đóng cửa trên {price} |
+| invalidation `close_below` | `{price}` | đóng cửa dưới {price} |
+| invalidation `close_beyond` | `{price}` | đóng cửa vượt {price} (also the legacy `"close beyond"`) |
+
+Also in this pass:
+- **N10:** a zone is only "flipped" after a close on the opposite side, then a close back through (test: SOL 4h ~83.33 rejection, plus every replay fixture).
+- **Legacy output keys:** `markers`, `summary` and `pick_notes` are stripped before validation in both output modes, so they validate on the first call.
+- **Server text:** the summary, drop note and budget note are now fully Vietnamese (no "detector / overlay / range / bias / pick / geometry").

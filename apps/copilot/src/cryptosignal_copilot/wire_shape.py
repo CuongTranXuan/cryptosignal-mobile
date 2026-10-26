@@ -23,8 +23,10 @@ WIRE_SHAPE_TOP_KEYS = frozenset(
     }
 )
 WIRE_POINT_KEYS = frozenset({"time", "price"})
-WIRE_GUARDRAIL_KEYS = frozenset({"regime", "confidence", "evidence_against", "invalidation"})
-WIRE_INVALIDATION_KEYS = frozenset({"price", "condition"})
+WIRE_GUARDRAIL_KEYS = frozenset(
+    {"regime", "confidence", "evidence_against", "evidence_against_items", "invalidation"}
+)
+WIRE_INVALIDATION_KEYS = frozenset({"price", "condition", "code", "params", "text"})
 
 
 def strip_internal_shape_fields(shape: dict[str, Any]) -> dict[str, Any]:

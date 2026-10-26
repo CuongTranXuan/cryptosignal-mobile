@@ -7,6 +7,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 
+from cryptosignal_copilot.vi_text import localize_guardrail
 from cryptosignal_copilot.wire_guardrail import Guardrail, Invalidation
 
 SkipReasonCode = Literal[
@@ -121,6 +122,7 @@ def enrich_shapes_with_guardrails(
                 evidence_against=[],
                 invalidation_price=None,
             )
+        guardrail = localize_guardrail(guardrail, symbol)
         out = dict(shape)
         out["id"] = stable_id
         out["guardrail"] = guardrail

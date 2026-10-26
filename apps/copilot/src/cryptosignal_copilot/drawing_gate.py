@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol, assert_never
@@ -17,6 +18,7 @@ from typing import Any, Literal, Protocol, assert_never
 from cryptosignal_copilot.features import Swing
 from cryptosignal_copilot.features import fractal_swings as _fractal_swings
 from cryptosignal_copilot.features import wilder_atr as _wilder_atr
+from cryptosignal_copilot.vi_text import gate_reason_vi
 
 logger = logging.getLogger(__name__)
 
@@ -251,11 +253,10 @@ def apply_preview_gate(
 
 
 def format_drop_note(dropped: list[Drop]) -> str:
-    """Vietnamese skip line plus English reason codes smoke can paste."""
-    shown = dropped[:12]
-    codes = ", ".join(f"{shape_id}:{reason}" for shape_id, reason in shown)
-    extra = f" +{len(dropped) - 12}" if len(dropped) > 12 else ""
-    return f"\n\nĐã bỏ qua {len(dropped)} hình không hợp lệ [{codes}{extra}]."
+    """Vietnamese skip line; machine reason codes travel in the `shapes.dropped` event."""
+    counts = Counter(gate_reason_vi(reason) for _shape_id, reason in dropped)
+    reasons = ", ".join(f"{label} ×{n}" if n > 1 else label for label, n in counts.most_common())
+    return f"\n\nĐã bỏ qua {len(dropped)} hình không hợp lệ ({reasons})."
 
 
 def review_shape(

@@ -1,0 +1,416 @@
+{
+  "shapes": {
+    "shapes": [
+      {
+        "id": "drw_8826a1d0d71f4b02",
+        "symbol": "BTCUSDT",
+        "interval": "4h",
+        "kind": "trendline",
+        "name": "Double top neckline",
+        "status": "preview",
+        "source": "agent",
+        "confidence": 0.78,
+        "points": [
+          {
+            "time": 1790942400,
+            "price": 83888.0
+          },
+          {
+            "time": 1791158400,
+            "price": 83888.0
+          }
+        ],
+        "priceLow": null,
+        "priceHigh": null,
+        "guardrail": {
+          "regime": "trend_down",
+          "confidence": 0.78,
+          "evidence_against": [
+            "chỉ 2 lần chạm đỉnh"
+          ],
+          "invalidation": {
+            "price": 87407.1415368059,
+            "condition": "close_above",
+            "code": "close_above",
+            "params": {
+              "price": 87407.1415368059
+            },
+            "text": "đóng cửa trên 87,407.14"
+          },
+          "evidence_against_items": [
+            {
+              "code": "few_top_touches",
+              "params": {
+                "n": 2
+              },
+              "text": "chỉ 2 lần chạm đỉnh"
+            }
+          ]
+        }
+      },
+      {
+        "id": "drw_99d2df484be95a98",
+        "symbol": "BTCUSDT",
+        "interval": "4h",
+        "kind": "trendline",
+        "name": "Fib 0.382",
+        "status": "preview",
+        "source": "agent",
+        "confidence": 0.7,
+        "points": [
+          {
+            "time": 1792886400,
+            "price": 81389.45332
+          },
+          {
+            "time": 1792598400,
+            "price": 81389.45332
+          }
+        ],
+        "priceLow": null,
+        "priceHigh": null,
+        "guardrail": {
+          "regime": "trend_down",
+          "confidence": 0.7,
+          "evidence_against": [],
+          "invalidation": null,
+          "evidence_against_items": []
+        }
+      },
+      {
+        "id": "drw_0e0ae8dad6a03cfd",
+        "symbol": "BTCUSDT",
+        "interval": "4h",
+        "kind": "trendline",
+        "name": "Fib 0.5",
+        "status": "preview",
+        "source": "agent",
+        "confidence": 0.7,
+        "points": [
+          {
+            "time": 1792886400,
+            "price": 82059.37
+          },
+          {
+            "time": 1792598400,
+            "price": 82059.37
+          }
+        ],
+        "priceLow": null,
+        "priceHigh": null,
+        "guardrail": {
+          "regime": "trend_down",
+          "confidence": 0.7,
+          "evidence_against": [],
+          "invalidation": null,
+          "evidence_against_items": []
+        }
+      },
+      {
+        "id": "drw_f589f80a78c6a8ee",
+        "symbol": "BTCUSDT",
+        "interval": "4h",
+        "kind": "trendline",
+        "name": "Fib 0.618",
+        "status": "preview",
+        "source": "agent",
+        "confidence": 0.7,
+        "points": [
+          {
+            "time": 1792886400,
+            "price": 82729.28668
+          },
+          {
+            "time": 1792598400,
+            "price": 82729.28668
+          }
+        ],
+        "priceLow": null,
+        "priceHigh": null,
+        "guardrail": {
+          "regime": "trend_down",
+          "confidence": 0.7,
+          "evidence_against": [],
+          "invalidation": null,
+          "evidence_against_items": []
+        }
+      },
+      {
+        "id": "drw_42c17485c9009675",
+        "symbol": "BTCUSDT",
+        "interval": "4h",
+        "kind": "zone",
+        "name": "Fib pocket 0.5–0.618",
+        "status": "preview",
+        "source": "agent",
+        "confidence": 0.7,
+        "points": [
+          {
+            "time": 1792598400,
+            "price": 82059.37
+          },
+          {
+            "time": 1792886400,
+            "price": 82729.28668
+          }
+        ],
+        "priceLow": 82059.37,
+        "priceHigh": 82729.28668,
+        "guardrail": {
+          "regime": "trend_down",
+          "confidence": 0.7,
+          "evidence_against": [],
+          "invalidation": null,
+          "evidence_against_items": []
+        }
+      },
+      {
+        "id": "drw_ddafe495ad881c83",
+        "symbol": "BTCUSDT",
+        "interval": "4h",
+        "kind": "trendline",
+        "name": "Resistance trendline",
+        "status": "preview",
+        "source": "agent",
+        "confidence": 0.7,
+        "points": [
+          {
+            "time": 1792382400,
+            "price": 83158.0
+          },
+          {
+            "time": 1792598400,
+            "price": 84898.0
+          }
+        ],
+        "priceLow": null,
+        "priceHigh": null,
+        "guardrail": {
+          "regime": "trend_down",
+          "confidence": 0.7,
+          "evidence_against": [],
+          "invalidation": {
+            "price": 87405.1415368059,
+            "condition": "close_above",
+            "code": "close_above",
+            "params": {
+              "price": 87405.1415368059
+            },
+            "text": "đóng cửa trên 87,405.14"
+          },
+          "evidence_against_items": []
+        }
+      }
+    ],
+    "dropped": [],
+    "skipped": [],
+    "skipped_count": 0
+  },
+  "analysis": {
+    "bias": "bearish",
+    "no_valid_pattern": false,
+    "evidence_for": [
+      "Đỉnh/đáy thấp hơn trên các nhịp sóng gần đây",
+      "Giá dưới EMA50, độ dốc EMA20 âm",
+      "Biên độ dao động ATR14 ≈ 748.57"
+    ],
+    "evidence_against": [
+      "chỉ 2 lần chạm đỉnh"
+    ],
+    "evidence_for_items": [
+      {
+        "code": "lower_highs_lows",
+        "params": {},
+        "text": "Đỉnh/đáy thấp hơn trên các nhịp sóng gần đây"
+      },
+      {
+        "code": "price_below_ema",
+        "params": {},
+        "text": "Giá dưới EMA50, độ dốc EMA20 âm"
+      },
+      {
+        "code": "atr_value",
+        "params": {
+          "period": 14,
+          "value": 748.57
+        },
+        "text": "Biên độ dao động ATR14 ≈ 748.57"
+      }
+    ],
+    "evidence_against_items": [
+      {
+        "code": "few_top_touches",
+        "params": {
+          "n": 2
+        },
+        "text": "chỉ 2 lần chạm đỉnh"
+      }
+    ],
+    "invalidation": {
+      "price": 87407.1415368059,
+      "condition": "close_above",
+      "code": "close_above",
+      "params": {
+        "price": 87407.1415368059
+      },
+      "text": "đóng cửa trên 87,407.14"
+    },
+    "confidence": 0.713,
+    "intent_check": {
+      "detected_regime": "trend_down",
+      "bias_conflict": false,
+      "message": null
+    },
+    "summary_direction": "bearish"
+  },
+  "markers": {
+    "markers": [
+      {
+        "id": "anchor-drw_8826a1d0d71f4b02",
+        "symbol": "BTCUSDT",
+        "interval": "4h",
+        "time": 1790942400,
+        "side": "neutral",
+        "position": "inBar",
+        "shape": "circle",
+        "label": "Neo",
+        "confidence": 0.78,
+        "source": "agent",
+        "drawing_id": "drw_8826a1d0d71f4b02",
+        "guardrail": {
+          "regime": "trend_down",
+          "confidence": 0.78,
+          "evidence_against": [
+            "chỉ 2 lần chạm đỉnh"
+          ],
+          "evidence_against_items": [
+            {
+              "code": "few_top_touches",
+              "params": {
+                "n": 2
+              },
+              "text": "chỉ 2 lần chạm đỉnh"
+            }
+          ],
+          "invalidation": {
+            "price": 87407.1415368059,
+            "condition": "close_above",
+            "code": "close_above",
+            "params": {
+              "price": 87407.1415368059
+            },
+            "text": "đóng cửa trên 87,407.14"
+          }
+        }
+      },
+      {
+        "id": "anchor-drw_99d2df484be95a98",
+        "symbol": "BTCUSDT",
+        "interval": "4h",
+        "time": 1792886400,
+        "side": "neutral",
+        "position": "inBar",
+        "shape": "circle",
+        "label": "Neo",
+        "confidence": 0.7,
+        "source": "agent",
+        "drawing_id": "drw_99d2df484be95a98",
+        "guardrail": {
+          "regime": "trend_down",
+          "confidence": 0.7,
+          "evidence_against": [],
+          "evidence_against_items": [],
+          "invalidation": null
+        }
+      },
+      {
+        "id": "anchor-drw_0e0ae8dad6a03cfd",
+        "symbol": "BTCUSDT",
+        "interval": "4h",
+        "time": 1792886400,
+        "side": "neutral",
+        "position": "inBar",
+        "shape": "circle",
+        "label": "Neo",
+        "confidence": 0.7,
+        "source": "agent",
+        "drawing_id": "drw_0e0ae8dad6a03cfd",
+        "guardrail": {
+          "regime": "trend_down",
+          "confidence": 0.7,
+          "evidence_against": [],
+          "evidence_against_items": [],
+          "invalidation": null
+        }
+      },
+      {
+        "id": "anchor-drw_f589f80a78c6a8ee",
+        "symbol": "BTCUSDT",
+        "interval": "4h",
+        "time": 1792886400,
+        "side": "neutral",
+        "position": "inBar",
+        "shape": "circle",
+        "label": "Neo",
+        "confidence": 0.7,
+        "source": "agent",
+        "drawing_id": "drw_f589f80a78c6a8ee",
+        "guardrail": {
+          "regime": "trend_down",
+          "confidence": 0.7,
+          "evidence_against": [],
+          "evidence_against_items": [],
+          "invalidation": null
+        }
+      },
+      {
+        "id": "anchor-drw_42c17485c9009675",
+        "symbol": "BTCUSDT",
+        "interval": "4h",
+        "time": 1792598400,
+        "side": "neutral",
+        "position": "inBar",
+        "shape": "circle",
+        "label": "Neo",
+        "confidence": 0.7,
+        "source": "agent",
+        "drawing_id": "drw_42c17485c9009675",
+        "guardrail": {
+          "regime": "trend_down",
+          "confidence": 0.7,
+          "evidence_against": [],
+          "evidence_against_items": [],
+          "invalidation": null
+        }
+      },
+      {
+        "id": "anchor-drw_ddafe495ad881c83",
+        "symbol": "BTCUSDT",
+        "interval": "4h",
+        "time": 1792382400,
+        "side": "neutral",
+        "position": "inBar",
+        "shape": "circle",
+        "label": "Neo",
+        "confidence": 0.7,
+        "source": "agent",
+        "drawing_id": "drw_ddafe495ad881c83",
+        "guardrail": {
+          "regime": "trend_down",
+          "confidence": 0.7,
+          "evidence_against": [],
+          "evidence_against_items": [],
+          "invalidation": {
+            "price": 87405.1415368059,
+            "condition": "close_above",
+            "code": "close_above",
+            "params": {
+              "price": 87405.1415368059
+            },
+            "text": "đóng cửa trên 87,405.14"
+          }
+        }
+      }
+    ]
+  }
+}

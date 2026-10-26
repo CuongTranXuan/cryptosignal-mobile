@@ -8,19 +8,25 @@ from cryptosignal_copilot.analysis_events import build_analysis_event, regime_to
 from cryptosignal_copilot.candidates import CandidateCatalog, DrawingCandidate
 from cryptosignal_copilot.chart_regime import Regime
 from cryptosignal_copilot.drawing_intent import AnalyzeResultLlm, DrawingIntent, PickAssessment
-from cryptosignal_copilot.evidence_i18n import evidence_to_vietnamese
 from cryptosignal_copilot.market_price import format_market_price
+from cryptosignal_copilot.vi_text import (
+    BIAS_CONFLICT_VI,
+    condition_code,
+    display_name_vi,
+    invalidation_text_vi,
+    localize_evidence,
+)
 
 SummaryDirection = Literal["bullish", "bearish", "neutral", "conditional"]
 
 _QUALITY_VI = {"strong": "mạnh", "ok": "ổn", "weak": "yếu"}
 _CONFLUENCE_VI: dict[str, str] = {
-    "htf_level": "mức HTF",
-    "fib": "Fib",
+    "htf_level": "mức khung lớn (HTF)",
+    "fib": "Fibonacci",
     "volume": "khối lượng",
     "liquidity": "thanh khoản",
     "ema": "EMA",
-    "order_block": "order block",
+    "order_block": "khối lệnh",
     "structure": "cấu trúc",
 }
 
@@ -44,31 +50,31 @@ def summary_direction_from_regime(
 def _regime_lead(regime: str, symbol: str, interval: str) -> str:
     if regime == "trend_up":
         return (
-            f"{symbol} {interval}: chế độ detector là xu hướng tăng — "
+            f"{symbol} {interval}: chế độ thị trường là xu hướng tăng — "
             "cấu trúc đỉnh/đáy cao hơn trên các nến đã đóng."
         )
     if regime == "trend_down":
         return (
-            f"{symbol} {interval}: chế độ detector là xu hướng giảm — "
+            f"{symbol} {interval}: chế độ thị trường là xu hướng giảm — "
             "cấu trúc đỉnh/đáy thấp hơn trên các nến đã đóng."
         )
     if regime == "volatile":
         return (
-            f"{symbol} {interval}: chế độ detector là biến động cao — "
-            "biên độ ATR nổi so với trung vị gần đây."
+            f"{symbol} {interval}: chế độ thị trường là biến động mạnh — "
+            "biên độ ATR cao so với trung vị gần đây."
         )
     return (
-        f"{symbol} {interval}: chế độ detector là sideway — "
+        f"{symbol} {interval}: chế độ thị trường là đi ngang — "
         "chưa có xu hướng rõ trên các nến đã đóng."
     )
 
 
 def _bias_line(bias: str) -> str:
     if bias == "bullish":
-        return "Thiên hướng overlay (máy chủ): tăng theo detector."
+        return "Thiên hướng lớp phủ (máy chủ): tăng theo bộ phát hiện."
     if bias == "bearish":
-        return "Thiên hướng overlay (máy chủ): giảm theo detector."
-    return "Thiên hướng overlay (máy chủ): trung tính / range theo detector."
+        return "Thiên hướng lớp phủ (máy chủ): giảm theo bộ phát hiện."
+    return "Thiên hướng lớp phủ (máy chủ): trung tính / đi ngang theo bộ phát hiện."
 
 
 def _conditional_clause(
@@ -78,25 +84,25 @@ def _conditional_clause(
 ) -> str:
     if not invalidation or invalidation.get("price") is None:
         return (
-            "Kịch bản hai phía: nếu giá phá vượt vùng vô hiệu thì bias theo hướng phá; "
-            "nếu giữ trong vùng thì coi là range."
+            "Kịch bản hai phía: nếu giá phá vượt vùng vô hiệu thì thiên hướng theo hướng phá; "
+            "nếu giữ trong vùng thì coi là đi ngang."
         )
     raw_price = float(invalidation["price"])
     price = format_market_price(raw_price, symbol)
-    cond = str(invalidation.get("condition") or "close beyond")
+    cond = condition_code(invalidation.get("condition"))
     if cond == "close_below":
         return (
-            f"Kịch bản có điều kiện: nếu đóng cửa dưới {price} thì bias giảm; "
-            f"nếu giữ trên {price} thì trung tính/range."
+            f"Kịch bản có điều kiện: nếu đóng cửa dưới {price} thì thiên hướng giảm; "
+            f"nếu giữ trên {price} thì trung tính/đi ngang."
         )
     if cond == "close_above":
         return (
-            f"Kịch bản có điều kiện: nếu đóng cửa trên {price} thì bias tăng; "
-            f"nếu giữ dưới {price} thì trung tính/range."
+            f"Kịch bản có điều kiện: nếu đóng cửa trên {price} thì thiên hướng tăng; "
+            f"nếu giữ dưới {price} thì trung tính/đi ngang."
         )
     return (
-        f"Kịch bản có điều kiện: nếu đóng cửa vượt {price} ({cond}) thì đổi bias; "
-        f"nếu không vượt thì giữ quan sát range."
+        f"Kịch bản có điều kiện: nếu đóng cửa vượt {price} thì đổi thiên hướng; "
+        "nếu không vượt thì tiếp tục quan sát vùng đi ngang."
     )
 
 
@@ -121,7 +127,7 @@ def _pick_lines(
         ids = [intent.candidate_id] if intent.type == "candidate" else list(intent.candidate_ids)
         for cid in ids:
             cand = by_id.get(cid)
-            label = cand.name if cand is not None else cid
+            label = display_name_vi(cand.name) if cand is not None else cid
             assessment = assessments_by_id.get(cid)
             if assessment is not None:
                 lines.append(f"• {label}: {_render_assessment(assessment)}")
@@ -159,16 +165,12 @@ def compose_stream_summary(
     inv = analysis.get("invalidation")
     if isinstance(inv, dict) and inv.get("price") is not None:
         inv_price = format_market_price(float(inv["price"]), symbol)
-        cond = str(inv.get("condition") or "close beyond")
-        parts.append(f"Vô hiệu hóa (detector): {cond} tại {inv_price}.")
+        inv_text = invalidation_text_vi(inv.get("condition"), inv_price)
+        parts.append(f"Vô hiệu hóa (bộ phát hiện): {inv_text}.")
 
     if bool(intent_check.get("bias_conflict")):
         message = intent_check.get("message")
-        conflict_line = (
-            message
-            if isinstance(message, str) and message
-            else "Thiên kiến người dùng không khớp chế độ detector; lớp phủ theo chế độ detector."
-        )
+        conflict_line = message if isinstance(message, str) and message else BIAS_CONFLICT_VI
         parts.append(f"Lưu ý: {conflict_line}")
 
     if not shapes:
@@ -179,14 +181,14 @@ def compose_stream_summary(
             parts.append("Ủng hộ: " + "; ".join(str(x) for x in ev_for[:3]) + ".")
         ev_against = analysis.get("evidence_against") or []
         if ev_against:
-            vi = [evidence_to_vietnamese(str(x)) for x in ev_against[:4]]
+            vi = [localize_evidence(str(x)) for x in ev_against[:4]]
             parts.append("Lưu ý kỹ thuật: " + "; ".join(vi) + ".")
 
     assessments_by_id = {a.candidate_id: a for a in llm_output.pick_assessments}
     pick_lines = _pick_lines(catalog, llm_output.drawing_intents, assessments_by_id)
     if pick_lines:
-        parts.append("Chi tiết pick:")
+        parts.append("Chi tiết lựa chọn:")
         parts.extend(pick_lines)
 
-    parts.append("Đây không phải tín hiệu vào lệnh; chỉ mô tả geometry trên nến đã đóng.")
+    parts.append("Đây không phải tín hiệu vào lệnh; chỉ mô tả hình học trên nến đã đóng.")
     return "\n\n".join(parts), direction
