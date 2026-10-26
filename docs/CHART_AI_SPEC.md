@@ -104,7 +104,7 @@ New package `apps/copilot/src/cryptosignal_copilot/candidates/` (pure numpy, no 
 | `n` | number of closed candles in the window; bars indexed `0..n-1`, `n-1` = last closed | |
 | `ancient(i)` | `(t_i − t_0)/(t_{n-1} − t_0) < 0.35` | [code] `ANCIENT_FRACTION` |
 | `height(P)` | max price − min price over the pattern's anchors | [code] `_pattern_height` |
-| `k_max` | forward projection cap: 1m 30, 15m/1h 24, 4h 18, 1d 12, hard max 48 | [code] |
+| `k_max` | forward projection cap: 1m 30, 15m/1h 24, 30m 27, 4h 18, 1d 12, hard max 48 | [code] |
 | `in_play(C)` | last anchor not ancient **and** no close beyond the candidate's `inv_level` since its last anchor | [code] + ours |
 
 ### 2.2 Per-interval parameters
@@ -112,6 +112,7 @@ New package `apps/copilot/src/cryptosignal_copilot/candidates/` (pure numpy, no 
 |---|---|---|---|---|---|---|
 | 1m | 2 [code] | 5 bars [code] | 2.5 [init] | 15 bars [init] | 15m | 30 |
 | 15m | 2 [code] | 5 | 2.0 [init] | 12 bars [init] | 1h | 24 |
+| 30m | 2 [code] | 5 | 2.0 [init] | 12 bars [init] | 4h | 27 |
 | 1h | 3 [code] | 5 | 2.0 [init] | 10 bars [init] | 4h | 24 |
 | 4h | 3 [code] | 5 | 1.75 [init] | 8 bars [init] | 1d | 18 |
 | 1d | 3 [code] | 5 | 1.5 [init] | 22 bars [src: LMW, "22 trading days"] | 1w | 12 |

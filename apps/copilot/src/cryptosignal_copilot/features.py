@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol, assert_never
 
-IntervalName = Literal["1m", "15m", "1h", "4h", "1d"]
+IntervalName = Literal["1m", "15m", "30m", "1h", "4h", "1d"]
 SwingSide = Literal["high", "low"]
 
 SWING_MIN_BARS_APART = 5
@@ -19,9 +19,7 @@ def zigzag_mult(interval: IntervalName) -> float:
     match interval:
         case "1m":
             return 2.5
-        case "15m":
-            return 2.0
-        case "1h":
+        case "15m" | "30m" | "1h":
             return 2.0
         case "4h":
             return 1.75
@@ -60,7 +58,7 @@ class ZigZagSwing:
 
 def fractal_radius(interval: IntervalName) -> int:
     match interval:
-        case "1m" | "15m":
+        case "1m" | "15m" | "30m":
             return 2
         case "1h" | "4h" | "1d":
             return 3
@@ -74,6 +72,8 @@ def bar_seconds(interval: IntervalName) -> int:
             return 60
         case "15m":
             return 15 * 60
+        case "30m":
+            return 30 * 60
         case "1h":
             return 60 * 60
         case "4h":
@@ -235,7 +235,7 @@ def htf_summary(candles: Sequence[CandleLike], interval: IntervalName) -> dict[s
     """Compact higher-timeframe context from the same window (bucket aggregation)."""
     if len(candles) < 4:
         return {"bars": 0, "trend": "flat", "range_pct": 0.0}
-    bucket = 4 if interval in ("1m", "15m") else 3
+    bucket = 4 if interval in ("1m", "15m", "30m") else 3
     closes = [c.close for c in candles]
     highs = [c.high for c in candles]
     lows = [c.low for c in candles]

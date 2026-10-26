@@ -15,14 +15,13 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol, assert_never
 
-from cryptosignal_copilot.features import Swing
+from cryptosignal_copilot.features import IntervalName, Swing, bar_seconds
 from cryptosignal_copilot.features import fractal_swings as _fractal_swings
 from cryptosignal_copilot.features import wilder_atr as _wilder_atr
 from cryptosignal_copilot.vi_text import gate_reason_vi
 
 logger = logging.getLogger(__name__)
 
-IntervalName = Literal["1m", "15m", "1h", "4h", "1d"]
 SwingSide = Literal["high", "low"]
 
 # Interval k table is the default. COPILOT_PROJECT_BARS overrides it.
@@ -99,28 +98,14 @@ class _GateContext:
     candle_by_time: dict[int, CandleLike]
 
 
-def bar_seconds(interval: IntervalName) -> int:
-    match interval:
-        case "1m":
-            return 60
-        case "15m":
-            return 15 * 60
-        case "1h":
-            return 60 * 60
-        case "4h":
-            return 4 * 60 * 60
-        case "1d":
-            return 24 * 60 * 60
-        case _ as unreachable:
-            assert_never(unreachable)
-
-
 def table_project_bars(interval: IntervalName) -> int:
     match interval:
         case "1m":
             return 30
         case "15m" | "1h":
             return 24
+        case "30m":
+            return 27
         case "4h":
             return 18
         case "1d":

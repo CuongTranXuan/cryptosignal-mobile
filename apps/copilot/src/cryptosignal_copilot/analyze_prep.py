@@ -59,6 +59,7 @@ class AnalyzePlan:
 _HTF_INTERVAL: dict[str, str] = {
     "1m": "15m",
     "15m": "1h",
+    "30m": "4h",
     "1h": "4h",
     "4h": "1d",
 }

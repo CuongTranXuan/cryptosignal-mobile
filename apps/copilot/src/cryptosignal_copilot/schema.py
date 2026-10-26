@@ -19,8 +19,8 @@ from cryptosignal_copilot.wire_guardrail import Guardrail, coerce_wire_guardrail
 
 logger = logging.getLogger(__name__)
 
-INTERVALS = ("1m", "15m", "1h", "4h", "1d")
-Interval = Literal["1m", "15m", "1h", "4h", "1d"]
+INTERVALS = ("1m", "15m", "30m", "1h", "4h", "1d")
+Interval = Literal["1m", "15m", "30m", "1h", "4h", "1d"]
 Kind = Literal["trendline", "polyline", "zone"]
 Status = Literal["preview", "committed"]
 # Trading-order keys. PatternShape forbids `side` as an order field.
@@ -358,6 +358,8 @@ _INTERVAL_ALIASES = {
     "1min": "1m",
     "15m": "15m",
     "15min": "15m",
+    "30m": "30m",
+    "30min": "30m",
     "1h": "1h",
     "60m": "1h",
     "4h": "4h",
