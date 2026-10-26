@@ -3,8 +3,10 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
+from functools import partial
+from typing import Any
 
 from fastapi import FastAPI, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,6 +15,17 @@ from pydantic import ValidationError
 
 from cryptosignal_copilot.agent import AgentRunner, PydanticAiRunner
 from cryptosignal_copilot.analyze_prep import AnalyzePrepError, prepare_analyze
+from cryptosignal_copilot.chart_state import (
+    ChartKeyError,
+    ChartStateNotFoundError,
+    ChartStatePut,
+    ChartStateStore,
+    ChartStateTooLargeError,
+    RevisionConflictError,
+    check_limits,
+    normalize_key,
+    validation_detail,
+)
 from cryptosignal_copilot.chart_styles import list_styles_payload
 from cryptosignal_copilot.config import (
     LlmConfigError,
@@ -69,6 +82,7 @@ def create_app(
     sessions_store: SessionsStore | None = None,
     feedback_store: FeedbackStore | None = None,
     model_probe: ModelProbeService | None = None,
+    chart_store: ChartStateStore | None = None,
 ) -> FastAPI:
     use_runner: AgentRunner = runner if runner is not None else PydanticAiRunner()
     catalog = models_catalog if models_catalog is not None else get_models_catalog()
@@ -100,6 +114,10 @@ def create_app(
     rate_limiter = SlidingWindowRateLimiter()
     store = sessions_store if sessions_store is not None else get_sessions_store()
     feedback = feedback_store if feedback_store is not None else get_feedback_store()
+    # Same database as the sessions (chart_states.session_id references copilot_sessions).
+    charts = (
+        chart_store if chart_store is not None else ChartStateStore(database_url=store.database_url)
+    )
 
     state_lock = asyncio.Lock()
     latest_request: dict[str, AnalyzeRequest | None] = {"value": None}
@@ -281,6 +299,106 @@ def create_app(
         except SessionNotFoundError:
             return JSONResponse({"error": "session not found"}, status_code=404)
         return {"ok": True}
+
+    # ------------------------------------------------------------ chart history
+
+    def _session_missing() -> JSONResponse:
+        return JSONResponse({"error": "session not found"}, status_code=404)
+
+    def _chart_missing() -> JSONResponse:
+        return JSONResponse(
+            error_payload("chart_state_not_found", "Chưa có lịch sử cho biểu đồ này"),
+            status_code=404,
+        )
+
+    def _too_large(exc: ChartStateTooLargeError) -> JSONResponse:
+        body = error_payload("chart_state_too_large", "Lịch sử biểu đồ vượt giới hạn lưu")
+        return JSONResponse({**body, "limit": exc.limit}, status_code=413)
+
+    def _invalid(code: str, message: str, detail: object = None) -> JSONResponse:
+        body: dict[str, object] = error_payload(code, message)
+        if detail is not None:
+            body["detail"] = detail
+        return JSONResponse(body, status_code=422)
+
+    async def _chart_call(symbol: str, interval: str, fn: Callable[[str, str], Any]) -> Any:
+        """Run `fn(symbol, interval)` off-thread with the shared key checks and error map."""
+        try:
+            sym, ivl = normalize_key(symbol, interval)
+        except ChartKeyError as exc:
+            return _invalid(exc.code, "Mã hoặc khung thời gian không hợp lệ", str(exc))
+        try:
+            return await asyncio.to_thread(fn, sym, ivl)
+        except SessionNotFoundError:
+            return _session_missing()
+        except ChartStateNotFoundError:
+            return _chart_missing()
+        except RevisionConflictError as exc:
+            body = error_payload("revision_conflict", "Biểu đồ đã được lưu ở nơi khác")
+            return JSONResponse({**body, "current": exc.current}, status_code=409)
+        except ChartStateTooLargeError as exc:
+            return _too_large(exc)
+
+    @app.get("/v1/copilot/sessions/{session_id}/charts")
+    async def list_charts(session_id: str):
+        try:
+            entries = await asyncio.to_thread(charts.list_charts, session_id)
+        except SessionNotFoundError:
+            return _session_missing()
+        return {"charts": entries}
+
+    @app.get("/v1/copilot/sessions/{session_id}/charts/{symbol}/{interval}")
+    async def get_chart(session_id: str, symbol: str, interval: str):
+        return await _chart_call(symbol, interval, partial(charts.get_chart, session_id))
+
+    @app.delete("/v1/copilot/sessions/{session_id}/charts/{symbol}/{interval}")
+    async def delete_chart(session_id: str, symbol: str, interval: str):
+        result = await _chart_call(symbol, interval, partial(charts.delete_chart, session_id))
+        return result if isinstance(result, JSONResponse) else {"ok": True}
+
+    @app.put("/v1/copilot/sessions/{session_id}/charts/{symbol}/{interval}")
+    async def put_chart(session_id: str, symbol: str, interval: str, request: Request):
+        try:
+            sym, ivl = normalize_key(symbol, interval)
+        except ChartKeyError as exc:
+            return _invalid(exc.code, "Mã hoặc khung thời gian không hợp lệ", str(exc))
+        try:
+            raw = await request.json()
+        except ValueError:
+            return _invalid(
+                "invalid_chart_state", "Dữ liệu biểu đồ không hợp lệ", "body is not JSON"
+            )
+        if not isinstance(raw, dict) or not isinstance(raw.get("shapes"), list):
+            return _invalid(
+                "invalid_chart_state", "Dữ liệu biểu đồ không hợp lệ", "shapes[] required"
+            )
+        markers = raw.get("markers")
+        analysis = raw.get("analysis")
+        try:
+            # Size limits first, so an oversized doc is a 413 rather than a 422 per item.
+            check_limits(
+                raw["shapes"],
+                markers if isinstance(markers, list) else None,
+                analysis if isinstance(analysis, dict) else None,
+            )
+        except ChartStateTooLargeError as exc:
+            return _too_large(exc)
+        try:
+            body = ChartStatePut.model_validate(raw)
+        except ValidationError as exc:
+            return _invalid(
+                "invalid_chart_state", "Dữ liệu biểu đồ không hợp lệ", validation_detail(exc)
+            )
+        keyed = [(s.id, s.symbol, s.interval) for s in body.shapes]
+        keyed += [(m.id, m.symbol, m.interval) for m in body.markers or []]
+        stray = [item_id for item_id, s, i in keyed if s.upper() != sym or i != ivl]
+        if stray:
+            return _invalid(
+                "chart_key_mismatch",
+                "Hình vẽ không thuộc biểu đồ này",
+                {"ids": stray[:20], "symbol": sym, "interval": ivl},
+            )
+        return await _chart_call(sym, ivl, lambda s, i: charts.put_chart(session_id, s, i, body))
 
     @app.post("/v1/copilot/analyze")
     async def analyze(request: Request):

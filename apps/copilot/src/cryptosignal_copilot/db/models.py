@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import Float, String, Text
+from sqlalchemy import Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -32,3 +32,26 @@ class CopilotSessionRow(Base):
     payload: Mapped[str] = mapped_column(Text, nullable=False)
     reasoning_effort: Mapped[str | None] = mapped_column(String, nullable=True)
     intent_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class ChartStateRow(Base):
+    """Per-session chart history: one JSON doc per (session, symbol, interval)."""
+
+    __tablename__ = "chart_states"
+    __table_args__ = (
+        UniqueConstraint("session_id", "symbol", "interval", name="uq_chart_states_key"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("copilot_sessions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    symbol: Mapped[str] = mapped_column(String, nullable=False)
+    interval: Mapped[str] = mapped_column(String, nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    doc: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[float] = mapped_column(Float, nullable=False)
+    analyzed_at: Mapped[float | None] = mapped_column(Float, nullable=True)

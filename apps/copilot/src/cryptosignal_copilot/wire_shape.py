@@ -20,6 +20,11 @@ WIRE_SHAPE_TOP_KEYS = frozenset(
         "priceLow",
         "priceHigh",
         "guardrail",
+        # Chart-history flags (docs/CHART_HISTORY_SPEC.md); pinned = user || kept || edited.
+        "origin",
+        "kept",
+        "edited",
+        "drawing_id",
     }
 )
 WIRE_POINT_KEYS = frozenset({"time", "price"})
@@ -57,6 +62,11 @@ def shape_for_wire(shape: dict[str, Any]) -> dict[str, Any]:
 
 def shapes_for_wire(shapes: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [shape_for_wire(s) for s in shapes]
+
+
+def ai_shape_flags(shape: dict[str, Any]) -> dict[str, Any]:
+    """A freshly analyzed shape: AI-made, not kept, not edited."""
+    return {**shape, "origin": "ai", "kept": False, "edited": False}
 
 
 def _assert_wire_keys(shape: dict[str, Any]) -> None:

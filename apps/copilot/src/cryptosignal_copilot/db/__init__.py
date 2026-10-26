@@ -1,3 +1,3 @@
-from cryptosignal_copilot.db.models import Base, CopilotSessionRow
+from cryptosignal_copilot.db.models import Base, ChartStateRow, CopilotSessionRow
 
-__all__ = ["Base", "CopilotSessionRow"]
+__all__ = ["Base", "ChartStateRow", "CopilotSessionRow"]

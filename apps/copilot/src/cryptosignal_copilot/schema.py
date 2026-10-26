@@ -84,16 +84,21 @@ PatternShapeModel = PatternShape
 
 
 class SessionShape(PatternShape):
-    """A shape as stored in a session message: the wire shape, guardrail included."""
+    """A shape as stored in a session message: the wire shape, guardrail and
+    chart-history flags included (all optional, omitted when unset)."""
 
     guardrail: Guardrail | None = None
+    origin: Literal["ai", "user"] | None = None
+    kept: bool | None = None
+    edited: bool | None = None
+    drawing_id: str | None = None
 
     _wire_guardrail = field_validator("guardrail", mode="before")(coerce_wire_guardrail)
 
     @model_serializer(mode="wrap")
     def _omit_empty_optionals(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
         data = handler(self)
-        for key in ("guardrail", "agentId"):
+        for key in ("guardrail", "agentId", "origin", "kept", "edited", "drawing_id"):
             if data.get(key) is None:
                 data.pop(key, None)
         return data

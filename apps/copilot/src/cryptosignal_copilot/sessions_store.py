@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from cryptosignal_copilot.config import sqlite_url_for_path
 from cryptosignal_copilot.db.engine import get_engine, reset_engine_for_tests
 from cryptosignal_copilot.db.migrate import run_db_migrations
-from cryptosignal_copilot.db.models import CopilotSessionRow
+from cryptosignal_copilot.db.models import ChartStateRow, CopilotSessionRow
 from cryptosignal_copilot.intent_prep import normalize_session_intent
 from cryptosignal_copilot.schema import (
     AnalyzeIntent,
@@ -84,6 +84,10 @@ class SessionsStore:
         self._lock = threading.Lock()
         if run_migrations:
             run_db_migrations(url, force=True)
+
+    @property
+    def database_url(self) -> str | None:
+        return self._database_url
 
     def _session(self) -> Session:
         return self._session_factory()
@@ -176,6 +180,8 @@ class SessionsStore:
                 row = session.get(CopilotSessionRow, session_id)
                 if row is None:
                     raise SessionNotFoundError(session_id)
+                # Cascade explicitly: SQLite does not enforce the FK unless PRAGMA'd on.
+                session.execute(delete(ChartStateRow).where(ChartStateRow.session_id == session_id))
                 session.delete(row)
                 session.commit()
 
@@ -193,6 +199,7 @@ class SessionsStore:
                 ).scalars()
                 ids = list(oldest)
                 if ids:
+                    session.execute(delete(ChartStateRow).where(ChartStateRow.session_id.in_(ids)))
                     session.execute(delete(CopilotSessionRow).where(CopilotSessionRow.id.in_(ids)))
                 session.commit()
 
