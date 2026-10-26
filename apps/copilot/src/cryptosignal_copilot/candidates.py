@@ -22,6 +22,7 @@ from cryptosignal_copilot.features import (
     zigzag_swings,
 )
 from cryptosignal_copilot.gate_policy import anchor_in_play, prefilter_candidate
+from cryptosignal_copilot.market_price import format_market_price
 from cryptosignal_copilot.schema import Candle, Interval
 from cryptosignal_copilot.vi_text import (
     EV_NECKLINE_NOT_BROKEN,
@@ -246,8 +247,6 @@ def _sr_role_from_last_close(cand: DrawingCandidate, candles: list[Candle]) -> D
     low_f, high_f = float(low), float(high)
     close = float(candles[-1].close)
     base_price = (low_f + high_f) / 2.0
-    from cryptosignal_copilot.market_price import format_market_price
-
     sym = str(shape.get("symbol") or "BTCUSDT")
     price_label = format_market_price(base_price, sym)
     start_t = _sr_zone_start_time(cand)
@@ -266,7 +265,7 @@ def _sr_role_from_last_close(cand: DrawingCandidate, candles: list[Candle]) -> D
             style=cand.style,
             score=cand.score,
             swing_ids=cand.swing_ids,
-            shapes=cand.shapes,
+            shapes=_renamed_shapes(cand.shapes, f"S/R {price_label}"),
             evidence_against=list(cand.evidence_against),
             invalidation_price=cand.invalidation_price,
             break_time=cand.break_time,
@@ -287,12 +286,17 @@ def _sr_role_from_last_close(cand: DrawingCandidate, candles: list[Candle]) -> D
         style=cand.style,
         score=score,
         swing_ids=cand.swing_ids,
-        shapes=cand.shapes,
+        shapes=_renamed_shapes(cand.shapes, name),
         evidence_against=evidence,
         invalidation_price=inv,
         break_time=cand.break_time,
         name=name,
     )
+
+
+def _renamed_shapes(shapes: list[dict[str, Any]], name: str) -> list[dict[str, Any]]:
+    """The wire shape carries the candidate's name (tick-formatted price, role/flip)."""
+    return [{**shape, "name": name} for shape in shapes]
 
 
 def _hs_target_reached(
@@ -509,6 +513,8 @@ def _level_clusters(
             band_high = price + 0.1 * atr
             score = min(0.85, 0.55 + 0.1 * len(cluster))
             cid = _cand_id("sr", cluster[0].side, round(price, 2), t0)
+            # Tick-aware label: a fixed 2 decimals showed PEPE as "S/R 0.00".
+            sr_name = f"S/R {format_market_price(price, symbol)}"
             out.append(
                 DrawingCandidate(
                     id=cid,
@@ -516,12 +522,12 @@ def _level_clusters(
                     style="classic",
                     score=score,
                     swing_ids=[s.id for s in cluster],
-                    name=f"S/R {price:.2f}",
+                    name=sr_name,
                     shapes=[
                         _zone_shape(
                             symbol=symbol,
                             interval=interval,
-                            name=f"S/R {price:.2f}",
+                            name=sr_name,
                             t0=t0,
                             t1=t1,
                             low=band_low,
