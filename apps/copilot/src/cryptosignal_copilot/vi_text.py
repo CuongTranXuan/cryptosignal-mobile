@@ -12,6 +12,8 @@ import re
 from collections.abc import Callable
 from typing import Any
 
+from cryptosignal_copilot.market_price import format_market_price
+
 # --------------------------------------------------------------------------- coded text
 #
 # Every evidence line and invalidation condition that reaches the client is also sent
@@ -160,7 +162,7 @@ def evidence_items(lines: list[str]) -> list[dict[str, Any]]:
 
 # --------------------------------------------------------------------------- regime / bias
 
-REGIME_VI = {
+_REGIME_VI = {
     "trend_up": "xu hướng tăng",
     "trend_down": "xu hướng giảm",
     "range": "đi ngang",
@@ -169,7 +171,7 @@ REGIME_VI = {
 
 
 def regime_vi(regime: str) -> str:
-    return REGIME_VI.get(regime, "đi ngang")
+    return _REGIME_VI.get(regime, "đi ngang")
 
 
 BIAS_CONFLICT_VI = (
@@ -192,13 +194,9 @@ def condition_code(condition: str | None) -> str:
     return key if key in _CONDITION_VI else "close_beyond"
 
 
-def condition_vi(condition: str | None) -> str:
-    return _CONDITION_VI[condition_code(condition)]
-
-
 def invalidation_text_vi(condition: str | None, price_label: str) -> str:
     """e.g. `đóng cửa trên 87,299.13`."""
-    return f"{condition_vi(condition)} {price_label}"
+    return f"{_CONDITION_VI[condition_code(condition)]} {price_label}"
 
 
 # --------------------------------------------------------------------------- gate reasons
@@ -297,8 +295,6 @@ def display_name_vi(name: str) -> str:
 
 def localize_invalidation(inv: dict[str, Any], symbol: str) -> dict[str, Any]:
     """Add `code`/`params`/`text` to an invalidation dict (keeps `price`/`condition`)."""
-    from cryptosignal_copilot.market_price import format_market_price
-
     if inv.get("price") is None:
         return inv
     price = float(inv["price"])

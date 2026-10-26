@@ -659,11 +659,7 @@ class ModelProbeService:
         if report is not None and not self.is_stale(report):
             return report
         if report is not None and report.upstream_reachable:
-            task = self._ensure_started(cfg)
-            try:
-                return await asyncio.wait_for(asyncio.shield(task), self.settings.first_wait_s)
-            except TimeoutError:
-                return report
+            return await self._await_briefly(self._ensure_started(cfg), fallback=report)
         return await self._join_or_start(cfg, wait=wait)
 
     def start_background(self, cfg: LlmConfig) -> None:
@@ -679,9 +675,22 @@ class ModelProbeService:
         task = self._ensure_started(cfg)
         if wait:
             return await asyncio.shield(task)
+        return await self._await_briefly(task, fallback=None, cfg=cfg)
+
+    async def _await_briefly(
+        self,
+        task: asyncio.Task[ProbeReport],
+        *,
+        fallback: ProbeReport | None,
+        cfg: LlmConfig | None = None,
+    ) -> ProbeReport:
+        """Wait up to `first_wait_s`; then `fallback`, else the partial/placeholder view."""
         try:
             return await asyncio.wait_for(asyncio.shield(task), self.settings.first_wait_s)
         except TimeoutError:
+            if fallback is not None:
+                return fallback
+            assert cfg is not None
             return self._partial or self._placeholder(cfg)
 
     def _placeholder(self, cfg: LlmConfig) -> ProbeReport:

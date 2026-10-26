@@ -201,9 +201,8 @@ async def test_persisted_cache_loads_at_startup_and_serves_stale_while_refreshin
     assert second.cached_step("BTCUSDT") == pytest.approx(0.001)
     # Stale tick served immediately; refresh scheduled in the background and fails softly.
     assert tick_size_for_symbol("BTCUSDT", reference_price=87_000.0) == pytest.approx(0.1)
-    refresh = second.schedule("BTCUSDT") or next(iter(second._tasks.values()), None)
-    if refresh is not None:
-        await refresh
+    refresh = second.schedule("BTCUSDT")  # joins the task the lookup started
+    assert refresh is not None and await refresh is None  # offline → backoff, stale kept
     assert tick_size_for_symbol("BTCUSDT", reference_price=87_000.0) == pytest.approx(0.1)
 
 
