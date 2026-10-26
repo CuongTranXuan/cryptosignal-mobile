@@ -430,7 +430,11 @@ def test_provider_detection(monkeypatch):
 async def test_ttl_cache_and_stale_while_revalidate(probe_env):
     calls: dict[str, int] = {}
     clock = Clock()
-    service = make_service(stub_transport(models=ROWS, chat=mixed_chat, calls=calls), clock=clock)
+    service = make_service(
+        stub_transport(models=ROWS, chat=mixed_chat, calls=calls),
+        clock=clock,
+        settings=ProbeSettings(first_wait_s=0.0),
+    )
     cfg = load_llm_config()
     first = await service.get_report(cfg)
     second = await service.get_report(cfg)
@@ -445,6 +449,9 @@ async def test_ttl_cache_and_stale_while_revalidate(probe_env):
     body = service.models_body(stale)
     assert body["stale"] is True
     assert body["probe_in_progress"] is True
+    # Stale: requested default m/auth failed → no substitute default from stale data.
+    assert body["default_model"] is None and body["default_fallback"] is False
+    assert body["requested_default"] == "m/auth"
     await service._task  # type: ignore[misc]
     assert service.probe_runs == 2
     assert service.cached_report() is not first
@@ -776,3 +783,91 @@ async def test_refresh_not_rate_limited_while_upstream_down(probe_env):
     report = await service.get_report(cfg, force=True)
     assert report.upstream_reachable is False
     assert service.probe_runs == 2
+
+
+# --------------------------------------------------------------------------- stale vs upstream down
+
+
+class Switchable(httpx.AsyncBaseTransport):
+    """OmniRoute that can be "stopped": /models then raises connection refused."""
+
+    def __init__(self) -> None:
+        self.down = False
+        self.inner = stub_transport(models=ROWS, chat=mixed_chat)
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        if self.down:
+            raise httpx.ConnectError("[Errno 61] Connection refused")
+        return await self.inner.handle_async_request(request)
+
+
+async def test_upstream_down_after_healthy_report_never_serves_stale_models(
+    probe_env, tmp_path, monkeypatch
+):
+    clock = Clock()
+    transport = Switchable()
+    service = make_service(transport, clock=clock)  # type: ignore[arg-type]
+    app = make_app(service, tmp_path, monkeypatch)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        healthy = (await client.get("/v1/copilot/models")).json()
+        assert healthy["default_model"] == "m/fast" and healthy["models"]
+        transport.down = True
+        clock.now += 601  # report goes stale, OmniRoute stopped
+        body = (await client.get("/v1/copilot/models")).json()
+        health = service.model_health()
+    assert body["upstream_reachable"] is False
+    assert body["models"] == []
+    assert body["default_model"] is None
+    assert body["default_fallback"] is False
+    assert body["requested_default"] == "m/auth"
+    assert body["upstream_error"]["code"] == "connect_error"
+    assert health.default_model is None
+
+
+async def test_upstream_down_while_refresh_slow_keeps_no_stale_default(probe_env):
+    """Refresh still running past first_wait: stale list may show, default never substitutes."""
+    gate = asyncio.Event()
+    clock = Clock()
+
+    class Gated(Switchable):
+        async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+            if self.down:
+                await gate.wait()
+            return await super().handle_async_request(request)
+
+    transport = Gated()
+    service = make_service(
+        transport,  # type: ignore[arg-type]
+        clock=clock,
+        settings=ProbeSettings(first_wait_s=0.01),
+    )
+    cfg = load_llm_config()
+    await service.get_report(cfg)
+    transport.down = True
+    clock.now += 601
+    stale = await service.get_report(cfg)
+    body = service.models_body(stale)
+    assert body["stale"] is True and body["probe_in_progress"] is True
+    assert body["default_model"] is None  # m/auth failed; no fallback from a stale report
+    assert service.model_health().default_model is None
+    gate.set()
+    await service._task  # type: ignore[misc]
+    down = service.models_body(service.cached_report())
+    assert down["upstream_reachable"] is False
+    assert down["models"] == [] and down["default_model"] is None
+    assert down["requested_default"] == "m/auth"
+
+
+async def test_stale_report_keeps_requested_default_only_if_it_passed(probe_env, monkeypatch):
+    monkeypatch.setenv("LLM_MODEL", "m/slow")
+    clock = Clock()
+    service = make_service(
+        stub_transport(models=ROWS, chat=mixed_chat),
+        clock=clock,
+        settings=ProbeSettings(first_wait_s=0.0),
+    )
+    report = await service.get_report(load_llm_config())
+    clock.now += 601
+    body = service.models_body(report)
+    assert body["stale"] is True
+    assert body["default_model"] == "m/slow" and body["default_fallback"] is False

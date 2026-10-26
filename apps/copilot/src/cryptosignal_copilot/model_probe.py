@@ -362,10 +362,16 @@ class ProbeReport:
             ),
         )
 
-    def effective_default(self) -> tuple[str | None, bool]:
-        """`(default_model, default_fallback)`; fallback only when a healthy substitute exists."""
+    def effective_default(self, *, stale: bool = False) -> tuple[str | None, bool]:
+        """`(default_model, default_fallback)`; fallback only when a healthy substitute exists.
+
+        A stale report never picks a substitute: only the requested default, and only if
+        it passed in that report; otherwise null until a current probe says otherwise.
+        """
         if self.status_of(self.requested_default) == "ok":
             return self.requested_default, False
+        if stale:
+            return None, False
         healthy = self.healthy()
         if not healthy:
             return None, False
@@ -614,7 +620,7 @@ class ModelProbeService:
         report = self._report or self.partial_report()
         if report is None:
             return ModelHealth(default_model=None, report=None)
-        default_model, _ = report.effective_default()
+        default_model, _ = report.effective_default(stale=self.is_stale(report))
         return ModelHealth(default_model=default_model, report=report)
 
     def check_refresh_allowed(self) -> None:
@@ -638,7 +644,9 @@ class ModelProbeService:
         """Report for the API.
 
         - fresh cache → cached report;
-        - stale reachable cache → cached report, refresh in the background;
+        - stale reachable cache → refresh, waiting up to `first_wait_s` (an upstream that
+          went down fails fast, so its unreachable report wins); still running → the stale
+          report (its models stay listed, but no substitute default is chosen from it);
         - otherwise start (or join) a probe and wait for it: fully when `wait`, else only
           `first_wait_s`, then return the partial report (results so far,
           `complete: false`) so a slow 100+ model probe never blocks the first request.
@@ -651,8 +659,11 @@ class ModelProbeService:
         if report is not None and not self.is_stale(report):
             return report
         if report is not None and report.upstream_reachable:
-            self._ensure_started(cfg)
-            return report
+            task = self._ensure_started(cfg)
+            try:
+                return await asyncio.wait_for(asyncio.shield(task), self.settings.first_wait_s)
+            except TimeoutError:
+                return report
         return await self._join_or_start(cfg, wait=wait)
 
     def start_background(self, cfg: LlmConfig) -> None:
@@ -806,8 +817,9 @@ class ModelProbeService:
         default_model: str | None = None
         default_fallback = False
         fetched_at: int | None = None
+        stale = self.is_stale(report)
         if report is not None:
-            default_model, default_fallback = report.effective_default()
+            default_model, default_fallback = report.effective_default(stale=stale)
             negative = get_model_negative_cache()
             by_id = report.snapshot.by_id() if report.snapshot else {}
             fetched_at = report.snapshot.fetched_at if report.snapshot else None
@@ -832,7 +844,7 @@ class ModelProbeService:
             "default_fallback": default_fallback,
             "probed_at": iso_utc(report.probed_at) if report else None,
             "ttl_s": int(settings.ttl_s),
-            "stale": self.is_stale(report),
+            "stale": stale,
             "probe_in_progress": self.in_progress,
             "upstream_reachable": report.upstream_reachable if report else False,
             "upstream_error": (
