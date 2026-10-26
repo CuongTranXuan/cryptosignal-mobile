@@ -4,7 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import type { CopilotApiClient } from "../../lib/copilot-api";
 import {
   formatProbedAt,
+  formatProbeProgress,
   hiddenModelsFromReport,
+  isProbeIncomplete,
   isProbeSupported,
   modelsAvailability,
   probeDetailLine,
@@ -129,20 +131,21 @@ function HiddenModelsToggle({ api }: { api: CopilotApiClient }) {
 
 /** Always-visible model picker + OmniRoute probe status for the top bar. */
 export function CopilotModelBar({ api }: { api: CopilotApiClient }) {
-  const { response } = useCopilotModels(api);
+  const { response, report } = useCopilotModels(api);
   const modelId = useCopilotSessionStore((s) => s.modelId);
   const setModelId = useCopilotSessionStore((s) => s.setModelId);
   const reconcile = useCopilotSessionStore((s) => s.reconcileModelWithCatalog);
   const inFlight = useAiStore((s) => s.inFlight);
   const now = useNow(30_000);
 
-  useCopilotModelsAutoRefresh(api, response);
+  useCopilotModelsAutoRefresh(api, response, report);
 
   useEffect(() => {
     if (response) reconcile();
-  }, [response, reconcile]);
+  }, [response, report, reconcile]);
 
   const probeSupported = isProbeSupported(response);
+  const probeRunning = isProbeIncomplete(response, report);
 
   return (
     <div className="flex items-center gap-2">
@@ -156,7 +159,11 @@ export function CopilotModelBar({ api }: { api: CopilotApiClient }) {
         <>
           <div className="flex min-w-0 flex-col items-start leading-tight">
             <span className="flex items-center gap-1 whitespace-nowrap text-[10px] text-[#848e9c]">
-              {formatProbedAt(response?.probed_at, now)}
+              {probeRunning ? (
+                <span data-testid="copilot-probe-progress">{formatProbeProgress(report)}</span>
+              ) : (
+                formatProbedAt(response?.probed_at, now)
+              )}
               {response?.stale && (
                 <span
                   className="rounded bg-[#f0b90b]/15 px-1 text-[#f0b90b]"
@@ -218,12 +225,12 @@ function Banner({
 
 /** Full-width notices under the top bar: OmniRoute down, no healthy model, auto-switch, fallback. */
 export function CopilotModelBanner({ api }: { api: CopilotApiClient }) {
-  const { response, probeError } = useCopilotModels(api);
+  const { response, report, probeError } = useCopilotModels(api);
   const modelNotice = useCopilotSessionStore((s) => s.modelNotice);
   const dismissModelNotice = useCopilotSessionStore((s) => s.dismissModelNotice);
   const [dismissedFallback, setDismissedFallback] = useState<string | null>(null);
 
-  const availability = modelsAvailability(response);
+  const availability = modelsAvailability(response, report);
   const fallbackKey =
     response?.default_fallback && response.requested_default && response.default_model
       ? `${response.requested_default}->${response.default_model}`

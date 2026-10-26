@@ -13,6 +13,7 @@ import {
   type SummaryDirection,
 } from "./copilot-schema";
 import { formatInvalidationLine } from "./guardrail-format";
+import { evidenceItemRaw, evidenceItemText, evidenceTexts, labelForGateReason } from "./vi-evidence";
 
 export const KNOWN_PATTERN_IDS = [
   "head_and_shoulders",
@@ -89,7 +90,9 @@ export function labelForSkippedReason(reasonCode: string): string {
   if (reasonCode in SKIPPED_REASON_VI) {
     return SKIPPED_REASON_VI[reasonCode as KnownSkippedReasonCode];
   }
-  return humanizeId(reasonCode);
+  const gate = labelForGateReason(reasonCode);
+  if (gate !== reasonCode) return gate;
+  return `lý do khác (${humanizeId(reasonCode)})`;
 }
 
 export function labelForStyle(id: ChartStyleId | string): string {
@@ -107,7 +110,7 @@ export function labelForPattern(id: string): string {
 }
 
 export function labelForRegime(regime: string): string {
-  return REGIME_LABELS_VI[regime] ?? humanizeId(regime);
+  return REGIME_LABELS_VI[regime] ?? `chế độ khác (${humanizeId(regime)})`;
 }
 
 /** Parse `analysis` SSE payload; never throws — returns null when unrecoverable. */
@@ -120,19 +123,30 @@ export function parseAnalysisSseEvent(data: Record<string, unknown>): AnalysisSs
 const BIAS_CONFLICT_EVIDENCE_RE =
   /thiên kiến|user bias conflict|bias conflict|không khớp chế độ detector/i;
 
-/** Drop bias-conflict copy from analysis card; banner + server summary own that signal (C.12). */
+/**
+ * Vietnamese evidence_against lines for the analysis card, without the bias-conflict copy
+ * (the banner and server summary own that signal, C.12).
+ */
 export function filterStructuralEvidenceAgainst(
   analysis: Pick<AnalysisSseEvent, "evidence_against" | "intent_check">,
+  symbol = "BTCUSDT",
 ): string[] {
   const message = analysis.intent_check?.message?.trim();
-  return (analysis.evidence_against ?? []).filter((line) => {
-    if (!line) return false;
-    if (message && line.includes(message)) return false;
-    if (analysis.intent_check?.bias_conflict && BIAS_CONFLICT_EVIDENCE_RE.test(line)) {
-      return false;
+  const lines: string[] = [];
+  for (const item of analysis.evidence_against ?? []) {
+    const raw = evidenceItemRaw(item);
+    if (!raw) continue;
+    if (message && raw.includes(message)) continue;
+    const text = evidenceItemText(item, symbol);
+    if (
+      analysis.intent_check?.bias_conflict &&
+      (BIAS_CONFLICT_EVIDENCE_RE.test(raw) || BIAS_CONFLICT_EVIDENCE_RE.test(text))
+    ) {
+      continue;
     }
-    return true;
-  });
+    lines.push(text);
+  }
+  return lines;
 }
 
 export function isAnalysisSseEmpty(analysis: Partial<AnalysisSseEvent>): boolean {
@@ -148,7 +162,10 @@ export function isAnalysisSseEmpty(analysis: Partial<AnalysisSseEvent>): boolean
 }
 
 /** Compact Vietnamese summary for the analysis card; null when nothing to show. */
-export function formatAnalysisSummaryVi(analysis: AnalysisSseEvent): string | null {
+export function formatAnalysisSummaryVi(
+  analysis: AnalysisSseEvent,
+  symbol = "BTCUSDT",
+): string | null {
   if (isAnalysisSseEmpty(analysis)) return null;
   const lines: string[] = [];
   if (analysis.no_valid_pattern) {
@@ -158,22 +175,22 @@ export function formatAnalysisSummaryVi(analysis: AnalysisSseEvent): string | nu
     lines.push(`Hướng tóm tắt: ${labelForSummaryDirection(analysis.summary_direction)}.`);
   }
   if (analysis.bias && analysis.bias !== "neutral") {
-    lines.push(`Bias phát hiện: ${labelForBias(analysis.bias)}.`);
+    lines.push(`Thiên hướng phát hiện: ${labelForBias(analysis.bias)}.`);
   }
   if (analysis.confidence != null && Number.isFinite(analysis.confidence)) {
     lines.push(`Độ tin cậy tổng hợp: ${Math.round(analysis.confidence * 100)}%.`);
   }
-  const forLines = analysis.evidence_for ?? [];
+  const forLines = evidenceTexts(analysis.evidence_for, symbol);
   if (forLines.length > 0) {
     lines.push(`Bằng chứng thuận: ${forLines.join("; ")}`);
   }
-  const againstLines = filterStructuralEvidenceAgainst(analysis);
+  const againstLines = filterStructuralEvidenceAgainst(analysis, symbol);
   if (againstLines.length > 0) {
     lines.push(`Bằng chứng ngược: ${againstLines.join("; ")}`);
   }
   const inv = analysis.invalidation;
   if (inv != null) {
-    const line = formatInvalidationLine(inv, "BTCUSDT");
+    const line = formatInvalidationLine(inv, symbol);
     if (line) lines.push(`Vô hiệu hóa: ${line}`);
   }
   return lines.join("\n");

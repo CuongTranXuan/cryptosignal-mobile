@@ -4,6 +4,7 @@ import { useState } from "react";
 import { displayShapeName } from "../lib/copilot-display";
 import { labelForRegime } from "../lib/copilot-chart-ai";
 import { formatInvalidationLine } from "../lib/guardrail-format";
+import { evidenceItemRaw, evidenceItemText } from "../lib/vi-evidence";
 import { getCopilotFeedbackClient } from "../lib/copilot-feedback-host";
 import { shapeFeedbackSnapshot } from "../lib/copilot-shape-snapshot";
 import {
@@ -31,7 +32,8 @@ function GuardrailDetails({ shape }: { shape: PatternShape }) {
   if (!g) {
     return <span className="text-[#474d57]">{COPILOT_GUARDRAIL_NONE}</span>;
   }
-  const inv = formatInvalidationLine(g.invalidation, shape.symbol || symbol);
+  const shapeSymbol = shape.symbol || symbol;
+  const inv = formatInvalidationLine(g.invalidation, shapeSymbol);
   return (
     <div className="space-y-1 text-[#848e9c]">
       <div className="text-[#eaecef]">
@@ -41,8 +43,8 @@ function GuardrailDetails({ shape }: { shape: PatternShape }) {
         <span className="text-[#848e9c]">{COPILOT_GUARDRAIL_EVIDENCE}: </span>
         {g.evidence_against.length > 0 ? (
           <ul className="mt-0.5 list-disc pl-4 text-[#eaecef]">
-            {g.evidence_against.map((line) => (
-              <li key={line}>{line}</li>
+            {g.evidence_against.map((item, index) => (
+              <li key={`${index}:${evidenceItemRaw(item)}`}>{evidenceItemText(item, shapeSymbol)}</li>
             ))}
           </ul>
         ) : (

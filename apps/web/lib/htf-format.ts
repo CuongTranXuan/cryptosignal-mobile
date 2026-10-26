@@ -27,7 +27,7 @@ export function formatMetaHtfLine(meta: AnalyzeMetaEvent | null | undefined): st
     typeof htf.regime === "string" && htf.regime in HTF_REGIME_VI
       ? HTF_REGIME_VI[htf.regime as DrawingRegime]
       : typeof htf.regime === "string"
-        ? htf.regime
+        ? `chế độ khác (${String(htf.regime).replace(/_/g, " ")})`
         : null;
   const closeTime =
     typeof htf.last_closed_time === "number" && Number.isFinite(htf.last_closed_time)

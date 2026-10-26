@@ -21,11 +21,11 @@ export const COPILOT_PATTERN_ANY = "Bất kỳ";
 export const COPILOT_STYLE_NO_PATTERNS = "Chưa có mẫu hình cho phong cách này";
 
 export const COPILOT_GUARDRAIL_REGIME = "Chế độ";
-export const COPILOT_GUARDRAIL_CONFIDENCE = "Độ tin cậy guardrail";
+export const COPILOT_GUARDRAIL_CONFIDENCE = "Độ tin cậy kiểm soát rủi ro";
 export const COPILOT_GUARDRAIL_EVIDENCE = "Bằng chứng trái";
 export const COPILOT_GUARDRAIL_NO_EVIDENCE = "Không có bằng chứng trái";
 export const COPILOT_GUARDRAIL_INVALIDATION = "Vô hiệu hóa";
-export const COPILOT_GUARDRAIL_NONE = "Không có guardrail";
+export const COPILOT_GUARDRAIL_NONE = "Không có kiểm soát rủi ro";
 
 export const COPILOT_FEEDBACK_KEEP = "Giữ";
 export const COPILOT_FEEDBACK_REJECT = "Bỏ";
@@ -205,6 +205,8 @@ export const COPILOT_PROBE_NEVER = "Chưa kiểm tra model";
 export const COPILOT_PROBE_STALE = "cũ";
 export const COPILOT_PROBE_STALE_HINT = "Kết quả kiểm tra đã cũ — đang chờ kiểm tra lại";
 export const COPILOT_PROBE_IN_PROGRESS = "Đang kiểm tra…";
+export const COPILOT_PROBE_PROGRESS = "Đang kiểm tra… ({done}/{total})";
+export const COPILOT_PROBE_PROGRESS_DONE = "Đang kiểm tra… (đã xong {done})";
 export const COPILOT_PROBE_RETRY = "Kiểm tra lại";
 export const COPILOT_PROBE_RETRY_IN = "Thử lại sau {seconds}s";
 export const COPILOT_PROBE_FAILED = "Không kiểm tra lại được — thử lại sau.";

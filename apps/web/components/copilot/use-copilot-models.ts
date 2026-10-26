@@ -185,12 +185,13 @@ export function useCopilotModels(api: CopilotApiClient | null): {
 export function useCopilotModelsAutoRefresh(
   api: CopilotApiClient | null,
   response: ModelsListResponse | null,
+  report: ModelProbeReport | null = null,
 ): void {
   useEffect(() => {
     if (!api) return;
-    const delay = nextModelsRefetchDelayMs(response, Date.now());
+    const delay = nextModelsRefetchDelayMs(response, Date.now(), report);
     if (delay == null) return;
     const timer = window.setTimeout(() => void refreshCopilotModels(api), delay);
     return () => window.clearTimeout(timer);
-  }, [api, response]);
+  }, [api, response, report]);
 }

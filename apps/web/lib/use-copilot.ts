@@ -21,7 +21,12 @@ import {
   getDefaultModelId,
   getModelsList,
 } from "./copilot-models-cache";
-import { probeStatusLabel, unhealthyModelFromError } from "./copilot-model-probe";
+import {
+  isProbeIncomplete,
+  probeStatusLabel,
+  unhealthyModelFromError,
+} from "./copilot-model-probe";
+import { getModelProbeReport } from "../components/copilot/use-copilot-models";
 import { reasoningEffortForAnalyze } from "./copilot-reasoning";
 import { resolveCopilotBaseUrl, type ApiErrorBody } from "./copilot-api";
 import {
@@ -56,6 +61,7 @@ import {
 import { filterShapesWithProjection } from "./shape-projection";
 import { useAiStore } from "./stores/ai-store";
 import { useChartStore } from "./stores/chart-store";
+import { translateServerText } from "./vi-evidence";
 import { useMarkerStore } from "./stores/marker-store";
 import { useShapeStore } from "./stores/shape-store";
 
@@ -217,8 +223,9 @@ function appendServerSkippedNote(data: Record<string, unknown>): void {
   if (text) appendAgentChatLine(text);
 }
 
+/** Server-authored stream text; known English/jargon templates are shown in Vietnamese. */
 function appendAgentStreamText(delta: string): void {
-  appendAgentChatLine(delta);
+  appendAgentChatLine(translateServerText(delta, useChartStore.getState().symbol));
 }
 
 function appendMetaFallbackNote(meta: AnalyzeMetaEvent): void {
@@ -590,11 +597,13 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
 
     const models = getModelsList();
     const apiDefault = getDefaultModelId();
-    const analyzeModelId = modelIdForAnalyzeRequest(
-      models,
-      sessionState.modelId,
-      apiDefault,
-    );
+    // While a probe runs the healthy list is partial: keep sending the selected model.
+    const keepSelected =
+      !!sessionState.modelId &&
+      isProbeIncomplete(getCachedModelsResponse() ?? null, getModelProbeReport());
+    const analyzeModelId = keepSelected
+      ? (sessionState.modelId ?? undefined)
+      : modelIdForAnalyzeRequest(models, sessionState.modelId, apiDefault);
     const displayModelId =
       analyzeModelId ?? sessionState.modelId ?? apiDefault ?? undefined;
     const model = findCachedModel(analyzeModelId ?? sessionState.modelId);

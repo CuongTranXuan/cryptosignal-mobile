@@ -3,14 +3,16 @@
 import { formatAnalysisSummaryVi } from "../../lib/copilot-chart-ai";
 import { COPILOT_ANALYSIS_CARD_TITLE } from "../../lib/copilot-strings";
 import type { AnalysisSseEvent } from "../../lib/copilot-schema";
+import { useChartStore } from "../../lib/stores/chart-store";
 
 type CopilotAnalysisSummaryProps = {
   analysis: AnalysisSseEvent | null | undefined;
 };
 
 export function CopilotAnalysisSummary({ analysis }: CopilotAnalysisSummaryProps) {
+  const symbol = useChartStore((s) => s.symbol);
   if (!analysis) return null;
-  const body = formatAnalysisSummaryVi(analysis);
+  const body = formatAnalysisSummaryVi(analysis, symbol);
   if (!body) return null;
   return (
     <div

@@ -12,7 +12,10 @@ import {
   COPILOT_PROBE_HOURS_AGO,
   COPILOT_PROBE_JUST_NOW,
   COPILOT_PROBE_MINUTES_AGO,
+  COPILOT_PROBE_IN_PROGRESS,
   COPILOT_PROBE_NEVER,
+  COPILOT_PROBE_PROGRESS,
+  COPILOT_PROBE_PROGRESS_DONE,
   COPILOT_PROBE_REASON_UNKNOWN,
 } from "./copilot-strings";
 
@@ -22,6 +25,7 @@ const PROBE_STATUS_LABELS: Record<Exclude<ModelProbeStatus, "ok">, string> = {
   not_found: "Không tìm thấy model",
   timeout: "Hết thời gian chờ",
   upstream_error: "Lỗi máy chủ upstream",
+  provider_unconfigured: "Chưa cấu hình nhà cung cấp",
 };
 
 function isProbeStatus(status: string): status is ModelProbeStatus {
@@ -48,12 +52,48 @@ export function hiddenModelsFromReport(report: ModelProbeReport | null): ModelPr
   return report?.results.filter((r) => r.status !== "ok") ?? [];
 }
 
-export type ModelsAvailability = "unknown" | "healthy" | "empty" | "down";
+/**
+ * A probe is still running, so `/models` only lists the healthy models found so far.
+ * Until it completes, a selected model missing from the list is not a reason to switch.
+ */
+export function isProbeIncomplete(
+  response: ModelsListResponse | null,
+  report: ModelProbeReport | null,
+): boolean {
+  return (
+    response?.probe_in_progress === true ||
+    report?.probe_in_progress === true ||
+    report?.complete === false
+  );
+}
 
-export function modelsAvailability(response: ModelsListResponse | null): ModelsAvailability {
+/**
+ * Progress while a probe runs: "(N/M)" when the total is known, else "(đã xong N)".
+ * N = results published so far. The wire has no total yet, so callers pass it when known.
+ */
+export function formatProbeProgress(
+  report: ModelProbeReport | null,
+  total?: number | null,
+): string {
+  const done = report?.results.length ?? 0;
+  if (done === 0) return COPILOT_PROBE_IN_PROGRESS;
+  if (total != null && total >= done) {
+    return COPILOT_PROBE_PROGRESS.replace("{done}", String(done)).replace("{total}", String(total));
+  }
+  return COPILOT_PROBE_PROGRESS_DONE.replace("{done}", String(done));
+}
+
+export type ModelsAvailability = "unknown" | "healthy" | "empty" | "down" | "probing";
+
+export function modelsAvailability(
+  response: ModelsListResponse | null,
+  report: ModelProbeReport | null = null,
+): ModelsAvailability {
   if (!response) return "unknown";
   if (response.upstream_reachable === false) return "down";
-  if (response.models.length === 0) return "empty";
+  if (response.models.length === 0) {
+    return isProbeIncomplete(response, report) ? "probing" : "empty";
+  }
   return "healthy";
 }
 
@@ -124,9 +164,10 @@ const IN_PROGRESS_REFETCH_MS = 10_000;
 export function nextModelsRefetchDelayMs(
   response: ModelsListResponse | null,
   now: number,
+  report: ModelProbeReport | null = null,
 ): number | null {
   if (!response || !isProbeSupported(response)) return null;
-  if (response.probe_in_progress) return IN_PROGRESS_REFETCH_MS;
+  if (isProbeIncomplete(response, report)) return IN_PROGRESS_REFETCH_MS;
   if (response.stale) return MIN_REFETCH_MS;
   const ttlMs = (response.ttl_s ?? 0) * 1000;
   if (ttlMs <= 0) return null;
@@ -147,6 +188,20 @@ export function modelSwitchedFrom(
   const saved = savedId?.trim();
   if (!saved || !resolvedId || saved === resolvedId || models.length === 0) return null;
   return models.some((m) => m.id === saved) ? null : saved;
+}
+
+/**
+ * Session model to use: while a probe is incomplete the saved model is kept even when the
+ * partial healthy list does not contain it yet; otherwise `resolve` picks a healthy one.
+ */
+export function resolveModelDuringProbe(
+  savedId: string | null | undefined,
+  incomplete: boolean,
+  resolve: () => string | null,
+): string | null {
+  const saved = savedId?.trim();
+  if (incomplete && saved) return saved;
+  return resolve();
 }
 
 export function probeReasonForModel(

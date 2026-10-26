@@ -8,7 +8,12 @@ import {
   refreshCopilotModels,
   syncModelsSnapshotFromCache,
 } from "../../components/copilot/use-copilot-models";
-import { modelSwitchedFrom, probeReasonForModel } from "../copilot-model-probe";
+import {
+  isProbeIncomplete,
+  modelSwitchedFrom,
+  probeReasonForModel,
+  resolveModelDuringProbe,
+} from "../copilot-model-probe";
 import {
   defaultReasoningEffortForModel,
   resetReasoningForModel,
@@ -58,6 +63,7 @@ import { useAiStore } from "./ai-store";
 import { useChartStore } from "./chart-store";
 import { useMarkerStore } from "./marker-store";
 import { useShapeStore } from "./shape-store";
+import { translateServerText } from "../vi-evidence";
 import type { AgentMarker, PatternShape } from "../pattern-shape";
 
 function aiToSessionMessages(messages: AiMessage[]): CopilotSessionV1["messages"] {
@@ -83,7 +89,7 @@ function sessionToAiMessages(
   return messages.map((m) => ({
     id: m.id,
     role: m.role === "user" ? "user" : "agent",
-    content: m.content,
+    content: m.role === "user" ? m.content : translateServerText(m.content),
     modelId: m.model_id ?? undefined,
     modelLabel: agentMessageModelLabel(models, m.model_id, apiDefault),
     shapes: m.shapes as PatternShape[],
@@ -105,6 +111,21 @@ function switchNotice(
   if (!from || !resolvedId) return null;
   const reason = probeReasonForModel(getModelProbeReport(), from);
   return copilotModelSwitchedNotice(from, resolvedId, reason);
+}
+
+function probeIncomplete(): boolean {
+  return isProbeIncomplete(getCachedModelsResponse() ?? null, getModelProbeReport());
+}
+
+/** Healthy model for the session; keeps the saved one while the probe is still running. */
+function resolveModel(
+  models: ReturnType<typeof getModelsList>,
+  savedId: string | null | undefined,
+  apiDefault: string | null,
+): string | null {
+  return resolveModelDuringProbe(savedId, probeIncomplete(), () =>
+    resolveSessionModelId(models, savedId, apiDefault),
+  );
 }
 
 type CopilotSessionState = {
@@ -203,7 +224,7 @@ function buildActiveSessionSnapshot(get: () => CopilotSessionState): CopilotSess
     id: activeSessionId,
     updated_at: Math.floor(Date.now() / 1000),
     model_id:
-      resolveSessionModelId(getModelsList(), modelId ?? base.model_id, getDefaultModelId()) ??
+      resolveModel(getModelsList(), modelId ?? base.model_id, getDefaultModelId()) ??
       base.model_id,
     reasoning_effort: reasoningEffort,
     intent: cached?.intent ?? base.intent ?? null,
@@ -362,7 +383,7 @@ export const useCopilotSessionStore = create<CopilotSessionState>((set, get) => 
       }
     }
 
-    const resolvedModelId = resolveSessionModelId(models, activeSession!.model_id, apiDefault);
+    const resolvedModelId = resolveModel(models, activeSession!.model_id, apiDefault);
     const resolvedModel = findCachedModel(resolvedModelId);
     const reasoningEffort = resetReasoningForModel(
       resolvedModel,
@@ -457,6 +478,7 @@ export const useCopilotSessionStore = create<CopilotSessionState>((set, get) => 
     const { activeSessionId, modelId, sessionCache } = get();
     const response = getCachedModelsResponse();
     if (!activeSessionId || !response || response.models.length === 0) return;
+    if (probeIncomplete()) return;
     const current = modelId ?? sessionCache[activeSessionId]?.model_id ?? null;
     const resolved = resolveSessionModelId(response.models, current, response.default_model);
     if (!resolved || resolved === modelId) return;
@@ -533,7 +555,7 @@ export const useCopilotSessionStore = create<CopilotSessionState>((set, get) => 
     await get().flushPersist();
     const models = getModelsList();
     const modelId =
-      resolveSessionModelId(models, get().modelId, getDefaultModelId()) ??
+      resolveModel(models, get().modelId, getDefaultModelId()) ??
       resolveCatalogDefaultId(models, getDefaultModelId());
     if (!modelId) {
       set({ sessionsError: COPILOT_SESSIONS_OFFLINE });
@@ -610,7 +632,7 @@ export const useCopilotSessionStore = create<CopilotSessionState>((set, get) => 
     saveActiveSessionId(id);
     const models = getModelsList();
     const apiDefault = getDefaultModelId();
-    const resolvedId = resolveSessionModelId(models, session.model_id, apiDefault);
+    const resolvedId = resolveModel(models, session.model_id, apiDefault);
     const model = findCachedModel(resolvedId);
     set({
       modelNotice: switchNotice(models, session.model_id, resolvedId),

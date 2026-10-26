@@ -28,6 +28,7 @@ export const MODEL_PROBE_STATUSES = [
   "not_found",
   "timeout",
   "upstream_error",
+  "provider_unconfigured",
 ] as const;
 export type ModelProbeStatus = (typeof MODEL_PROBE_STATUSES)[number];
 
@@ -73,6 +74,12 @@ export const ModelProbeReportSchema = z.object({
   upstream_reachable: z.boolean().optional(),
   upstream_error: UpstreamErrorSchema.nullable().optional(),
   results: z.array(ModelProbeResultSchema),
+  /** Candidates over the probe cap, never probed. */
+  skipped_count: z.number().int().nonnegative().optional(),
+  skipped_ids: z.array(z.string()).optional(),
+  /** `false` while a running probe has only published part of its results. */
+  complete: z.boolean().optional(),
+  probe_in_progress: z.boolean().optional(),
 });
 
 export type CopilotModelRecord = z.infer<typeof CopilotModelRecordSchema>;
@@ -116,15 +123,35 @@ export type AnalyzeIntent = z.infer<typeof AnalyzeIntentSchema>;
 export const DrawingRegimeSchema = z.enum(["trend_up", "trend_down", "range", "volatile"]);
 export type DrawingRegime = z.infer<typeof DrawingRegimeSchema>;
 
-export const DrawingInvalidationSchema = z.object({
-  price: z.number(),
-  condition: z.string().optional(),
-});
+/**
+ * Coded backend text: stable `code` + `params`, with `text` already in Vietnamese.
+ * Older backends send plain (often English) strings instead; both parse.
+ */
+export const CodedTextSchema = z
+  .object({
+    code: z.string().optional(),
+    params: z.record(z.unknown()).optional(),
+    text: z.string().optional(),
+  })
+  .passthrough();
+
+export const EvidenceItemSchema = z.union([z.string(), CodedTextSchema]);
+export type EvidenceItem = z.infer<typeof EvidenceItemSchema>;
+
+export const DrawingInvalidationSchema = z
+  .object({
+    price: z.number(),
+    condition: z.string().optional(),
+    code: z.string().optional(),
+    params: z.record(z.unknown()).optional(),
+    text: z.string().optional(),
+  })
+  .passthrough();
 
 export const DrawingGuardrailSchema = z.object({
   regime: DrawingRegimeSchema,
   confidence: z.number().min(0).max(1),
-  evidence_against: z.array(z.string()),
+  evidence_against: z.array(EvidenceItemSchema),
   invalidation: DrawingInvalidationSchema.nullable(),
 });
 
@@ -240,8 +267,8 @@ export const AnalysisSseEventSchema = z
     bias: optionalBiasWire,
     summary_direction: SummaryDirectionSchema.optional(),
     no_valid_pattern: z.boolean().optional(),
-    evidence_for: z.array(z.string()).optional().default([]),
-    evidence_against: z.array(z.string()).optional().default([]),
+    evidence_for: z.array(EvidenceItemSchema).optional().default([]),
+    evidence_against: z.array(EvidenceItemSchema).optional().default([]),
     invalidation: DrawingInvalidationSchema.nullable().optional(),
     confidence: z.number().nullable().optional(),
     intent_check: IntentCheckSchema.optional(),
