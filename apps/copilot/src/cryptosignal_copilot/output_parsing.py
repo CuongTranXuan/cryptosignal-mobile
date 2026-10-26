@@ -30,11 +30,6 @@ def parse_analyze_result_llm_text(raw: str) -> AnalyzeResultLlm:
             pick_assessments=[],
             drawing_intents=[],
         )
-    if "pick_notes" in payload or "summary" in payload or "markers" in payload:
-        payload = {
-            "pick_assessments": list(payload.get("pick_assessments") or []),
-            "drawing_intents": list(payload.get("drawing_intents") or []),
-        }
     return AnalyzeResultLlm.model_validate(payload)
 
 

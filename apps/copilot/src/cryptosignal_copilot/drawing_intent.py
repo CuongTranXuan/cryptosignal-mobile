@@ -6,7 +6,7 @@ import re
 from collections.abc import Sequence
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from cryptosignal_copilot.candidates import CandidateCatalog, DrawingCandidate, patterns_for_style
 from cryptosignal_copilot.drawing_gate import MAX_SHAPES
@@ -81,10 +81,23 @@ class PickAssessment(BaseModel):
         return value
 
 
+# Keys from the pre-id output contract. Models still emit them (often empty); the server
+# authors summary/markers itself, so they are dropped before validation instead of
+# costing an output retry.
+LEGACY_OUTPUT_KEYS = frozenset({"markers", "summary", "pick_notes"})
+
+
 class AnalyzeResultLlm(BaseModel):
     """Structured LLM output — references candidates by id; bias text is server-side."""
 
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _strip_legacy_keys(cls, data: Any) -> Any:
+        if isinstance(data, dict) and LEGACY_OUTPUT_KEYS & data.keys():
+            return {k: v for k, v in data.items() if k not in LEGACY_OUTPUT_KEYS}
+        return data
 
     pick_assessments: list[PickAssessment] = Field(
         default_factory=list, max_length=MAX_DRAWING_INTENTS
