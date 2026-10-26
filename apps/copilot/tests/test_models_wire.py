@@ -31,6 +31,7 @@ PROBE_STATUSES = {
     "auth_error",
     "quota_or_rate_limited",
     "not_found",
+    "provider_unconfigured",
     "timeout",
     "upstream_error",
 }
@@ -75,6 +76,9 @@ REPORT_FIELDS: dict[str, tuple[type | None, ...]] = {
     "upstream_reachable": (bool,),
     "upstream_error": (dict, None),
     "skipped_count": (int,),
+    "skipped_ids": (list,),
+    "complete": (bool,),
+    "probe_in_progress": (bool,),
     "results": (list,),
 }
 RESULT_FIELDS: dict[str, tuple[type | None, ...]] = {
@@ -91,6 +95,7 @@ ROWS = [
     {"id": "agentrouter/deepseek-v4-flash", "owned_by": "agentrouter", "context_length": 1_000_000},
     {"id": "cursor/composer-2.5", "owned_by": "cursor"},
     {"id": "cursor/auto", "owned_by": "cursor"},
+    {"id": "auggie/claude-sonnet-4-5", "owned_by": "auggie"},
 ]
 SECRET = "sk-wire-SECRET-0000000000000000"
 
@@ -133,11 +138,16 @@ def _chat(case: str):
     def chat(model: str, _body: dict[str, Any]) -> httpx.Response:
         if case == "default_fallback" and model == "agentrouter/deepseek-v4-flash":
             return httpx.Response(
-                402, json={"error": {"message": "Budget pool quota exhausted", "code": "quota"}}
+                401, json={"error": {"message": "No active credentials for provider agentrouter"}}
             )
         if model == "cursor/auto":
             return httpx.Response(
                 404, json={"error": {"message": "model not found", "code": "model_not_found"}}
+            )
+        if model == "auggie/claude-sonnet-4-5":
+            return httpx.Response(
+                502,
+                json={"error": {"message": "Auggie CLI not found. Please install/login first."}},
             )
         return completion_ok(model)
 
@@ -156,7 +166,7 @@ async def capture(case: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) ->
     monkeypatch.setenv("LLM_MODEL", "agentrouter/deepseek-v4-flash")
     monkeypatch.setenv(
         "COPILOT_MODEL_VISIBILITY_ALLOWLIST",
-        "agentrouter/deepseek-v4-flash,cursor/composer-2.5,cursor/auto",
+        "agentrouter/deepseek-v4-flash,cursor/composer-2.5,cursor/auto,auggie/claude-sonnet-4-5",
     )
     monkeypatch.setenv("DATABASE_URL", sqlite_url_for_path(tmp_path / "s.sqlite3"))
     models_error = (
@@ -194,9 +204,14 @@ def test_fixture_files_match_contract():
     for case in CASES:
         check_models_body(models[case], f"models_response.{case}")
         check_report_body(report[case], f"models_probe_report.{case}")
+        assert report[case]["skipped_count"] == len(report[case]["skipped_ids"])
     assert models["healthy"]["default_fallback"] is False
     assert models["default_fallback"]["default_fallback"] is True
     assert models["upstream_down"]["upstream_reachable"] is False
+    statuses = {r["id"]: r["status"] for r in report["default_fallback"]["results"]}
+    assert statuses["agentrouter/deepseek-v4-flash"] == "auth_error"
+    assert statuses["auggie/claude-sonnet-4-5"] == "provider_unconfigured"
+    assert statuses["cursor/auto"] == "not_found"
 
 
 @pytest.mark.parametrize("case", CASES)

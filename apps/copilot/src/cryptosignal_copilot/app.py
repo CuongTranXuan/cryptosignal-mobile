@@ -166,12 +166,12 @@ def create_app(
         if not _probe_applies(cfg.style):
             return await _unprobed_models_body(cfg, q)
         try:
-            report = await probe.get_report(cfg, force=refresh)
+            report = await probe.get_report(cfg, force=refresh, wait=False)
         except ProbeRateLimited as exc:
             return _rate_limited_response(exc)
         return probe.models_body(report, q=q)
 
-    async def _probe_report(force: bool):
+    async def _probe_report(force: bool, *, wait: bool):
         try:
             cfg = load_llm_config()
         except LlmConfigError as exc:
@@ -186,18 +186,18 @@ def create_app(
                 status_code=409,
             )
         try:
-            report = await probe.get_report(cfg, force=force)
+            report = await probe.get_report(cfg, force=force, wait=wait)
         except ProbeRateLimited as exc:
             return _rate_limited_response(exc)
         return probe.report_body(report)
 
     @app.get("/v1/copilot/models/probe")
     async def get_models_probe():
-        return await _probe_report(force=False)
+        return await _probe_report(force=False, wait=False)
 
     @app.post("/v1/copilot/models/probe")
     async def post_models_probe():
-        return await _probe_report(force=True)
+        return await _probe_report(force=True, wait=True)
 
     @app.get("/v1/copilot/styles")
     async def list_styles():

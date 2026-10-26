@@ -60,9 +60,10 @@ Copilot normalizes `/models` ids (`models/gemini-2.5-flash` → `gemini-2.5-flas
 | `COPILOT_MODEL_PROBE_TTL_S` | no | `600` | Probe cache TTL (stale-while-revalidate after expiry) |
 | `COPILOT_MODEL_PROBE_DOWN_TTL_S` | no | `15` | TTL for an "upstream unreachable" report, so a freshly started OmniRoute appears quickly |
 | `COPILOT_MODEL_PROBE_TIMEOUT_S` | no | `10` | Per-model probe timeout |
-| `COPILOT_MODEL_PROBE_CONCURRENCY` | no | `4` | Parallel probe requests (1–32) |
+| `COPILOT_MODEL_PROBE_CONCURRENCY` | no | `8` | Parallel probe requests (1–32) |
 | `COPILOT_MODEL_PROBE_MAX_TOKENS` | no | `1` | `max_tokens` on the probe request (1–4); retried once as `max_completion_tokens` if rejected |
-| `COPILOT_MODEL_PROBE_MAX_MODELS` | no | `60` | Cap on probed candidates (default model, then allowlist order, then id); the rest are hidden and counted in `skipped_count` |
+| `COPILOT_MODEL_PROBE_MAX_MODELS` | no | `0` | `0` = probe every listed model. A positive value caps candidates (order: default model, allowlist, ids healthy last time, then id); the rest are hidden and listed in `skipped_ids` / `skipped_count` |
+| `COPILOT_MODEL_PROBE_FIRST_WAIT_S` | no | `3` | How long a GET that had to start a probe waits before answering with the partial (in-progress) view |
 | `COPILOT_MODEL_PROBE_REFRESH_MIN_INTERVAL_S` | no | `30` | Minimum gap between probe starts for a forced refresh; otherwise `429` + `Retry-After` |
 | `COPILOT_MODELS_FETCH_TIMEOUT_S` | no | `10` | Timeout of the upstream `/models` list call |
 | `COPILOT_DEFAULT_CANDLE_COUNT` | no | `100` | Default session/analyze window |
@@ -77,12 +78,12 @@ Copilot normalizes `/models` ids (`models/gemini-2.5-flash` → `gemini-2.5-flas
 
 ### Model probe endpoints
 
-The picker shows only models the configured OpenAI-compatible upstream (OmniRoute, Gemini, any `/v1` gateway) can serve **right now**. For each catalog candidate (after the usual provider / allowlist / media filters) the server sends one chat completion (`"Reply OK"`, `max_tokens` 1) and classifies the result as `ok`, `auth_error`, `quota_or_rate_limited`, `not_found`, `timeout` or `upstream_error`. Results are cached in-process, shared by concurrent callers (single flight) and warmed in the background at startup (startup never waits). Keys, bearer tokens and credentialed URLs are redacted from messages and never logged.
+The picker shows only models the configured OpenAI-compatible upstream (OmniRoute, Gemini, any `/v1` gateway) can serve **right now**. For each catalog candidate (after the usual provider / allowlist / media filters) the server sends one chat completion (`"Reply OK"`, `max_tokens` 1) and classifies the result as `ok`, `auth_error`, `quota_or_rate_limited`, `not_found`, `provider_unconfigured` (gateway route whose CLI/transport is not installed or logged in), `timeout` or `upstream_error`. With ~160 OmniRoute ids a full run takes ~35 s; results are published as they arrive, so `GET /models` lists healthy models found so far with `probe_in_progress:true` instead of blocking. Results are cached in-process, shared by concurrent callers (single flight) and warmed in the background at startup (startup never waits). Keys, bearer tokens and credentialed URLs are redacted from messages and never logged.
 
 | Endpoint | Behaviour |
 |---|---|
 | `GET /v1/copilot/models[?refresh=1][&q=]` | Healthy models only (existing catalog fields + `latency_ms`, `status:"ok"`), plus `default_model` (effective), `requested_default`, `default_fallback`, `probed_at`, `ttl_s`, `stale`, `probe_in_progress`, `upstream_reachable`, `upstream_error`. `refresh=1` is rate-limited like POST. |
-| `GET /v1/copilot/models/probe` | Full report incl. failures: `probed_at`, `ttl_s`, `provider` (`omniroute`/`gemini`/`openai_compat`), `upstream_reachable`, `upstream_error`, `skipped_count`, `results[]` (`id`, `status`, `latency_ms`, `http_status`, `error_code`, `message`). |
+| `GET /v1/copilot/models/probe` | Full report incl. failures: `probed_at`, `ttl_s`, `provider` (`omniroute`/`gemini`/`openai_compat`), `upstream_reachable`, `upstream_error`, `skipped_count`, `skipped_ids`, `complete`, `probe_in_progress`, `results[]` (`id`, `status`, `latency_ms`, `http_status`, `error_code`, `message`). |
 | `POST /v1/copilot/models/probe` | Force a re-probe and return the report. Joins an in-flight probe instead of failing. Too soon → `429`, `Retry-After: <s>`, body `{code:"probe_rate_limited", message, retry_after_s}` (not applied while the last report says the upstream is unreachable). |
 
 If the upstream `/models` call fails (connection refused, DNS, timeout, 5xx, auth), both endpoints return `200` with `upstream_reachable:false`, `upstream_error:{code,message}` and no models (`code` ∈ `connect_error`, `timeout`, `http_error`, `auth_error`, `quota_or_rate_limited`, `network_error`, `invalid_response`). Incomplete `LLM_*` env gives the same shape with `code:"config_missing"` (message lists missing variable names only; `/health` stays `503`). If the configured `LLM_MODEL` fails its probe, `default_model` becomes the first healthy model (allowlist order, then latency) with `default_fallback:true`; `POST /analyze` without `model` uses it, and naming a model whose last probe failed returns `422 model_unavailable` with structured `model` and `probe_status` fields (plus the `detail` string). Wire fixtures: `tests/fixtures/wire/models_response.json`, `tests/fixtures/wire/models_probe_report.json`.

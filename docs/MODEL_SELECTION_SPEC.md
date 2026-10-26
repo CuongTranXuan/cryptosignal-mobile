@@ -148,7 +148,7 @@ type ModelsResponse = {
   probed_at: string | null;          // ISO-8601 UTC
   ttl_s: number;
   stale: boolean;                    // cached report past TTL; refresh running
-  probe_in_progress: boolean;
+  probe_in_progress: boolean;        // true → `models` holds the healthy ids found so far
   upstream_reachable: boolean;
   upstream_error: { code: string; message: string } | null;
 };
@@ -157,14 +157,21 @@ type ProbeReport = {
   probed_at: string | null; ttl_s: number;
   provider: "omniroute" | "gemini" | "openai_compat";
   upstream_reachable: boolean; upstream_error: { code: string; message: string } | null;
-  skipped_count: number;             // candidates over COPILOT_MODEL_PROBE_MAX_MODELS
-  results: { id: string;
-    status: "ok"|"auth_error"|"quota_or_rate_limited"|"not_found"|"timeout"|"upstream_error";
+  skipped_count: number;             // = skipped_ids.length (0 with the default MAX_MODELS=0)
+  skipped_ids: string[];             // candidates over COPILOT_MODEL_PROBE_MAX_MODELS, never probed
+  complete: boolean;                 // false → partial report of a running probe
+  probe_in_progress: boolean;
+  results: { id: string;             // completion order of the running/last probe
+    status: "ok"|"auth_error"|"quota_or_rate_limited"|"not_found"|"provider_unconfigured"|"timeout"|"upstream_error";
     latency_ms: number | null; http_status: number | null;
     error_code: string | null; message: string | null }[];
 };
 ```
-`upstream_error.code`: `connect_error|timeout|http_error|auth_error|quota_or_rate_limited|network_error|invalid_response|config_missing`. Analyze: absent `model` → `default_model` from the last probe; a `model` whose last probe failed → `422` with body `{code: "model_unavailable", message, detail, model: string, probe_status: "auth_error"|"quota_or_rate_limited"|"not_found"|"timeout"|"upstream_error"}` (`detail` keeps the human-readable string; fixture `apps/copilot/tests/fixtures/wire/analyze_model_unavailable.json`). The same body arrives as an SSE `error` event if the model fails between the pre-check and the stream. Env vars and behaviour: `apps/copilot/DEPLOY.md` § Model probe endpoints. Fixtures: `apps/copilot/tests/fixtures/wire/models_*.json`.
+Probe order: requested default, then `COPILOT_MODEL_VISIBILITY_ALLOWLIST` order, then ids healthy in the previous report, then the rest by id. `COPILOT_MODEL_PROBE_MAX_MODELS=0` (default) probes every listed id at `COPILOT_MODEL_PROBE_CONCURRENCY=8`. Results are published as each probe finishes. `GET /models` and `GET /models/probe` wait at most `COPILOT_MODEL_PROBE_FIRST_WAIT_S` (3 s) for a probe they had to start and then answer with the partial view (`probe_in_progress:true`, report `complete:false`); a stale reachable report is served immediately while the refresh runs; `POST /models/probe` waits for the full run.
+
+Status meanings: `not_found` = the gateway does not know the model id; `provider_unconfigured` = the gateway knows the route but its provider backend is not installed / logged in / wired (OmniRoute e.g. "Auggie CLI not found… install/login", "Cloudflare Playground needs Playwright", "Codex app-server transport is not configured"); `message` then carries a short (≤120 chars) key-free reason. `auth_error` includes OmniRoute "No active credentials".
+
+`upstream_error.code`: `connect_error|timeout|http_error|auth_error|quota_or_rate_limited|network_error|invalid_response|config_missing`. Analyze: absent `model` → `default_model` from the last probe; a `model` whose last probe failed → `422` with body `{code: "model_unavailable", message, detail, model: string, probe_status: "auth_error"|"quota_or_rate_limited"|"not_found"|"provider_unconfigured"|"timeout"|"upstream_error"}` (`detail` keeps the human-readable string; fixture `apps/copilot/tests/fixtures/wire/analyze_model_unavailable.json`). The same body arrives as an SSE `error` event if the model fails between the pre-check and the stream. Env vars and behaviour: `apps/copilot/DEPLOY.md` § Model probe endpoints. Fixtures: `apps/copilot/tests/fixtures/wire/models_*.json`.
 
 ### 3.2 `POST /v1/copilot/analyze` (additions, both optional)
 | Field | Type | Rule |

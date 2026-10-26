@@ -15,7 +15,7 @@ import os
 import re
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any, Literal
 from urllib.parse import urlparse
@@ -36,13 +36,20 @@ from cryptosignal_copilot.model_visibility import (
 logger = logging.getLogger(__name__)
 
 ProbeStatus = Literal[
-    "ok", "auth_error", "quota_or_rate_limited", "not_found", "timeout", "upstream_error"
+    "ok",
+    "auth_error",
+    "quota_or_rate_limited",
+    "not_found",
+    "provider_unconfigured",
+    "timeout",
+    "upstream_error",
 ]
 ProbeProvider = Literal["omniroute", "gemini", "openai_compat"]
 
 OMNIROUTE_DEFAULT_PORT = 20128
 _PROBE_PROMPT = "Reply OK"
 _MESSAGE_MAX_CHARS = 200
+_UNCONFIGURED_MESSAGE_MAX_CHARS = 120
 
 
 @dataclass(frozen=True)
@@ -50,11 +57,12 @@ class ProbeSettings:
     ttl_s: float = 600.0
     down_ttl_s: float = 15.0
     timeout_s: float = 10.0
-    concurrency: int = 4
+    concurrency: int = 8
     max_tokens: int = 1
-    max_models: int = 60
+    max_models: int = 0  # 0 = probe every candidate
     refresh_min_interval_s: float = 30.0
     enabled: bool = True
+    first_wait_s: float = 3.0
 
 
 def _env_float(name: str, default: float, minimum: float) -> float:
@@ -82,11 +90,12 @@ def load_probe_settings() -> ProbeSettings:
         ttl_s=_env_float("COPILOT_MODEL_PROBE_TTL_S", 600.0, 1.0),
         down_ttl_s=_env_float("COPILOT_MODEL_PROBE_DOWN_TTL_S", 15.0, 1.0),
         timeout_s=_env_float("COPILOT_MODEL_PROBE_TIMEOUT_S", 10.0, 0.5),
-        concurrency=_env_int("COPILOT_MODEL_PROBE_CONCURRENCY", 4, 1, 32),
+        concurrency=_env_int("COPILOT_MODEL_PROBE_CONCURRENCY", 8, 1, 32),
         max_tokens=_env_int("COPILOT_MODEL_PROBE_MAX_TOKENS", 1, 1, 4),
-        max_models=_env_int("COPILOT_MODEL_PROBE_MAX_MODELS", 60, 1, 1000),
+        max_models=_env_int("COPILOT_MODEL_PROBE_MAX_MODELS", 0, 0, 100_000),
         refresh_min_interval_s=_env_float("COPILOT_MODEL_PROBE_REFRESH_MIN_INTERVAL_S", 30.0, 0.0),
         enabled=env_flag("COPILOT_MODEL_PROBE_ENABLED", default=True),
+        first_wait_s=_env_float("COPILOT_MODEL_PROBE_FIRST_WAIT_S", 3.0, 0.0),
     )
 
 
@@ -175,8 +184,24 @@ _AUTH_MARKERS = (
     "permission denied",
     "forbidden",
     "no credentials",
+    "no active credentials",
+    "invalid credentials",
+    "missing credentials",
     "invalid_token",
     "token expired",
+)
+# Gateway-side provider not installed / logged in / wired (OmniRoute CLI-backed routes).
+# Checked before not_found: "Auggie CLI not found" is a setup problem, not an unknown model.
+_UNCONFIGURED_MARKERS = (
+    "cli not found",
+    "not installed",
+    "install/login",
+    "please install",
+    "playwright",
+    "not configured",
+    "requires setup",
+    "not set up",
+    "app-server",
 )
 _TIMEOUT_MARKERS = ("timeout", "timed out", "deadline_exceeded", "deadline exceeded")
 _MAX_TOKENS_PARAM_MARKERS = ("max_tokens", "max_completion_tokens")
@@ -233,6 +258,8 @@ def _has(text: str, markers: tuple[str, ...]) -> bool:
 
 def classify_http_failure(status: int, err: dict[str, Any] | None, raw: str) -> ProbeStatus:
     text = _error_text(err, raw)
+    if status not in (402, 429) and _has(text, _UNCONFIGURED_MARKERS):
+        return "provider_unconfigured"
     if status in (401, 403):
         return "not_found" if _has(text, _NOT_FOUND_MARKERS) else "auth_error"
     if status in (402, 429):
@@ -304,8 +331,13 @@ class ProbeReport:
     results: tuple[ProbeResult, ...]
     requested_default: str
     snapshot: ModelsSnapshot | None = None
-    skipped_count: int = 0
+    skipped_ids: tuple[str, ...] = ()
     allowlist: tuple[str, ...] = field(default_factory=tuple)
+    complete: bool = True
+
+    @property
+    def skipped_count(self) -> int:
+        return len(self.skipped_ids)
 
     @property
     def upstream_reachable(self) -> bool:
@@ -347,6 +379,8 @@ class ProbeReport:
             "upstream_reachable": self.upstream_reachable,
             "upstream_error": self.upstream_error.to_api_dict() if self.upstream_error else None,
             "skipped_count": self.skipped_count,
+            "skipped_ids": list(self.skipped_ids),
+            "complete": self.complete,
             "results": [r.to_api_dict() for r in self.results],
         }
 
@@ -403,12 +437,16 @@ def _upstream_error_from_exception(
 
 
 def order_candidates(
-    models: tuple[NormalizedModel, ...], requested_default: str, allowlist: tuple[str, ...]
+    models: tuple[NormalizedModel, ...],
+    requested_default: str,
+    allowlist: tuple[str, ...],
+    previously_healthy: tuple[str, ...] = (),
 ) -> list[NormalizedModel]:
+    """Probe order: requested default, allowlist, ids healthy last time, then the rest by id."""
     by_id = {m.id: m for m in models}
     ordered: list[NormalizedModel] = []
     seen: set[str] = set()
-    for mid in (requested_default, *allowlist):
+    for mid in (requested_default, *allowlist, *previously_healthy):
         model = by_id.get(mid)
         if model is not None and mid not in seen:
             ordered.append(model)
@@ -475,14 +513,11 @@ async def probe_one(
             )
         status = classify_http_failure(res.status_code, err, raw)
         message = (err or {}).get("message") if err else raw
-        return ProbeResult(
-            model.id,
-            status,
-            latency,
-            res.status_code,
-            _error_code(err),
-            sanitize_message(str(message) if message else None, secrets=secrets),
-        )
+        text = sanitize_message(str(message) if message else None, secrets=secrets)
+        if status == "provider_unconfigured" and text:
+            limit = _UNCONFIGURED_MESSAGE_MAX_CHARS
+            text = text if len(text) <= limit else text[: limit - 1] + "…"
+        return ProbeResult(model.id, status, latency, res.status_code, _error_code(err), text)
     except httpx.TimeoutException:
         return ProbeResult(model.id, "timeout", elapsed(), None, "timeout", "Probe timed out")
     except httpx.TransportError as exc:
@@ -524,6 +559,7 @@ class ModelProbeService:
         self._settings_loader = settings_loader
         self._clock = clock
         self._report: ProbeReport | None = None
+        self._partial: ProbeReport | None = None
         self._task: asyncio.Task[ProbeReport] | None = None
         self._last_started: float | None = None
         self.probe_runs = 0
@@ -538,6 +574,10 @@ class ModelProbeService:
 
     def cached_report(self) -> ProbeReport | None:
         return self._report
+
+    def partial_report(self) -> ProbeReport | None:
+        """Results so far of the running probe (None when idle)."""
+        return self._partial if self.in_progress else None
 
     def is_stale(self, report: ProbeReport | None = None) -> bool:
         report = report or self._report
@@ -571,7 +611,7 @@ class ModelProbeService:
         )
 
     def model_health(self) -> ModelHealth:
-        report = self._report
+        report = self._report or self.partial_report()
         if report is None:
             return ModelHealth(default_model=None, report=None)
         default_model, _ = report.effective_default()
@@ -592,18 +632,28 @@ class ModelProbeService:
         if remaining > 0:
             raise ProbeRateLimited(max(1, math.ceil(remaining)))
 
-    async def get_report(self, cfg: LlmConfig, *, force: bool = False) -> ProbeReport:
-        """Fresh report; stale-while-revalidate when a previous report exists."""
+    async def get_report(
+        self, cfg: LlmConfig, *, force: bool = False, wait: bool = True
+    ) -> ProbeReport:
+        """Report for the API.
+
+        - fresh cache → cached report;
+        - stale reachable cache → cached report, refresh in the background;
+        - otherwise start (or join) a probe and wait for it: fully when `wait`, else only
+          `first_wait_s`, then return the partial report (results so far,
+          `complete: false`) so a slow 100+ model probe never blocks the first request.
+        `force` refreshes (rate-limited) and follows the same `wait` rule.
+        """
         if force:
             self.check_refresh_allowed()
-            return await self._join_or_start(cfg)
+            return await self._join_or_start(cfg, wait=wait)
         report = self._report
         if report is not None and not self.is_stale(report):
             return report
         if report is not None and report.upstream_reachable:
             self._ensure_started(cfg)
             return report
-        return await self._join_or_start(cfg)
+        return await self._join_or_start(cfg, wait=wait)
 
     def start_background(self, cfg: LlmConfig) -> None:
         self._ensure_started(cfg)
@@ -614,9 +664,24 @@ class ModelProbeService:
             self._task = asyncio.create_task(self._run(cfg))
         return self._task
 
-    async def _join_or_start(self, cfg: LlmConfig) -> ProbeReport:
+    async def _join_or_start(self, cfg: LlmConfig, *, wait: bool = True) -> ProbeReport:
         task = self._ensure_started(cfg)
-        return await asyncio.shield(task)
+        if wait:
+            return await asyncio.shield(task)
+        try:
+            return await asyncio.wait_for(asyncio.shield(task), self.settings.first_wait_s)
+        except TimeoutError:
+            return self._partial or self._placeholder(cfg)
+
+    def _placeholder(self, cfg: LlmConfig) -> ProbeReport:
+        return ProbeReport(
+            probed_at=self._last_started or self._clock(),
+            provider=detect_probe_provider(cfg),
+            upstream_error=None,
+            results=(),
+            requested_default=normalize_upstream_model_id(cfg.model),
+            complete=False,
+        )
 
     async def _run(self, cfg: LlmConfig) -> ProbeReport:
         try:
@@ -631,6 +696,7 @@ class ModelProbeService:
                 requested_default=normalize_upstream_model_id(cfg.model),
             )
         self._report = report
+        self._partial = None
         return report
 
     async def run_probe(self, cfg: LlmConfig) -> ProbeReport:
@@ -659,10 +725,28 @@ class ModelProbeService:
                 allowlist=allowlist,
             )
 
-        candidates = order_candidates(snapshot.models, requested_default, allowlist)
-        skipped = max(0, len(candidates) - settings.max_models)
-        candidates = candidates[: settings.max_models]
+        previous = self._report
+        previously_healthy = tuple(r.id for r in previous.healthy()) if previous else ()
+        candidates = order_candidates(
+            snapshot.models, requested_default, allowlist, previously_healthy
+        )
+        skipped_ids: tuple[str, ...] = ()
+        if settings.max_models > 0 and len(candidates) > settings.max_models:
+            skipped_ids = tuple(m.id for m in candidates[settings.max_models :])
+            candidates = candidates[: settings.max_models]
         semaphore = asyncio.Semaphore(settings.concurrency)
+        partial = ProbeReport(
+            probed_at=started_at,
+            provider=provider,
+            upstream_error=None,
+            results=(),
+            requested_default=requested_default,
+            snapshot=snapshot,
+            skipped_ids=skipped_ids,
+            allowlist=allowlist,
+            complete=False,
+        )
+        self._partial = partial
 
         async with httpx.AsyncClient(
             transport=self._transport, timeout=settings.timeout_s
@@ -670,13 +754,17 @@ class ModelProbeService:
 
             async def run(model: NormalizedModel) -> ProbeResult:
                 async with semaphore:
-                    return await probe_one(
+                    result = await probe_one(
                         client,
                         cfg,
                         model,
                         max_tokens=settings.max_tokens,
                         timeout_s=settings.timeout_s,
                     )
+                # Publish progressively so /models lists healthy ids found so far.
+                current = self._partial or partial
+                self._partial = replace(current, results=(*current.results, result))
+                return result
 
             results = await asyncio.gather(*(run(m) for m in candidates))
 
@@ -691,7 +779,12 @@ class ModelProbeService:
             )
         ok = sum(1 for r in results if r.status == "ok")
         logger.info(
-            "model probe done: provider=%s ok=%d/%d skipped=%d", provider, ok, len(results), skipped
+            "model probe done: provider=%s ok=%d/%d skipped=%d in %.1fs",
+            provider,
+            ok,
+            len(results),
+            len(skipped_ids),
+            self._clock() - started_at,
         )
         return ProbeReport(
             probed_at=started_at,
@@ -700,7 +793,7 @@ class ModelProbeService:
             results=tuple(results),
             requested_default=requested_default,
             snapshot=snapshot,
-            skipped_count=skipped,
+            skipped_ids=skipped_ids,
             allowlist=allowlist,
         )
 
@@ -748,4 +841,6 @@ class ModelProbeService:
         }
 
     def report_body(self, report: ProbeReport) -> dict[str, Any]:
-        return report.to_api_dict(self.settings.ttl_s)
+        body = report.to_api_dict(self.settings.ttl_s)
+        body["probe_in_progress"] = self.in_progress
+        return body

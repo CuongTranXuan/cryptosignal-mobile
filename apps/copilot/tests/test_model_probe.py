@@ -136,6 +136,25 @@ def make_app(service: ModelProbeService, tmp_path, monkeypatch):
             None,
         ),
         (lambda m: _err(503, "No credentials for provider cursor"), "auth_error", None),
+        (lambda m: _err(400, "No active credentials"), "auth_error", None),
+        (lambda m: _err(503, "No active credentials for agentrouter"), "auth_error", None),
+        (
+            lambda m: _err(502, "Auggie CLI not found on PATH. Run install/login."),
+            "provider_unconfigured",
+            None,
+        ),
+        (
+            lambda m: _err(503, "Cloudflare Playground needs Playwright (npx playwright install)"),
+            "provider_unconfigured",
+            None,
+        ),
+        (
+            lambda m: _err(503, "Codex app-server transport is not configured"),
+            "provider_unconfigured",
+            None,
+        ),
+        # Unrelated mention of credentials is not an auth failure.
+        (lambda m: _err(500, "credentials cache warmed; upstream crashed"), "upstream_error", None),
         (lambda m: _err(500, "boom", "internal_error"), "upstream_error", "internal_error"),
         (lambda m: _err(502, "upstream connect error"), "upstream_error", None),
         (lambda m: _err(504, "gateway"), "timeout", None),
@@ -254,6 +273,122 @@ async def test_probe_max_models_cap_keeps_default_first(probe_env, monkeypatch):
     assert [r.id for r in report.results][0] == "m/z-default"
     assert len(report.results) == 4
     assert report.skipped_count == 7
+    assert report.skipped_ids == tuple(f"m/a{i:02d}" for i in range(3, 10))
+    body = service.report_body(report)
+    assert body["skipped_ids"] == list(report.skipped_ids)
+    assert body["skipped_count"] == 7
+
+
+def test_probe_defaults_probe_everything(monkeypatch):
+    from cryptosignal_copilot.model_probe import load_probe_settings
+
+    for name in ("COPILOT_MODEL_PROBE_MAX_MODELS", "COPILOT_MODEL_PROBE_CONCURRENCY"):
+        monkeypatch.delenv(name, raising=False)
+    settings = load_probe_settings()
+    assert settings.max_models == 0
+    assert settings.concurrency == 8
+    assert settings.timeout_s == 10.0
+    assert settings.first_wait_s == 3.0
+
+
+async def test_unlimited_probes_every_listed_model(probe_env, monkeypatch):
+    monkeypatch.delenv("COPILOT_MODEL_VISIBILITY_ALLOWLIST")
+    monkeypatch.setenv("LLM_MODEL", "m/x000")
+    rows = [{"id": f"m/x{i:03d}", "owned_by": "m"} for i in range(163)]
+    service = make_service(stub_transport(models=rows), settings=ProbeSettings())
+    report = await service.run_probe(load_llm_config())
+    assert len(report.results) == 163
+    assert report.skipped_ids == ()
+
+
+def test_order_candidates_priority():
+    from types import SimpleNamespace
+
+    from cryptosignal_copilot.model_probe import order_candidates
+
+    models = tuple(SimpleNamespace(id=mid) for mid in ("m/bb", "m/aa", "m/cc", "m/dd", "m/zz"))
+    ordered = order_candidates(
+        models,  # type: ignore[arg-type]
+        "m/zz",
+        ("m/dd", "m/missing"),
+        ("m/cc", "m/zz"),
+    )
+    assert [m.id for m in ordered] == ["m/zz", "m/dd", "m/cc", "m/aa", "m/bb"]
+
+
+async def test_probe_priority_order(probe_env, monkeypatch):
+    monkeypatch.delenv("COPILOT_MODEL_VISIBILITY_ALLOWLIST")
+    monkeypatch.setenv("LLM_MODEL", "m/zz-default")
+    rows = [{"id": mid, "owned_by": "m"} for mid in ("m/aa", "m/bb", "m/cc", "m/zz-default")]
+    service = make_service(
+        stub_transport(
+            models=rows,
+            chat=lambda m, b: completion_ok(m) if m == "m/cc" else _err(401, "bad key"),
+        ),
+        settings=ProbeSettings(concurrency=1),
+    )
+    cfg = load_llm_config()
+    first = await service.get_report(cfg)
+    assert [r.id for r in first.results] == ["m/zz-default", "m/aa", "m/bb", "m/cc"]
+    # Next run: ids healthy last time come right after the default (and allowlist).
+    second = await service.run_probe(cfg)
+    assert [r.id for r in second.results] == ["m/zz-default", "m/cc", "m/aa", "m/bb"]
+
+
+async def test_first_request_does_not_block_and_publishes_progress(
+    probe_env, tmp_path, monkeypatch
+):
+    gate = asyncio.Event()
+
+    class SlowChat(httpx.AsyncBaseTransport):
+        def __init__(self) -> None:
+            self.inner = stub_transport(models=ROWS, chat=mixed_chat)
+
+        async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+            if request.method == "POST" and b'"m/fast"' not in (request.content or b""):
+                await gate.wait()
+            return await self.inner.handle_async_request(request)
+
+    service = make_service(SlowChat(), settings=ProbeSettings(first_wait_s=0.05))  # type: ignore[arg-type]
+    app = make_app(service, tmp_path, monkeypatch)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        body = (await asyncio.wait_for(client.get("/v1/copilot/models"), 2)).json()
+        assert body["probe_in_progress"] is True
+        assert [m["id"] for m in body["models"]] == ["m/fast"]
+        assert body["default_model"] == "m/fast"
+        report = (await client.get("/v1/copilot/models/probe")).json()
+        assert report["complete"] is False and report["probe_in_progress"] is True
+        gate.set()
+        await service._task  # type: ignore[misc]
+        done = (await client.get("/v1/copilot/models")).json()
+    assert done["probe_in_progress"] is False
+    assert [m["id"] for m in done["models"]] == ["m/fast", "m/slow"]
+
+
+async def test_auth_error_default_falls_back_to_first_healthy(probe_env, monkeypatch):
+    monkeypatch.setenv("LLM_MODEL", "agentrouter/deepseek-v4-flash")
+    monkeypatch.setenv(
+        "COPILOT_MODEL_VISIBILITY_ALLOWLIST",
+        "agentrouter/deepseek-v4-flash,ddgw/gpt-5.4-mini,gemini/gemini-3-flash-preview",
+    )
+    rows = [
+        {"id": "agentrouter/deepseek-v4-flash", "owned_by": "agentrouter"},
+        {"id": "ddgw/gpt-5.4-mini", "owned_by": "ddgw"},
+        {"id": "gemini/gemini-3-flash-preview", "owned_by": "gemini"},
+    ]
+
+    def chat(model, _body):
+        if model.startswith("agentrouter/") or "deepseek" in model:
+            return _err(401, "No active credentials")
+        return completion_ok(model)
+
+    service = make_service(stub_transport(models=rows, chat=chat))
+    report = await service.get_report(load_llm_config())
+    assert report.status_of("agentrouter/deepseek-v4-flash") == "auth_error"
+    body = service.models_body(report)
+    assert body["default_model"] == "ddgw/gpt-5.4-mini"
+    assert body["default_fallback"] is True
+    assert body["requested_default"] == "agentrouter/deepseek-v4-flash"
 
 
 async def test_gemini_path_uses_bare_ids_and_strips_params(monkeypatch):

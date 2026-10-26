@@ -6,6 +6,8 @@
     "upstream_reachable": true,
     "upstream_error": null,
     "skipped_count": 0,
+    "skipped_ids": [],
+    "complete": true,
     "results": [
       {
         "id": "agentrouter/deepseek-v4-flash",
@@ -30,8 +32,17 @@
         "http_status": 404,
         "error_code": "model_not_found",
         "message": "model not found"
+      },
+      {
+        "id": "auggie/claude-sonnet-4-5",
+        "status": "provider_unconfigured",
+        "latency_ms": 850,
+        "http_status": 502,
+        "error_code": null,
+        "message": "Auggie CLI not found. Please install/login first."
       }
-    ]
+    ],
+    "probe_in_progress": false
   },
   "default_fallback": {
     "probed_at": "2026-10-26T07:33:20Z",
@@ -40,14 +51,16 @@
     "upstream_reachable": true,
     "upstream_error": null,
     "skipped_count": 0,
+    "skipped_ids": [],
+    "complete": true,
     "results": [
       {
         "id": "agentrouter/deepseek-v4-flash",
-        "status": "quota_or_rate_limited",
+        "status": "auth_error",
         "latency_ms": 400,
-        "http_status": 402,
-        "error_code": "quota",
-        "message": "Budget pool quota exhausted"
+        "http_status": 401,
+        "error_code": null,
+        "message": "No active credentials for provider agentrouter"
       },
       {
         "id": "cursor/composer-2.5",
@@ -64,8 +77,17 @@
         "http_status": 404,
         "error_code": "model_not_found",
         "message": "model not found"
+      },
+      {
+        "id": "auggie/claude-sonnet-4-5",
+        "status": "provider_unconfigured",
+        "latency_ms": 850,
+        "http_status": 502,
+        "error_code": null,
+        "message": "Auggie CLI not found. Please install/login first."
       }
-    ]
+    ],
+    "probe_in_progress": false
   },
   "upstream_down": {
     "probed_at": "2026-10-26T07:33:20Z",
@@ -77,6 +99,9 @@
       "message": "Upstream unreachable (connection failed)"
     },
     "skipped_count": 0,
-    "results": []
+    "skipped_ids": [],
+    "complete": true,
+    "results": [],
+    "probe_in_progress": false
   }
 }
