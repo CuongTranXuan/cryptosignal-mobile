@@ -38,9 +38,71 @@ const EN_SHAPE_NAME_RULES: Array<{ pattern: RegExp; id: KnownPatternId }> = [
   { pattern: /liquidity/i, id: "liquidity" },
 ];
 
+/**
+ * Detector shape names → Vietnamese, same table as the backend (`vi_text._NAME_VI`), so the
+ * chart legend, patterns table and the server's "Lớp phủ sẵn sàng" line use one wording.
+ */
+const SHAPE_NAME_VI: Record<string, string> = {
+  "Resistance trendline": "Đường xu hướng kháng cự",
+  "Support trendline": "Đường xu hướng hỗ trợ",
+  "Double top": "Hai đỉnh",
+  "Double top neckline": "Đường viền cổ hai đỉnh",
+  "Double bottom": "Hai đáy",
+  "Double bottom neckline": "Đường viền cổ hai đáy",
+  "Liquidity highs": "Thanh khoản trên các đỉnh",
+  "Liquidity lows": "Thanh khoản dưới các đáy",
+  "Ascending triangle": "Tam giác tăng",
+  "Descending triangle": "Tam giác giảm",
+  "Symmetrical triangle": "Tam giác cân",
+  "Channel (high rail)": "Kênh giá (biên trên)",
+  "Channel (low rail)": "Kênh giá (biên dưới)",
+  "Channel high rail": "Biên trên kênh giá",
+  "Channel low rail": "Biên dưới kênh giá",
+  "Head and shoulders": "Vai đầu vai",
+  "H&S neckline": "Đường viền cổ vai đầu vai",
+  "Inverse H&S": "Vai đầu vai ngược",
+  "Inverse H&S neckline": "Đường viền cổ vai đầu vai ngược",
+  "Fib retracement": "Fibonacci thoái lui",
+  "Fib pocket 0.5–0.618": "Vùng Fibonacci 0.5–0.618",
+  "Bullish FVG": "FVG tăng",
+  "Bearish FVG": "FVG giảm",
+  "BOS bullish": "BOS tăng",
+  "BOS bearish": "BOS giảm",
+  "BOS level": "Mức BOS",
+  "CHoCH bullish": "CHoCH tăng",
+  "CHoCH bearish": "CHoCH giảm",
+  "Bullish order block": "Khối lệnh tăng",
+  "Bearish order block": "Khối lệnh giảm",
+  "Order block": "Khối lệnh",
+};
+const SR_ROLE_VI: Record<string, string> = { support: "hỗ trợ", resistance: "kháng cự" };
+const RAIL_VI: Record<string, string> = { upper: "cạnh trên", lower: "cạnh dưới" };
+const SR_NAME_RE = /^S\/R (?:(support|resistance) \(flipped\) )?(.+)$/;
+const FIB_NAME_RE = /^Fib (0\.\d+)$/;
+const RAIL_NAME_RE = /^(.+) (upper|lower)$/;
+
+function detectorNameVi(name: string): string | null {
+  const exact = SHAPE_NAME_VI[name];
+  if (exact) return exact;
+  const sr = SR_NAME_RE.exec(name);
+  if (sr) {
+    const [, role, price] = sr;
+    return role ? `Vùng ${SR_ROLE_VI[role]} (đổi vai) ${price}` : `Vùng hỗ trợ/kháng cự ${price}`;
+  }
+  const fib = FIB_NAME_RE.exec(name);
+  if (fib) return `Fibonacci ${fib[1]}`;
+  const rail = RAIL_NAME_RE.exec(name);
+  if (rail && rail[1] && rail[2] && SHAPE_NAME_VI[rail[1]]) {
+    return `${SHAPE_NAME_VI[rail[1]]} (${RAIL_VI[rail[2]]})`;
+  }
+  return null;
+}
+
 export function displayShapeName(backendName: string): string {
   const trimmed = backendName.trim();
   if (!trimmed) return trimmed;
+  const detector = detectorNameVi(trimmed);
+  if (detector) return detector;
   for (const rule of EN_SHAPE_NAME_RULES) {
     if (rule.pattern.test(trimmed)) return labelForPattern(rule.id);
   }

@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import { displayShapeName } from "../lib/copilot-display";
 import { labelForRegime } from "../lib/copilot-chart-ai";
 import { formatInvalidationLine } from "../lib/guardrail-format";
@@ -70,22 +69,18 @@ export function PatternsTable() {
   const selectedId = useShapeStore((s) => s.selectedId);
   const select = useShapeStore((s) => s.select);
   const remove = useShapeStore((s) => s.remove);
-  const pin = useShapeStore((s) => s.pin);
+  const keep = useShapeStore((s) => s.keep);
   const removeMarkersForDrawing = useMarkerStore((s) => s.removeLinkedToDrawing);
-
-  const [feedbackDone, setFeedbackDone] = useState<Record<string, "kept" | "rejected">>({});
 
   const committed = shapes.filter((s) => s.status === "committed");
 
   const onKeep = (shape: PatternShape) => {
     getCopilotFeedbackClient()?.keep(shape.id, shapeFeedbackSnapshot(shape));
-    setFeedbackDone((prev) => ({ ...prev, [shape.id]: "kept" }));
-    pin(shape.id);
+    keep(shape.id);
   };
 
   const onReject = (shape: PatternShape) => {
     getCopilotFeedbackClient()?.reject(shape.id, shapeFeedbackSnapshot(shape));
-    setFeedbackDone((prev) => ({ ...prev, [shape.id]: "rejected" }));
     removeMarkersForDrawing(shape.id);
     remove(shape.id);
   };
@@ -129,7 +124,7 @@ export function PatternsTable() {
                 key={s.id}
                 className={`border-b border-[#2b313a]/60 ${
                   selectedId === s.id ? "bg-[#2b313a]/60" : ""
-                } ${feedbackDone[s.id] === "kept" ? "opacity-70" : ""}`}
+                } ${s.kept ? "opacity-70" : ""}`}
               >
                 <td className="py-1.5 text-white">{displayShapeName(s.name)}</td>
                 <td className="py-1.5">{s.interval}</td>
@@ -139,7 +134,7 @@ export function PatternsTable() {
                   <GuardrailDetails shape={s} />
                 </td>
                 <td className="py-1.5 whitespace-nowrap" data-testid="patterns-feedback-cell">
-                  {s.source === "agent" && feedbackDone[s.id] !== "kept" && (
+                  {s.source === "agent" && !s.kept && (
                     <>
                       <button
                         type="button"

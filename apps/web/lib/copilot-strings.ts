@@ -251,3 +251,35 @@ export function copilotUnhealthyModelError(reason?: string): string {
     ? `Copilot lỗi: model đã chọn không khả dụng (${reason}) — đang cập nhật danh sách model`
     : "Copilot lỗi: model đã chọn không khả dụng — đang cập nhật danh sách model";
 }
+
+// Chart history (per session × symbol × timeframe).
+export const CHART_HISTORY_LABEL = "Đã phân tích trong phiên";
+export const CHART_HISTORY_LOADING = "Đang tải biểu đồ đã lưu…";
+export const CHART_HISTORY_SUMMARY_PREFIX = "Tóm tắt";
+export const CHART_HISTORY_N25_KEPT_PREVIOUS =
+  "Không vẽ được hình mới nào (nến chưa đóng) — giữ các hình trước.";
+export const CHART_HISTORY_CONFLICT =
+  "Biểu đồ vừa được thay đổi ở nơi khác và chưa gộp được — hình trên màn hình chưa được lưu. Thử lại sau.";
+export const CHART_HISTORY_SAVE_FAILED = "Không lưu được hình vẽ của biểu đồ — thử lại sau.";
+export const CHART_HISTORY_DOT_TITLE = "Khung này có hình vẽ đã lưu trong phiên";
+
+export function chartHistoryTooLarge(limit: string): string {
+  const detail = limit ? ` (giới hạn: ${limit})` : "";
+  return `Biểu đồ quá lớn để lưu${detail} — hãy xoá bớt hình hoặc điểm neo.`;
+}
+
+/** "1h · 3 hình · phân tích lúc 14:05" (time in the user's local zone). */
+export function chartHistoryChipLabel(
+  intervalLabel: string,
+  shapeCount: number,
+  analyzedAt: number | null,
+  updatedAt: number,
+): string {
+  const at = analyzedAt ?? updatedAt;
+  const d = new Date(at * 1000);
+  const hhmm = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  const verb = analyzedAt != null ? "phân tích lúc" : "lưu lúc";
+  return `${intervalLabel} · ${shapeCount} hình · ${verb} ${hhmm}`;
+}
+export const CHART_ACTIVE_LAYERS = "Lớp đang hiển thị";
+export const CHART_GHOST_PREVIEW = "Bản xem trước";

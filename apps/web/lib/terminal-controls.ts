@@ -1,4 +1,14 @@
+import type { Interval } from "./pattern-shape";
 import type { ConnectionStatus } from "./stores/chart-store";
+
+export const INTERVAL_LABELS: Record<Interval, string> = {
+  "1m": "1m",
+  "15m": "15m",
+  "30m": "30m",
+  "1h": "1h",
+  "4h": "4h",
+  "1d": "1D",
+};
 
 export function isSendDisabled(connection: ConnectionStatus, inFlight: boolean): boolean {
   return connection === "pair-unavailable" || inFlight;

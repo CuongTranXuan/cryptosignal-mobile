@@ -113,7 +113,7 @@ describe("N24: repeated analyze runs replace AI overlays", () => {
   it("kept, edited and user-drawn shapes survive a new run with their anchors", async () => {
     await runAnalyze(SIX);
     const store = useShapeStore.getState();
-    store.pin("drw_a");
+    store.keep("drw_a");
     store.patchPoints("drw_b", [
       { time: candles[0]!.time, price: 9 },
       { time: candles[1]!.time, price: 8 },
@@ -131,7 +131,7 @@ describe("N24: repeated analyze runs replace AI overlays", () => {
 
   it("an empty run clears unpinned AI shapes and drops their orphan anchors", async () => {
     await runAnalyze(SIX);
-    useShapeStore.getState().pin("drw_c");
+    useShapeStore.getState().keep("drw_c");
     await runAnalyze([]);
     expect(shapeIds()).toEqual(["drw_c"]);
     expect(markerIds()).toEqual(["anchor-drw_c"]);

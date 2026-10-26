@@ -9,4 +9,6 @@ export type ChartCoordinateApi = {
   revealTimes: (times: number[]) => void;
   /** Current visible time range on the chart, or null if not ready. */
   getVisibleTimeRange: () => VisibleTimeRange | null;
+  /** Restore a saved view (chart history). */
+  setVisibleTimeRange?: (range: VisibleTimeRange) => void;
 };

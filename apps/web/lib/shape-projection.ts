@@ -9,6 +9,8 @@ export function intervalBarSeconds(interval: Interval): number {
       return 60;
     case "15m":
       return 900;
+    case "30m":
+      return 1800;
     case "1h":
       return 3600;
     case "4h":
@@ -26,6 +28,8 @@ export function maxProjectionBarsForInterval(interval: Interval): number {
   switch (interval) {
     case "1m":
       return 30;
+    case "30m":
+      return 27;
     case "15m":
     case "1h":
       return 24;

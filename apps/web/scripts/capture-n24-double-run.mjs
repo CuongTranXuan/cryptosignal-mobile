@@ -96,7 +96,7 @@ await page.waitForTimeout(1500);
 const counts = await page.evaluate(() => {
   const text = document.body.innerText;
   return {
-    activeLayers: Number(/Active Layers \((\d+)\)/.exec(text)?.[1] ?? -1),
+    activeLayers: Number(/(?:Active Layers|Lớp đang hiển thị) \((\d+)\)/.exec(text)?.[1] ?? -1),
     tableTotal: Number(/Hình đang hoạt động: (\d+)/.exec(text)?.[1] ?? -1),
     tableRows: document.querySelectorAll('[data-testid="patterns-guardrail-cell"]').length,
     anchorLines: (text.match(/Đã đặt \d+ điểm neo/g) ?? []).length,

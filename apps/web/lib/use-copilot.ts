@@ -39,15 +39,24 @@ import {
   copilotSkippedShapes,
   COPILOT_SCROLLED_TO_OVERLAYS,
   COPILOT_SERVER_PICKED_SHAPES,
+  CHART_HISTORY_N25_KEPT_PREVIOUS,
   copilotUnhealthyModelError,
 } from "./copilot-strings";
 import { useCopilotSessionStore } from "./stores/copilot-session-store";
+import {
+  beginAnalyzeRun,
+  endAnalyzeRun,
+  noteChartTooLarge,
+  recordAnalyzeSaved,
+  saveChartNow,
+} from "./chart-history";
 import { fetchKlines as defaultFetchKlines, type FetchKlines } from "./market-client";
 import { filterRenderableAnchorMarkers } from "./marker-map";
 import { coerceAgentMarker, coerceAgentShape } from "./normalize-agent-shape";
 import {
   AgentMarkerSchema,
   PatternShapeSchema,
+  stripChartHistoryFlags,
   type AgentMarker,
   type Candle,
   type Interval,
@@ -159,7 +168,7 @@ export function filterMarkersToClosedTimes(
  * server-added output fields such as `guardrail`, or a second run on the same chart 422s.
  */
 export function shapeForAnalyzeRequest(shape: PatternShape): PatternShape {
-  const { guardrail: _guardrail, ...wire } = shape;
+  const { guardrail: _guardrail, ...wire } = stripChartHistoryFlags(shape);
   return wire;
 }
 
@@ -274,6 +283,37 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
   let pendingDrewShapesNotice: { count: number; lines: string[] } | null = null;
   let streamTimeValidMarkers: AgentMarker[] = [];
   let streamRenderableAnchorCount = 0;
+  /** Chart the run belongs to; overlays arriving after a timeframe/symbol switch are not painted. */
+  let streamChartPair: string | null = null;
+  let streamChartKey: string | null = null;
+  let streamChartStateRevision: number | null = null;
+  let streamChartStateError: string | null = null;
+  let streamAnalysisRaw: Record<string, unknown> | null = null;
+  /** N25: every new shape was dropped by the closed-candle filter; previous shapes kept. */
+  let streamKeptPreviousShapes = false;
+
+  const chartPairNow = (): string => {
+    const chart = useChartStore.getState();
+    return `${chart.symbol}|${chart.interval}`;
+  };
+  const streamIsForOtherChart = (): boolean =>
+    streamChartPair != null && streamChartPair !== chartPairNow();
+
+  /** Server saved the doc (`chart_state_revision`): record it; PUT only when N25 kept older shapes. */
+  const finalizeChartHistoryRun = (): void => {
+    endAnalyzeRun();
+    const key = streamChartKey;
+    if (!key) return;
+    if (streamChartStateRevision != null) {
+      recordAnalyzeSaved(key, streamChartStateRevision, streamAnalysisRaw);
+      if (streamKeptPreviousShapes) void saveChartNow(key);
+    } else if (streamChartStateError === "chart_state_too_large") {
+      noteChartTooLarge();
+    } else if (streamChartStateError !== "session_not_found") {
+      // Backend did not save this run (older backend or a failed save): save what is shown.
+      void saveChartNow(key);
+    }
+  };
 
   const applyStreamMergedMeta = (merged: AnalyzeMetaEvent): void => {
     streamMergedMeta = merged;
@@ -318,6 +358,12 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
     pendingDrewShapesNotice = null;
     streamTimeValidMarkers = [];
     streamRenderableAnchorCount = 0;
+    streamChartPair = null;
+    streamChartKey = null;
+    streamChartStateRevision = null;
+    streamChartStateError = null;
+    streamAnalysisRaw = null;
+    streamKeptPreviousShapes = false;
   };
 
   const runQueuedIfAny = async () => {
@@ -362,7 +408,15 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
 
     switch (event) {
       case "meta": {
+        // Final meta (right before done): server-side chart save result.
+        if (typeof data.chart_state_revision === "number") {
+          streamChartStateRevision = data.chart_state_revision;
+        }
+        if (typeof data.chart_state_error === "string") {
+          streamChartStateError = data.chart_state_error;
+        }
         const parsed = AnalyzeMetaEventSchema.safeParse(data);
+        if (streamIsForOtherChart()) return "ok";
         if (parsed.success) {
           const merged = mergeAnalyzeMeta(streamMergedMeta, parsed.data);
           applyStreamMergedMeta(merged);
@@ -371,6 +425,7 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
         return "ok";
       }
       case "regime": {
+        if (streamIsForOtherChart()) return "ok";
         const parsed = RegimeSseEventSchema.safeParse(data);
         if (parsed.success) {
           useCopilotSessionStore.getState().setLastDetectedRegime(parsed.data.regime);
@@ -383,6 +438,8 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
       }
       case "analysis": {
         const analysis = parseAnalysisSseEvent(data);
+        if (analysis) streamAnalysisRaw = data;
+        if (streamIsForOtherChart()) return "ok";
         if (analysis && !isAnalysisSseEmpty(analysis)) {
           useCopilotSessionStore.getState().setLastAnalysisEvent(analysis);
           if (analysis.intent_check) {
@@ -399,12 +456,15 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
       case "text": {
         const delta = typeof data.delta === "string" ? data.delta : "";
         if (delta) {
+          // N25: the server's "Lớp phủ sẵn sàng: N" would contradict the kept-previous note.
+          if (streamKeptPreviousShapes && isServerOverlayReadyText(delta)) return "ok";
           if (isServerOverlayReadyText(delta)) streamSawServerOverlayText = true;
           appendAgentStreamText(delta);
         }
         return "ok";
       }
       case "shapes": {
+        if (streamIsForOtherChart()) return "ok";
         const list = Array.isArray(data.shapes) ? data.shapes : [];
         const zodValid: PatternShape[] = [];
         const droppedIds: string[] = [];
@@ -436,7 +496,14 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
           chart.interval,
         );
         droppedIds.push(...outOfWindow);
-        useShapeStore.getState().replaceAgentShapes(valid);
+        const hadPrevious = useShapeStore.getState().committed().length > 0;
+        if (zodValid.length > 0 && valid.length === 0 && outOfWindow.length > 0 && hadPrevious) {
+          // N25: nothing new is drawable yet (candles not closed) — keep the previous overlays.
+          streamKeptPreviousShapes = true;
+          appendAgentChatLine(CHART_HISTORY_N25_KEPT_PREVIOUS);
+        } else {
+          useShapeStore.getState().replaceAgentShapes(valid);
+        }
         useMarkerStore.getState().pruneOrphans(shapeIdsOnChart());
         if (valid.length > 0) {
           const lines = valid.map((s) =>
@@ -455,7 +522,7 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
             appendAgentChatLine(COPILOT_SCROLLED_TO_OVERLAYS.trim());
           }
         }
-        noteDroppedShapes(droppedIds);
+        if (!streamKeptPreviousShapes) noteDroppedShapes(droppedIds);
         appendServerSkippedNote(data);
         if (streamTimeValidMarkers.length > 0) {
           streamRenderableAnchorCount = applyRenderableStreamMarkers(streamTimeValidMarkers).renderableCount;
@@ -463,6 +530,7 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
         return "ok";
       }
       case "markers": {
+        if (streamIsForOtherChart()) return "ok";
         const list = Array.isArray(data.markers) ? data.markers : [];
         const zodValid: AgentMarker[] = [];
         const droppedIds: string[] = [];
@@ -513,6 +581,7 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
       }
       case "done": {
         finalizeStreamAnalyzeNotes();
+        finalizeChartHistoryRun();
         resetStreamMetaAccumulator();
         if (isSuperseded(data)) {
           useAiStore.getState().finish();
@@ -609,7 +678,12 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
     const model = findCachedModel(analyzeModelId ?? sessionState.modelId);
 
     analyzing = true;
+    // Save pending chart edits first so the server-side merge sees the user's pins.
+    const chartRun = beginAnalyzeRun();
+    await chartRun.flushed;
     resetStreamMetaAccumulator();
+    streamChartPair = `${chart.symbol}|${chart.interval}`;
+    streamChartKey = chartRun.key;
     useCopilotSessionStore.getState().clearAnalyzeStreamState();
     useAiStore.getState().appendUser(prompt);
     useAiStore.getState().startAgent({
@@ -663,6 +737,7 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
       useAiStore.getState().fail(COPILOT_ERROR);
       useCopilotSessionStore.getState().persistActiveSession();
     } finally {
+      endAnalyzeRun();
       analyzing = false;
       if (useAiStore.getState().inFlight) {
         useAiStore.getState().finish();

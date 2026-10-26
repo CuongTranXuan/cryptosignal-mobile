@@ -330,7 +330,7 @@ export function annotatePromptWithWindow(prompt: string, window: AnalysisWindow)
 
   const projectionHint =
     "Anchors must use closed-candle times from this set. At most one forward endpoint per shape may project " +
-    "to lastClosed + k×barSeconds (k capped by interval: 1m≤30, 15m/1h≤24, 4h≤18, 1d≤12, max 48). " +
+    "to lastClosed + k×barSeconds (k capped by interval: 1m≤30, 30m≤27, 15m/1h≤24, 4h≤18, 1d≤12, max 48). " +
     "Horizontal levels: trendline with equal price on both points. Fib pocket: zone with priceLow/priceHigh.";
 
   const drawHint =

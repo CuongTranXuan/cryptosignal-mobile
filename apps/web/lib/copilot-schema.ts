@@ -152,6 +152,7 @@ export const DrawingGuardrailSchema = z.object({
   regime: DrawingRegimeSchema,
   confidence: z.number().min(0).max(1),
   evidence_against: z.array(EvidenceItemSchema),
+  evidence_against_items: z.array(CodedTextSchema).optional(),
   invalidation: DrawingInvalidationSchema.nullable(),
 });
 
@@ -227,6 +228,9 @@ export const AnalyzeMetaEventSchema = z.object({
   horizon: ChartHorizonSchema.nullable().optional(),
   skipped: z.array(SkippedEntrySchema).optional(),
   skipped_count: z.number().int().nonnegative().optional(),
+  /** Final meta: revision of the chart-state doc the server saved, or why it did not. */
+  chart_state_revision: z.number().int().optional(),
+  chart_state_error: z.string().optional(),
 });
 
 export type AnalyzeMetaEvent = z.infer<typeof AnalyzeMetaEventSchema>;
@@ -336,12 +340,23 @@ export const SessionMessageSchema = z.object({
   model_id: z.string().nullable(),
   shapes: z.array(z.unknown()),
   created_at: z.number(),
+  /**
+   * The backend dumps `meta: null` for messages without analyze meta (every user message) and
+   * may send null fields; a strict `.optional()` made every PATCH/GET response fail to parse,
+   * which showed "Không lưu được phiên" although the PATCH returned 200.
+   */
   meta: z
     .object({
-      candle_count_used: z.number(),
-      clamped: z.boolean(),
+      candle_count_used: z.number().nullable().optional(),
+      clamped: z.boolean().nullable().optional(),
     })
-    .optional(),
+    .nullable()
+    .optional()
+    .transform((meta) =>
+      meta && meta.candle_count_used != null && meta.clamped != null
+        ? { candle_count_used: meta.candle_count_used, clamped: meta.clamped }
+        : undefined,
+    ),
   markers: z.array(z.unknown()).optional(),
 });
 

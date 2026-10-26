@@ -61,10 +61,11 @@ import { buildEmptyClientSession } from "../copilot-session-factory";
 import type { AiMessage } from "./ai-store";
 import { useAiStore } from "./ai-store";
 import { useChartStore } from "./chart-store";
+import { activateChartSession, flushChartSave } from "../chart-history";
 import { useMarkerStore } from "./marker-store";
 import { useShapeStore } from "./shape-store";
 import { translateServerText } from "../vi-evidence";
-import type { AgentMarker, PatternShape } from "../pattern-shape";
+import { stripChartHistoryFlags, type AgentMarker, type PatternShape } from "../pattern-shape";
 
 function aiToSessionMessages(messages: AiMessage[]): CopilotSessionV1["messages"] {
   return messages.map((m) => ({
@@ -72,7 +73,7 @@ function aiToSessionMessages(messages: AiMessage[]): CopilotSessionV1["messages"
     role: m.role === "user" ? "user" : "assistant",
     content: m.content,
     model_id: m.modelId ?? null,
-    shapes: (m.shapes ?? []) as PatternShape[],
+    shapes: ((m.shapes ?? []) as PatternShape[]).map(stripChartHistoryFlags),
     markers: m.markers ?? [],
     created_at: m.createdAt ?? Math.floor(Date.now() / 1000),
     meta: m.analyzeMeta
@@ -180,15 +181,17 @@ type CopilotSessionState = {
 function applySessionToUi(session: CopilotSessionV1): void {
   const models = getModelsList();
   const apiDefault = getDefaultModelId();
+  // Save the chart we are leaving before the symbol/interval change.
+  void flushChartSave();
   useChartStore.setState({
     symbol: session.chart.symbol,
     interval: session.chart.interval as import("../pattern-shape").Interval,
   });
-  useShapeStore.setState({
+  useShapeStore.setState({ selectedId: null });
+  activateChartSession(session, {
     shapes: shapesFromSessionMessages(session),
-    selectedId: null,
+    markers: markersFromSessionMessages(session),
   });
-  useMarkerStore.setState({ markers: markersFromSessionMessages(session) });
   useAiStore.setState({
     messages: sessionToAiMessages(session.messages, models, apiDefault),
     lastError: null,
@@ -214,7 +217,7 @@ function buildActiveSessionSnapshot(get: () => CopilotSessionState): CopilotSess
   if (lastAssistantIdx >= 0) {
     messages[lastAssistantIdx] = {
       ...messages[lastAssistantIdx]!,
-      shapes: shapes as PatternShape[],
+      shapes: (shapes as PatternShape[]).map(stripChartHistoryFlags),
       markers: markers as AgentMarker[],
     };
   }

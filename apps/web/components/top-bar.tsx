@@ -4,27 +4,22 @@ import { useEffect, useState, type FormEvent } from "react";
 import { normalizeSpotSymbol } from "../lib/binance";
 import type { CopilotApiClient } from "../lib/copilot-api";
 import { INTERVALS, type Interval } from "../lib/pattern-shape";
-import { feedBadgeLabel } from "../lib/terminal-controls";
+import { INTERVAL_LABELS, feedBadgeLabel } from "../lib/terminal-controls";
+import { switchChart, useChartHistoryStore } from "../lib/chart-history";
+import { CHART_HISTORY_DOT_TITLE } from "../lib/copilot-strings";
 import { useChartStore } from "../lib/stores/chart-store";
 import { CopilotModelBar } from "./copilot/copilot-model-bar";
-
-const INTERVAL_LABELS: Record<Interval, string> = {
-  "1m": "1m",
-  "15m": "15m",
-  "1h": "1h",
-  "4h": "4h",
-  "1d": "1D",
-};
 
 export function TopBar({ api }: { api: CopilotApiClient }) {
   const symbol = useChartStore((s) => s.symbol);
   const interval = useChartStore((s) => s.interval);
   const tickerPercent = useChartStore((s) => s.tickerPercent);
   const connection = useChartStore((s) => s.connection);
-  const setSymbol = useChartStore((s) => s.setSymbol);
-  const setInterval = useChartStore((s) => s.setInterval);
   const setConnection = useChartStore((s) => s.setConnection);
-  const resetShapesSignal = useChartStore((s) => s.resetShapesSignal);
+  const historyIndex = useChartHistoryStore((s) => s.index);
+  const savedIntervals = new Set(
+    historyIndex.filter((e) => e.symbol === symbol && e.shape_count > 0).map((e) => e.interval),
+  );
 
   const [draft, setDraft] = useState(symbol);
   useEffect(() => {
@@ -38,16 +33,12 @@ export function TopBar({ api }: { api: CopilotApiClient }) {
       setConnection("pair-unavailable");
       return;
     }
-    if (next !== symbol) {
-      setSymbol(next);
-      resetShapesSignal();
-    }
+    if (next !== symbol) switchChart(next, interval);
   };
 
   const onInterval = (next: Interval) => {
     if (next === interval) return;
-    setInterval(next);
-    resetShapesSignal();
+    switchChart(symbol, next);
   };
 
   const pct = tickerPercent;
@@ -90,12 +81,20 @@ export function TopBar({ api }: { api: CopilotApiClient }) {
             <button
               key={tf}
               type="button"
+              data-testid={`tf-${tf}`}
               onClick={() => onInterval(tf)}
-              className={`rounded px-2 py-1 hover:bg-[#2b313a] ${
+              className={`relative rounded px-2 py-1 hover:bg-[#2b313a] ${
                 interval === tf ? "bg-[#2b313a] font-bold text-[#f0b90b]" : ""
               }`}
             >
               {INTERVAL_LABELS[tf]}
+              {savedIntervals.has(tf) && (
+                <span
+                  data-testid={`tf-dot-${tf}`}
+                  title={CHART_HISTORY_DOT_TITLE}
+                  className="absolute right-0.5 top-0.5 h-1 w-1 rounded-full bg-[#f0b90b]"
+                />
+              )}
             </button>
           ))}
         </div>

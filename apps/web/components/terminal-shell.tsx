@@ -5,12 +5,15 @@ import { Group, Panel, Separator } from "react-resizable-panels";
 import type { ChartCoordinateApi } from "../lib/chart-api";
 import { useAiStore } from "../lib/stores/ai-store";
 import { useBinanceMarket } from "../lib/use-binance-market";
+import { configureChartHistory } from "../lib/chart-history";
+import { createChartStateApi } from "../lib/chart-state";
 import { createCopilotApi } from "../lib/copilot-api";
 import { createCopilotFeedbackClient } from "../lib/copilot-feedback";
 import { setCopilotFeedbackClient } from "../lib/copilot-feedback-host";
 import { useCopilotSessionStore } from "../lib/stores/copilot-session-store";
 import { createCopilotClient, type CopilotClient } from "../lib/use-copilot";
 import { ChartCanvas } from "./chart-canvas";
+import { ChartHistoryBar } from "./chart-history-bar";
 import { CopilotModelBanner } from "./copilot/copilot-model-bar";
 import { CopilotPanel } from "./copilot-panel";
 import { PatternsTable } from "./patterns-table";
@@ -45,6 +48,15 @@ export function TerminalShell() {
   }, []);
 
   useEffect(() => {
+    configureChartHistory({
+      api: createChartStateApi({ forceMock: process.env.NEXT_PUBLIC_COPILOT_MOCK === "1" }),
+      getView: () => {
+        const range = coordApiRef.current?.getVisibleTimeRange() ?? null;
+        return range ? { from: Math.round(range.from), to: Math.round(range.to) } : null;
+      },
+      applyView: (view) => coordApiRef.current?.setVisibleTimeRange?.(view),
+      waitForCandles: true,
+    });
     useCopilotSessionStore.getState().setApi(copilotApi);
     void useCopilotSessionStore.getState().bootstrap();
   }, [copilotApi]);
@@ -117,6 +129,7 @@ export function TerminalShell() {
       >
         <Panel id="chart" minSize="40%" defaultSize={`${100 - defaultCopilotPct}%`} className="min-w-0">
           <div className="flex h-full min-h-0 flex-col">
+            <ChartHistoryBar />
             <ChartCanvas coordApiRef={coordApiRef} />
             <PatternsTable />
           </div>

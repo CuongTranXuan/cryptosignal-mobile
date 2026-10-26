@@ -9,6 +9,8 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import type { ChartCoordinateApi } from "../lib/chart-api";
+import { displayShapeName } from "../lib/copilot-display";
+import { CHART_ACTIVE_LAYERS, CHART_GHOST_PREVIEW } from "../lib/copilot-strings";
 import { buildHumanShape, shouldAutoCommit } from "../lib/human-draw";
 import { mapShapeToPixels, mapZoneToRect, pixelsToPoint } from "../lib/overlay-map";
 import type { PatternShape } from "../lib/pattern-shape";
@@ -205,7 +207,9 @@ export function ShapeOverlay({ coordApiRef, overlayTick }: ShapeOverlayProps) {
       {(committed.length > 0 || previews.length > 0) && (
         <div className="pointer-events-none absolute left-3 top-3 z-10 rounded border border-[#2b313a] bg-[#181a20]/90 p-2 text-xs backdrop-blur">
           {committed.length > 0 && (
-            <div className="mb-1 text-[#848e9c]">Active Layers ({committed.length}):</div>
+            <div className="mb-1 text-[#848e9c]" data-testid="active-layers-heading">
+              {CHART_ACTIVE_LAYERS} ({committed.length}):
+            </div>
           )}
           {committed.map((s) => (
             <div
@@ -213,12 +217,14 @@ export function ShapeOverlay({ coordApiRef, overlayTick }: ShapeOverlayProps) {
               className={`flex items-center gap-1 ${s.source === "human" ? "text-[#3b82f6]" : "text-[#0ecb81]"}`}
             >
               <span>
-                • {s.name} ({Math.round(s.confidence * 100)}%)
+                • {displayShapeName(s.name)} ({Math.round(s.confidence * 100)}%)
               </span>
             </div>
           ))}
           {previews.length > 0 && (
-            <div className="mt-1 text-[#f0b90b]">Ghost preview ({previews.length})</div>
+            <div className="mt-1 text-[#f0b90b]">
+              {CHART_GHOST_PREVIEW} ({previews.length})
+            </div>
           )}
         </div>
       )}

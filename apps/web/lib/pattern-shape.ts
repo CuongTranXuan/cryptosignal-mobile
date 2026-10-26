@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { DrawingGuardrailSchema } from "./copilot-schema";
 
-export const INTERVALS = ["1m", "15m", "1h", "4h", "1d"] as const;
+export const INTERVALS = ["1m", "15m", "30m", "1h", "4h", "1d"] as const;
 export type Interval = (typeof INTERVALS)[number];
 
 const PointSchema = z
@@ -26,6 +26,11 @@ export const PatternShapeSchema = z
     priceLow: z.number().nullable(),
     priceHigh: z.number().nullable(),
     guardrail: DrawingGuardrailSchema.optional(),
+    /** Chart-history flags: pinned = origin "user" || kept || edited (survive a new analyze run). */
+    origin: z.enum(["ai", "user"]).optional(),
+    kept: z.boolean().optional(),
+    edited: z.boolean().optional(),
+    drawing_id: z.string().min(1).optional(),
   })
   .strict()
   .superRefine((value, ctx) => {
@@ -64,6 +69,15 @@ export const AgentMarkerSchema = z
   })
   .strict();
 export type AgentMarker = z.infer<typeof AgentMarkerSchema>;
+
+/**
+ * Session messages and analyze `existingShapes` use the backend's strict PatternShape, which
+ * has no chart-history flags; strip them there (chart-state docs keep them).
+ */
+export function stripChartHistoryFlags(shape: PatternShape): PatternShape {
+  const { origin: _o, kept: _k, edited: _e, drawing_id: _d, ...rest } = shape;
+  return rest;
+}
 export const parseAgentMarker = (input: unknown): AgentMarker => AgentMarkerSchema.parse(input);
 
 export const CandleSchema = z

@@ -13,20 +13,42 @@ export function uniqueShapesById(shapes: PatternShape[]): PatternShape[] {
   });
 }
 
+/** User-drawn, kept ("Giữ") or edited shapes survive a new analyze run (chart-history contract). */
+export function isPinnedShape(shape: PatternShape): boolean {
+  return shape.source === "human" || shape.origin === "user" || shape.kept === true || shape.edited === true;
+}
+
+/** `origin` from the wire, or derived from `source` for shapes from older payloads. */
+export function shapeOrigin(shape: PatternShape): "ai" | "user" {
+  return shape.origin ?? (shape.source === "human" ? "user" : "ai");
+}
+
+type UserEditListener = () => void;
+let userEditListener: UserEditListener | null = null;
+
+/** Called after every user edit (draw, keep, drag/resize, delete/reject); not for programmatic paints. */
+export function setShapeUserEditListener(listener: UserEditListener | null): void {
+  userEditListener = listener;
+}
+
+function notifyUserEdit(): void {
+  userEditListener?.();
+}
+
 type ShapeState = {
   shapes: PatternShape[];
   selectedId: string | null;
-  /** AI shapes the user kept ("Giữ") or edited; a new analyze run does not replace them. */
-  pinnedIds: Record<string, true>;
   setPreview: (shapes: PatternShape[]) => void;
   commitPreview: () => void;
   /**
-   * New analyze run (N24): drop the previous run's AI shapes unless pinned, keep human and
-   * pinned shapes, then add `incoming` (deduped; an id that is already kept is skipped so the
+   * New analyze run (N24): drop the previous run's AI shapes unless pinned, keep pinned
+   * shapes, then add `incoming` (deduped; an id that is already pinned is skipped so the
    * user's version wins). Returns the shapes actually added.
    */
   replaceAgentShapes: (incoming: PatternShape[]) => PatternShape[];
-  pin: (id: string) => void;
+  /** Paint a saved chart state (no user-edit notification). */
+  setChartShapes: (shapes: PatternShape[]) => void;
+  keep: (id: string) => void;
   patchPoints: (id: string, points: Point[]) => void;
   patchZone: (id: string, low: number, high: number) => void;
   select: (id: string | null) => void;
@@ -40,7 +62,6 @@ type ShapeState = {
 export const useShapeStore = create<ShapeState>((set, get) => ({
   shapes: [],
   selectedId: null,
-  pinnedIds: {},
 
   setPreview: (shapes) => {
     const committed = get().shapes.filter((s) => s.status === "committed");
@@ -60,10 +81,8 @@ export const useShapeStore = create<ShapeState>((set, get) => ({
   },
 
   replaceAgentShapes: (incoming) => {
-    const { shapes, pinnedIds, selectedId } = get();
-    const kept = shapes.filter(
-      (s) => s.status === "committed" && (s.source === "human" || pinnedIds[s.id]),
-    );
+    const { shapes, selectedId } = get();
+    const kept = shapes.filter((s) => s.status === "committed" && isPinnedShape(s));
     const keptIds = new Set(kept.map((s) => s.id));
     const added = uniqueShapesById(incoming)
       .filter((s) => !keptIds.has(s.id))
@@ -77,40 +96,51 @@ export const useShapeStore = create<ShapeState>((set, get) => ({
     return added;
   },
 
-  pin: (id) => {
-    if (get().pinnedIds[id]) return;
-    set({ pinnedIds: { ...get().pinnedIds, [id]: true } });
+  setChartShapes: (shapes) => {
+    const next = uniqueShapesById(shapes).map((s) => ({ ...s, status: "committed" as const }));
+    const selectedId = get().selectedId;
+    set({
+      shapes: next,
+      selectedId: selectedId && next.some((s) => s.id === selectedId) ? selectedId : null,
+    });
+  },
+
+  keep: (id) => {
+    const target = get().shapes.find((s) => s.id === id);
+    if (!target || target.kept) return;
+    set({ shapes: get().shapes.map((s) => (s.id === id ? { ...s, kept: true } : s)) });
+    notifyUserEdit();
   },
 
   patchPoints: (id, points) => {
     set({
-      shapes: get().shapes.map((s) => (s.id === id ? { ...s, points } : s)),
+      shapes: get().shapes.map((s) => (s.id === id ? { ...s, points, edited: true } : s)),
     });
-    get().pin(id);
+    notifyUserEdit();
   },
 
   patchZone: (id, low, high) => {
     set({
       shapes: get().shapes.map((s) =>
-        s.id === id ? { ...s, priceLow: low, priceHigh: high } : s,
+        s.id === id ? { ...s, priceLow: low, priceHigh: high, edited: true } : s,
       ),
     });
-    get().pin(id);
+    notifyUserEdit();
   },
 
   select: (id) => set({ selectedId: id }),
 
   remove: (id) => {
-    const { shapes, selectedId, pinnedIds } = get();
-    const { [id]: _removed, ...restPinned } = pinnedIds;
+    const { shapes, selectedId } = get();
+    if (!shapes.some((s) => s.id === id)) return;
     set({
       shapes: shapes.filter((s) => s.id !== id),
       selectedId: selectedId === id ? null : selectedId,
-      pinnedIds: restPinned,
     });
+    notifyUserEdit();
   },
 
-  clearAll: () => set({ shapes: [], selectedId: null, pinnedIds: {} }),
+  clearAll: () => set({ shapes: [], selectedId: null }),
 
   addCommitted: (shape) => {
     const committed = { ...shape, status: "committed" as const };
@@ -118,6 +148,7 @@ export const useShapeStore = create<ShapeState>((set, get) => ({
       shapes: [...get().shapes.filter((s) => s.id !== committed.id), committed],
       selectedId: committed.id,
     });
+    notifyUserEdit();
   },
 
   committed: () => get().shapes.filter((s) => s.status === "committed"),
