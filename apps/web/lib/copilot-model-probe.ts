@@ -32,6 +32,24 @@ function isProbeStatus(status: string): status is ModelProbeStatus {
   return (MODEL_PROBE_STATUSES as readonly string[]).includes(status);
 }
 
+const UPSTREAM_ERROR_LABELS: Record<string, string> = {
+  connect_error: "không kết nối được (máy chủ không phản hồi)",
+  network_error: "lỗi mạng khi gọi OmniRoute",
+  timeout: "hết thời gian chờ danh sách mô hình",
+  auth_error: "OmniRoute từ chối khóa API",
+  quota_or_rate_limited: "OmniRoute đang giới hạn yêu cầu",
+  http_error: "OmniRoute trả lỗi HTTP",
+  invalid_response: "OmniRoute trả dữ liệu không hợp lệ",
+  upstream_error: "lỗi máy chủ OmniRoute",
+  probe_error: "lỗi nội bộ khi kiểm tra mô hình",
+};
+
+/** Vietnamese reason for `upstream_error.code` (the backend `message` is English detail). */
+export function upstreamErrorLabel(code: string | null | undefined): string | null {
+  if (!code) return null;
+  return UPSTREAM_ERROR_LABELS[code] ?? "lỗi không xác định";
+}
+
 /** Vietnamese reason for a failed probe status (unknown statuses get a generic reason). */
 export function probeStatusLabel(status: string): string {
   if (isProbeStatus(status) && status !== "ok") return PROBE_STATUS_LABELS[status];
@@ -68,18 +86,23 @@ export function isProbeIncomplete(
 }
 
 /**
- * Progress while a probe runs: "(N/M)" when the total is known, else "(đã xong N)".
- * N = results published so far. The wire has no total yet, so callers pass it when known.
+ * Progress while a probe runs: "(N/M)" when the wire `total` is known (N = total −
+ * pending_count, else results so far), "(đã xong N)" when only N is known.
  */
 export function formatProbeProgress(
   report: ModelProbeReport | null,
-  total?: number | null,
+  total: number | null | undefined = report?.total,
+  pendingCount: number | null | undefined = report?.pending_count,
 ): string {
-  const done = report?.results.length ?? 0;
-  if (done === 0) return COPILOT_PROBE_IN_PROGRESS;
-  if (total != null && total >= done) {
+  // `total` is null while the probe is still loading the upstream model list.
+  const done =
+    total != null && pendingCount != null
+      ? Math.max(0, total - pendingCount)
+      : (report?.results.length ?? 0);
+  if (total != null && total > 0 && total >= done) {
     return COPILOT_PROBE_PROGRESS.replace("{done}", String(done)).replace("{total}", String(total));
   }
+  if (done === 0) return COPILOT_PROBE_IN_PROGRESS;
   return COPILOT_PROBE_PROGRESS_DONE.replace("{done}", String(done));
 }
 

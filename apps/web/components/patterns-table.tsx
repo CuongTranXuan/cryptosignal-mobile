@@ -1,9 +1,9 @@
 "use client";
 
-import { displayShapeName } from "../lib/copilot-display";
 import { labelForRegime } from "../lib/copilot-chart-ai";
 import { formatInvalidationLine } from "../lib/guardrail-format";
-import { evidenceItemRaw, evidenceItemText } from "../lib/vi-evidence";
+import { shapeDisplayName } from "../lib/shape-labels";
+import { evidenceItemRaw, evidenceItemText, preferEvidenceItems } from "../lib/vi-evidence";
 import { getCopilotFeedbackClient } from "../lib/copilot-feedback-host";
 import { shapeFeedbackSnapshot } from "../lib/copilot-shape-snapshot";
 import {
@@ -39,6 +39,7 @@ function GuardrailDetails({ shape }: { shape: PatternShape }) {
   }
   const shapeSymbol = shape.symbol || symbol;
   const inv = formatInvalidationLine(g.invalidation, shapeSymbol);
+  const against = preferEvidenceItems(g.evidence_against_items, g.evidence_against);
   return (
     <div className="space-y-1 text-[#848e9c]">
       <div className="text-[#eaecef]">
@@ -46,9 +47,9 @@ function GuardrailDetails({ shape }: { shape: PatternShape }) {
       </div>
       <div>
         <span className="text-[#848e9c]">{COPILOT_GUARDRAIL_EVIDENCE}: </span>
-        {g.evidence_against.length > 0 ? (
+        {against.length > 0 ? (
           <ul className="mt-0.5 list-disc pl-4 text-[#eaecef]">
-            {g.evidence_against.map((item, index) => (
+            {against.map((item, index) => (
               <li key={`${index}:${evidenceItemRaw(item)}`}>{evidenceItemText(item, shapeSymbol)}</li>
             ))}
           </ul>
@@ -126,7 +127,7 @@ export function PatternsTable() {
                   selectedId === s.id ? "bg-[#2b313a]/60" : ""
                 } ${s.kept ? "opacity-70" : ""}`}
               >
-                <td className="py-1.5 text-white">{displayShapeName(s.name)}</td>
+                <td className="py-1.5 text-white">{shapeDisplayName(s)}</td>
                 <td className="py-1.5">{s.interval}</td>
                 <td className="py-1.5">{SHAPE_KIND_LABELS[s.kind] ?? s.kind}</td>
                 <td className="py-1.5 text-[#0ecb81]">{Math.round(s.confidence * 100)}%</td>

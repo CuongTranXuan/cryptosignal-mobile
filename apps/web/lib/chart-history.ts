@@ -16,6 +16,8 @@ import {
   CHART_HISTORY_CONFLICT,
   CHART_HISTORY_SAVE_FAILED,
   chartHistoryTooLarge,
+  CHART_HISTORY_SERVER_SAVE_FAILED,
+  CHART_HISTORY_SESSION_MISSING,
 } from "./copilot-strings";
 import {
   chartConflictCurrent,
@@ -548,6 +550,13 @@ export function saveChartNow(key: string): Promise<void> {
 /** Analyze autosave hit a size limit (`chart_state_error: chart_state_too_large`). */
 export function noteChartTooLarge(limit = ""): void {
   setNotice(chartHistoryTooLarge(limit));
+}
+
+/** Final analyze meta carried `chart_state_error` (backend did not save this run). */
+export function noteChartStateError(code: string): void {
+  setNotice(
+    code === "session_not_found" ? CHART_HISTORY_SESSION_MISSING : CHART_HISTORY_SERVER_SAVE_FAILED,
+  );
 }
 
 /** Wait for queued PUTs (tests, e2e). */

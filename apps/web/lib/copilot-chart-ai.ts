@@ -13,7 +13,13 @@ import {
   type SummaryDirection,
 } from "./copilot-schema";
 import { formatInvalidationLine } from "./guardrail-format";
-import { evidenceItemRaw, evidenceItemText, evidenceTexts, labelForGateReason } from "./vi-evidence";
+import {
+  evidenceItemRaw,
+  evidenceItemText,
+  evidenceTexts,
+  labelForGateReason,
+  preferEvidenceItems,
+} from "./vi-evidence";
 
 export const KNOWN_PATTERN_IDS = [
   "head_and_shoulders",
@@ -128,12 +134,13 @@ const BIAS_CONFLICT_EVIDENCE_RE =
  * (the banner and server summary own that signal, C.12).
  */
 export function filterStructuralEvidenceAgainst(
-  analysis: Pick<AnalysisSseEvent, "evidence_against" | "intent_check">,
+  analysis: Pick<AnalysisSseEvent, "evidence_against" | "intent_check"> &
+    Partial<Pick<AnalysisSseEvent, "evidence_against_items">>,
   symbol = "BTCUSDT",
 ): string[] {
   const message = analysis.intent_check?.message?.trim();
   const lines: string[] = [];
-  for (const item of analysis.evidence_against ?? []) {
+  for (const item of preferEvidenceItems(analysis.evidence_against_items, analysis.evidence_against)) {
     const raw = evidenceItemRaw(item);
     if (!raw) continue;
     if (message && raw.includes(message)) continue;
@@ -180,7 +187,10 @@ export function formatAnalysisSummaryVi(
   if (analysis.confidence != null && Number.isFinite(analysis.confidence)) {
     lines.push(`Độ tin cậy tổng hợp: ${Math.round(analysis.confidence * 100)}%.`);
   }
-  const forLines = evidenceTexts(analysis.evidence_for, symbol);
+  const forLines = evidenceTexts(
+    preferEvidenceItems(analysis.evidence_for_items, analysis.evidence_for),
+    symbol,
+  );
   if (forLines.length > 0) {
     lines.push(`Bằng chứng thuận: ${forLines.join("; ")}`);
   }

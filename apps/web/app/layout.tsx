@@ -16,7 +16,7 @@ const plexMono = IBM_Plex_Mono({
 
 export const metadata: Metadata = {
   title: "AI-CHART.PRO — Research Terminal",
-  description: "Live Binance chart with AI pattern overlay",
+  description: "Biểu đồ Binance trực tiếp với lớp phủ mẫu hình AI",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

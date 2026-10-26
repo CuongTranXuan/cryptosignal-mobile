@@ -9,7 +9,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import type { ChartCoordinateApi } from "../lib/chart-api";
-import { displayShapeName } from "../lib/copilot-display";
+import { shapeDisplayName } from "../lib/shape-labels";
 import { CHART_ACTIVE_LAYERS, CHART_GHOST_PREVIEW } from "../lib/copilot-strings";
 import { buildHumanShape, shouldAutoCommit } from "../lib/human-draw";
 import { mapShapeToPixels, mapZoneToRect, pixelsToPoint } from "../lib/overlay-map";
@@ -217,7 +217,7 @@ export function ShapeOverlay({ coordApiRef, overlayTick }: ShapeOverlayProps) {
               className={`flex items-center gap-1 ${s.source === "human" ? "text-[#3b82f6]" : "text-[#0ecb81]"}`}
             >
               <span>
-                • {displayShapeName(s.name)} ({Math.round(s.confidence * 100)}%)
+                • {shapeDisplayName(s)} ({Math.round(s.confidence * 100)}%)
               </span>
             </div>
           ))}

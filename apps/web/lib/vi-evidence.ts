@@ -116,6 +116,14 @@ export function evidenceItemText(item: EvidenceItem, symbol = "BTCUSDT"): string
   return translateBackendText(item.text ?? "", symbol);
 }
 
+/** Coded items when the backend sent them, else the legacy string array. */
+export function preferEvidenceItems(
+  items: readonly EvidenceItem[] | undefined,
+  legacy: readonly EvidenceItem[] | undefined,
+): readonly EvidenceItem[] {
+  return items && items.length > 0 ? items : (legacy ?? []);
+}
+
 export function evidenceTexts(items: readonly EvidenceItem[] | undefined, symbol = "BTCUSDT"): string[] {
   return (items ?? []).map((item) => evidenceItemText(item, symbol)).filter((line) => line.trim() !== "");
 }

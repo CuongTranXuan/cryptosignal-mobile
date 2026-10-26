@@ -211,7 +211,7 @@ export function copilotRoleLabel(role: "user" | "agent", modelLabel?: string): s
 }
 
 export const COPILOT_PROBE_CHECKED_AT = "Kiểm tra lúc {time} · {ago}";
-export const COPILOT_PROBE_NEVER = "Chưa kiểm tra model";
+export const COPILOT_PROBE_NEVER = "Chưa kiểm tra mô hình";
 export const COPILOT_PROBE_STALE = "cũ";
 export const COPILOT_PROBE_STALE_HINT = "Kết quả kiểm tra đã cũ — đang chờ kiểm tra lại";
 export const COPILOT_PROBE_IN_PROGRESS = "Đang kiểm tra…";
@@ -220,8 +220,8 @@ export const COPILOT_PROBE_PROGRESS_DONE = "Đang kiểm tra… (đã xong {done
 export const COPILOT_PROBE_RETRY = "Kiểm tra lại";
 export const COPILOT_PROBE_RETRY_IN = "Thử lại sau {seconds}s";
 export const COPILOT_PROBE_FAILED = "Không kiểm tra lại được — thử lại sau.";
-export const COPILOT_PROBE_HIDDEN_TOGGLE = "{count} model bị ẩn";
-export const COPILOT_PROBE_HIDDEN_TITLE = "Model không qua kiểm tra OmniRoute";
+export const COPILOT_PROBE_HIDDEN_TOGGLE = "{count} mô hình bị ẩn";
+export const COPILOT_PROBE_HIDDEN_TITLE = "Mô hình không qua kiểm tra OmniRoute";
 export const COPILOT_PROBE_JUST_NOW = "vừa xong";
 export const COPILOT_PROBE_MINUTES_AGO = "{n} phút trước";
 export const COPILOT_PROBE_HOURS_AGO = "{n} giờ trước";
@@ -230,26 +230,26 @@ export const COPILOT_PROBE_REASON_UNKNOWN = "Không khả dụng";
 export const COPILOT_UPSTREAM_DOWN_TITLE = "Không kết nối được OmniRoute";
 export const COPILOT_UPSTREAM_DOWN_BODY =
   "Chưa thể phân tích cho đến khi OmniRoute hoạt động lại.";
-export const COPILOT_NO_MODELS_TITLE = "Không có model nào khả dụng";
+export const COPILOT_NO_MODELS_TITLE = "Không có mô hình nào khả dụng";
 export const COPILOT_NO_MODELS_BODY =
-  "Mọi model đều không qua kiểm tra OmniRoute. Xem danh sách model bị ẩn hoặc kiểm tra lại.";
-export const COPILOT_NO_MODELS_SHORT = "Không có model khả dụng";
-export const COPILOT_INPUT_NO_MODEL = "Chưa có model khả dụng — chưa thể phân tích";
+  "Mọi mô hình đều không qua kiểm tra OmniRoute. Xem danh sách mô hình bị ẩn hoặc kiểm tra lại.";
+export const COPILOT_NO_MODELS_SHORT = "Không có mô hình khả dụng";
+export const COPILOT_INPUT_NO_MODEL = "Chưa có mô hình khả dụng — chưa thể phân tích";
 export const COPILOT_NOTICE_DISMISS = "Đóng thông báo";
 
 export function copilotModelSwitchedNotice(from: string, to: string, reason?: string): string {
   const why = reason ? ` (${reason})` : "";
-  return `Model "${from}" không còn khả dụng${why} — đã chuyển sang "${to}".`;
+  return `Mô hình "${from}" không còn khả dụng${why} — đã chuyển sang "${to}".`;
 }
 
 export function copilotDefaultFallbackNotice(requested: string, fallback: string): string {
-  return `Model mặc định "${requested}" không qua kiểm tra — đang dùng "${fallback}".`;
+  return `Mô hình mặc định "${requested}" không qua kiểm tra — đang dùng "${fallback}".`;
 }
 
 export function copilotUnhealthyModelError(reason?: string): string {
   return reason
-    ? `Copilot lỗi: model đã chọn không khả dụng (${reason}) — đang cập nhật danh sách model`
-    : "Copilot lỗi: model đã chọn không khả dụng — đang cập nhật danh sách model";
+    ? `Copilot lỗi: mô hình đã chọn không khả dụng (${reason}) — đang cập nhật danh sách mô hình`
+    : "Copilot lỗi: mô hình đã chọn không khả dụng — đang cập nhật danh sách mô hình";
 }
 
 // Chart history (per session × symbol × timeframe).
@@ -261,6 +261,12 @@ export const CHART_HISTORY_N25_KEPT_PREVIOUS =
 export const CHART_HISTORY_CONFLICT =
   "Biểu đồ vừa được thay đổi ở nơi khác và chưa gộp được — hình trên màn hình chưa được lưu. Thử lại sau.";
 export const CHART_HISTORY_SAVE_FAILED = "Không lưu được hình vẽ của biểu đồ — thử lại sau.";
+export const CHART_HISTORY_SERVER_SAVE_FAILED =
+  "Máy chủ không lưu được biểu đồ của lần phân tích này — đã lưu lại từ thiết bị.";
+export const CHART_HISTORY_SESSION_MISSING =
+  "Phiên này không còn trên máy chủ — hình vẽ của lần phân tích này chưa được lưu.";
+export const COPILOT_ERROR_UPSTREAM_UNREACHABLE =
+  "Không kết nối được máy chủ mô hình AI — vui lòng thử lại sau.";
 export const CHART_HISTORY_DOT_TITLE = "Khung này có hình vẽ đã lưu trong phiên";
 
 export function chartHistoryTooLarge(limit: string): string {

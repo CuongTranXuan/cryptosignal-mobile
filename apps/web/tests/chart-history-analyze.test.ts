@@ -10,7 +10,12 @@ import {
 import { createMockChartStateApi, type ChartStateApi } from "../lib/chart-state";
 import { createCopilotApi, resetCopilotApiMockSessionsForTests } from "../lib/copilot-api";
 import { clearCopilotModelsCache, loadCopilotModels } from "../lib/copilot-models-cache";
-import { CHART_HISTORY_N25_KEPT_PREVIOUS } from "../lib/copilot-strings";
+import {
+  CHART_HISTORY_N25_KEPT_PREVIOUS,
+  CHART_HISTORY_SERVER_SAVE_FAILED,
+  CHART_HISTORY_SESSION_MISSING,
+} from "../lib/copilot-strings";
+import { resetShapeLabelsForTests, shapeDisplayName } from "../lib/shape-labels";
 import type { Candle, PatternShape } from "../lib/pattern-shape";
 import { useAiStore } from "../lib/stores/ai-store";
 import { useChartStore } from "../lib/stores/chart-store";
@@ -49,10 +54,12 @@ const shape = (id: string, t0 = candles[0]!.time, t1 = candles[2]!.time): Patter
   edited: false,
 });
 
-function sse(shapes: PatternShape[], revision: number | null): Response {
-  const meta = { model: "provider-a/model-alpha", candle_count_used: 3, clamped: false };
+type SseExtra = { labels?: Record<string, string>; meta?: Record<string, unknown> };
+
+function sse(shapes: PatternShape[], revision: number | null, extra: SseExtra = {}): Response {
+  const meta = { model: "provider-a/model-alpha", candle_count_used: 3, clamped: false, ...extra.meta };
   const body =
-    `event: shapes\ndata: ${JSON.stringify({ shapes })}\n\n` +
+    `event: shapes\ndata: ${JSON.stringify({ shapes, ...(extra.labels ? { labels: extra.labels } : {}) })}\n\n` +
     `event: analysis\ndata: ${JSON.stringify({ bias: "neutral", evidence_for: [], evidence_against: [] })}\n\n` +
     `event: text\ndata: ${JSON.stringify({ delta: `\n\nLớp phủ sẵn sàng: ${shapes.length} — Đường xu hướng hỗ trợ.` })}\n\n` +
     `event: meta\ndata: ${JSON.stringify(revision == null ? meta : { ...meta, chart_state_revision: revision })}\n\n` +
@@ -102,8 +109,12 @@ async function serverSave(shapes: PatternShape[]): Promise<number> {
   return doc.revision;
 }
 
-async function analyze(shapes: PatternShape[], save = true): Promise<Record<string, unknown>> {
-  const fetchImpl = vi.fn(async () => sse(shapes, save ? await serverSave(shapes) : null));
+async function analyze(
+  shapes: PatternShape[],
+  save = true,
+  extra: SseExtra = {},
+): Promise<Record<string, unknown>> {
+  const fetchImpl = vi.fn(async () => sse(shapes, save ? await serverSave(shapes) : null, extra));
   const client = createCopilotClient({
     fetchImpl: fetchImpl as unknown as typeof fetch,
     getClosedTimes: () => closed,
@@ -123,7 +134,31 @@ const lastAgentText = () => {
 
 describe("analyze with chart history", () => {
   beforeEach(async () => {
+    resetShapeLabelsForTests();
     await setup();
+  });
+
+  it("uses the shapes event `labels` for display names, falling back to the local mapping", async () => {
+    const other = { ...shape("drw_other"), name: "Fib pocket 0.5–0.618" };
+    expect(shapeDisplayName(shape("drw_a"))).toBe("Đường xu hướng hỗ trợ");
+    await analyze([shape("drw_a"), other], true, { labels: { drw_a: "Xu hướng hỗ trợ (máy chủ)" } });
+    const [a, b] = useShapeStore.getState().shapes;
+    expect(shapeDisplayName(a!)).toBe("Xu hướng hỗ trợ (máy chủ)");
+    expect(shapeDisplayName(b!)).not.toMatch(/Fib pocket/);
+    // Canonical English name stays on the shape (it is the wire id for the agent).
+    expect(a!.name).toBe("Support trendline");
+  });
+
+  it("chart_state_error session_not_found: Vietnamese notice and no client PUT", async () => {
+    await analyze([shape("drw_a")], false, { meta: { chart_state_error: "session_not_found" } });
+    expect(puts).toHaveLength(0);
+    expect(useChartHistoryStore.getState().notice).toBe(CHART_HISTORY_SESSION_MISSING);
+  });
+
+  it("chart_state_error chart_state_save_failed: Vietnamese notice and the client saves", async () => {
+    await analyze([shape("drw_a")], false, { meta: { chart_state_error: "chart_state_save_failed" } });
+    expect(puts).toEqual([{ revision: undefined, ids: ["drw_a"] }]);
+    expect(useChartHistoryStore.getState().notice).toBe(CHART_HISTORY_SERVER_SAVE_FAILED);
   });
 
   it("without chart_state_revision (backend did not save) the client saves what it shows", async () => {

@@ -5,6 +5,7 @@ import type { CopilotApiClient } from "../../lib/copilot-api";
 import {
   formatProbedAt,
   formatProbeProgress,
+  upstreamErrorLabel,
   hiddenModelsFromReport,
   isProbeIncomplete,
   isProbeSupported,
@@ -160,7 +161,11 @@ export function CopilotModelBar({ api }: { api: CopilotApiClient }) {
           <div className="flex min-w-0 flex-col items-start leading-tight">
             <span className="flex items-center gap-1 whitespace-nowrap text-[10px] text-[#848e9c]">
               {probeRunning ? (
-                <span data-testid="copilot-probe-progress">{formatProbeProgress(report)}</span>
+                <span data-testid="copilot-probe-progress">{formatProbeProgress(
+                    report,
+                    report?.total ?? response?.total,
+                    report?.pending_count ?? response?.pending_count,
+                  )}</span>
               ) : (
                 formatProbedAt(response?.probed_at, now)
               )}
@@ -186,12 +191,15 @@ function Banner({
   tone,
   title,
   detail,
+  secondary,
   action,
   onDismiss,
 }: {
   tone: "error" | "warn";
   title: string;
   detail?: string | null;
+  /** Raw backend detail (often English): small and dim, for support/debugging. */
+  secondary?: string | null;
   action?: React.ReactNode;
   onDismiss?: () => void;
 }) {
@@ -207,6 +215,11 @@ function Banner({
       <div className="min-w-0 flex-1">
         <span className="font-semibold">{title}</span>
         {detail && <span className="ml-2 text-[11px] text-[#eaecef]/80">{detail}</span>}
+        {secondary && (
+          <span className="ml-2 text-[10px] text-[#848e9c]" data-testid="banner-secondary">
+            ({secondary})
+          </span>
+        )}
       </div>
       {action}
       {onDismiss && (
@@ -247,9 +260,10 @@ export function CopilotModelBanner({ api }: { api: CopilotApiClient }) {
         <Banner
           tone="error"
           title={COPILOT_UPSTREAM_DOWN_TITLE}
-          detail={[COPILOT_UPSTREAM_DOWN_BODY, response?.upstream_error?.message]
+          detail={[COPILOT_UPSTREAM_DOWN_BODY, upstreamErrorLabel(response?.upstream_error?.code)]
             .filter(Boolean)
             .join(" · ")}
+          secondary={response?.upstream_error?.message ?? null}
           action={<ReprobeButton api={api} />}
         />
       )}

@@ -1,6 +1,6 @@
 import { mergeCandles } from "./binance";
 import { mapCopilotHttpError, mapCopilotSseErrorPayload } from "./copilot-errors";
-import { displayShapeName } from "./copilot-display";
+import { rememberShapeLabels, shapeDisplayName } from "./shape-labels";
 import {
   formatSkippedBreakdown,
   isAnalysisSseEmpty,
@@ -46,7 +46,9 @@ import { useCopilotSessionStore } from "./stores/copilot-session-store";
 import {
   beginAnalyzeRun,
   endAnalyzeRun,
+  noteChartStateError,
   noteChartTooLarge,
+  useChartHistoryStore,
   recordAnalyzeSaved,
   saveChartNow,
 } from "./chart-history";
@@ -309,9 +311,16 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
       if (streamKeptPreviousShapes) void saveChartNow(key);
     } else if (streamChartStateError === "chart_state_too_large") {
       noteChartTooLarge();
-    } else if (streamChartStateError !== "session_not_found") {
+    } else if (streamChartStateError === "session_not_found") {
+      noteChartStateError(streamChartStateError);
+    } else {
       // Backend did not save this run (older backend or a failed save): save what is shown.
-      void saveChartNow(key);
+      const error = streamChartStateError;
+      void saveChartNow(key).then(() => {
+        // After the device save, so its success does not clear the notice; a failed
+        // device save keeps its own (more urgent) notice.
+        if (error && !useChartHistoryStore.getState().notice) noteChartStateError(error);
+      });
     }
   };
 
@@ -466,6 +475,7 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
       case "shapes": {
         if (streamIsForOtherChart()) return "ok";
         const list = Array.isArray(data.shapes) ? data.shapes : [];
+        rememberShapeLabels(data.labels);
         const zodValid: PatternShape[] = [];
         const droppedIds: string[] = [];
         const chart = useChartStore.getState();
@@ -508,7 +518,7 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
         if (valid.length > 0) {
           const lines = valid.map((s) =>
             copilotShapeSummaryLine(
-              displayShapeName(s.name),
+              shapeDisplayName(s),
               s.kind,
               Math.round(s.confidence * 100),
               s.points.length,

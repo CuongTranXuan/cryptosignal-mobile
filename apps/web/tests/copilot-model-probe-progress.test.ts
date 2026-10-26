@@ -69,6 +69,14 @@ describe("probe report v2 fields", () => {
     expect(formatProbeProgress(partialReport, 4)).toBe("Đang kiểm tra… (2/4)");
     expect(formatProbeProgress(partialReport)).toBe("Đang kiểm tra… (đã xong 2)");
     expect(formatProbeProgress({ ...partialReport, results: [] })).toBe("Đang kiểm tra…");
+    // Wire total/pending_count (04da1c0e): total null while the upstream list loads.
+    expect(formatProbeProgress({ ...partialReport, total: 4, pending_count: 1 })).toBe("Đang kiểm tra… (3/4)");
+    expect(formatProbeProgress({ ...partialReport, results: [], total: 4, pending_count: 4 })).toBe(
+      "Đang kiểm tra… (0/4)",
+    );
+    expect(formatProbeProgress({ ...partialReport, results: [], total: null, pending_count: null })).toBe(
+      "Đang kiểm tra…",
+    );
   });
 
   it("treats an empty partial list as probing, not as no models", () => {

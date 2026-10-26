@@ -52,6 +52,9 @@ export const ModelsListResponseSchema = z.object({
   ttl_s: z.number().int().optional(),
   stale: z.boolean().optional(),
   probe_in_progress: z.boolean().optional(),
+  /** While probing: ids in the running probe (null until its model list loads). */
+  total: z.number().int().nullable().optional(),
+  pending_count: z.number().int().nullable().optional(),
   upstream_reachable: z.boolean().optional(),
   upstream_error: UpstreamErrorSchema.nullable().optional(),
 });
@@ -80,6 +83,9 @@ export const ModelProbeReportSchema = z.object({
   /** `false` while a running probe has only published part of its results. */
   complete: z.boolean().optional(),
   probe_in_progress: z.boolean().optional(),
+  /** Ids probed in this run; null while the upstream list loads. */
+  total: z.number().int().nullable().optional(),
+  pending_count: z.number().int().nullable().optional(),
 });
 
 export type CopilotModelRecord = z.infer<typeof CopilotModelRecordSchema>;
@@ -273,6 +279,9 @@ export const AnalysisSseEventSchema = z
     no_valid_pattern: z.boolean().optional(),
     evidence_for: z.array(EvidenceItemSchema).optional().default([]),
     evidence_against: z.array(EvidenceItemSchema).optional().default([]),
+    /** Coded `{code, params, text}` lines (CHART_AI_SPEC §C.16); preferred over the strings. */
+    evidence_for_items: z.array(CodedTextSchema).optional(),
+    evidence_against_items: z.array(CodedTextSchema).optional(),
     invalidation: DrawingInvalidationSchema.nullable().optional(),
     confidence: z.number().nullable().optional(),
     intent_check: IntentCheckSchema.optional(),

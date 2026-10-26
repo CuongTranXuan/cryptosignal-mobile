@@ -158,7 +158,7 @@ function CopilotModelPickerInner({
               aria-expanded={showAdvanced}
               onClick={() => setShowAdvanced((v) => !v)}
             >
-              {COPILOT_MODEL_ADVANCED}: {showAdvanced ? "ẩn" : "hiện"} combo/auto
+              {COPILOT_MODEL_ADVANCED}: {showAdvanced ? "ẩn" : "hiện"} mô hình tổ hợp/tự chọn
             </button>
           </div>
           <ul

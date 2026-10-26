@@ -46,7 +46,7 @@ describe("formatProbedAt", () => {
     expect(formatProbedAt(iso, at.getTime() + 20_000)).toBe("Kiểm tra lúc 11:42 · vừa xong");
     expect(formatProbedAt(iso, at.getTime() + 3 * 60_000)).toBe("Kiểm tra lúc 11:42 · 3 phút trước");
     expect(formatProbedAt(iso, at.getTime() + 2 * 3_600_000)).toBe("Kiểm tra lúc 11:42 · 2 giờ trước");
-    expect(formatProbedAt(null, Date.now())).toBe("Chưa kiểm tra model");
+    expect(formatProbedAt(null, Date.now())).toBe("Chưa kiểm tra mô hình");
   });
 });
 

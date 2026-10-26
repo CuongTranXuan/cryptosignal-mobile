@@ -93,7 +93,7 @@ describe("model auto-switch and re-probe", () => {
     const state = useCopilotSessionStore.getState();
     expect(state.modelId).toBe("agentrouter/deepseek-v4-flash");
     expect(state.modelNotice).toBe(
-      'Model "openrouter/gpt-5" không còn khả dụng — đã chuyển sang "agentrouter/deepseek-v4-flash".',
+      'Mô hình "openrouter/gpt-5" không còn khả dụng — đã chuyển sang "agentrouter/deepseek-v4-flash".',
     );
   });
 

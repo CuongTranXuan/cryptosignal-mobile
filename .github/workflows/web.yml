@@ -5,12 +5,16 @@ on:
     paths:
       - "apps/web/**"
       - "apps/copilot/tests/test_wire_schema.py"
+      - "apps/copilot/tests/test_chart_autosave.py"
+      - "apps/copilot/tests/fixtures/wire/**"
       - "apps/copilot/src/cryptosignal_copilot/wire_shape.py"
       - ".github/workflows/web.yml"
   pull_request:
     paths:
       - "apps/web/**"
       - "apps/copilot/tests/test_wire_schema.py"
+      - "apps/copilot/tests/test_chart_autosave.py"
+      - "apps/copilot/tests/fixtures/wire/**"
       - "apps/copilot/src/cryptosignal_copilot/wire_shape.py"
       - ".github/workflows/web.yml"
 
@@ -19,6 +23,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       CI: true
+      # Missing node/tsx/zod fails the web-Zod contract tests instead of skipping them.
+      COPILOT_REQUIRE_WEB_ZOD: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -46,4 +52,7 @@ jobs:
         run: pip install -e ".[dev]"
       - name: Web Zod wire contract
         working-directory: apps/copilot
-        run: pytest -q tests/test_wire_schema.py::test_wire_shapes_pass_web_zod_when_node_available
+        run: >-
+          pytest -q
+          tests/test_wire_schema.py::test_wire_shapes_pass_web_zod_when_node_available
+          tests/test_chart_autosave.py::test_wire_fixtures_pass_web_chart_state_zod
