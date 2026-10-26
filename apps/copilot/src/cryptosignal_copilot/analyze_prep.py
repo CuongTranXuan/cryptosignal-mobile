@@ -33,6 +33,15 @@ from cryptosignal_copilot.schema import AnalyzeRequest
 logger = logging.getLogger(__name__)
 
 
+def _upstream_unreachable(detail: str) -> AnalyzePrepError:
+    return AnalyzePrepError(
+        "upstream_unreachable",
+        503,
+        "Không kết nối được cổng mô hình AI — thử lại sau",
+        detail,
+    )
+
+
 @dataclass(frozen=True)
 class AnalyzePlan:
     model_id: str
@@ -137,6 +146,8 @@ async def prepare_analyze(
     model_id = (request.model or fallback_default or cfg.model).strip()
     if not model_id:
         raise AnalyzePrepError("unknown_model", 400, "Mô hình không hợp lệ", "model is required")
+    if model_health is not None and model_health.upstream_down:
+        raise _upstream_unreachable("last probe: upstream unreachable")
     probe_status = model_health.unhealthy_status(model_id) if model_health else None
     if probe_status is not None:
         raise AnalyzePrepError(
@@ -155,6 +166,8 @@ async def prepare_analyze(
             "Mô hình không có trong danh sách nhà cung cấp",
             f"unknown model: {model_id}",
         ) from None
+    except Exception as exc:  # noqa: BLE001 - catalog fetch failed (gateway down, bad JSON)
+        raise _upstream_unreachable(type(exc).__name__) from None
 
     if _over_budget(model, history_tokens):
         raise AnalyzePrepError(

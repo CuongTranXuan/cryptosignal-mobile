@@ -404,6 +404,10 @@ class ModelHealth:
     default_model: str | None
     report: ProbeReport | None
 
+    @property
+    def upstream_down(self) -> bool:
+        return self.report is not None and not self.report.upstream_reachable
+
     def unhealthy_status(self, model_id: str) -> ProbeStatus | None:
         if self.report is None:
             return None

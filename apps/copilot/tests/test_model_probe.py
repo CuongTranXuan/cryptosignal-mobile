@@ -871,3 +871,16 @@ async def test_stale_report_keeps_requested_default_only_if_it_passed(probe_env,
     body = service.models_body(report)
     assert body["stale"] is True
     assert body["default_model"] == "m/slow" and body["default_fallback"] is False
+
+
+async def test_analyze_while_upstream_down_is_structured_503(probe_env, tmp_path, monkeypatch):
+    service = make_service(stub_transport(models=ROWS, models_error=httpx.ConnectError("refused")))
+    app = make_app(service, tmp_path, monkeypatch)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        cold = await client.post("/v1/copilot/analyze", json={**ANALYZE, "model": "m/fast"})
+        await client.get("/v1/copilot/models")  # probe now records upstream down
+        known = await client.post("/v1/copilot/analyze", json=ANALYZE)
+    for res in (cold, known):
+        assert res.status_code == 503, res.text
+        assert res.json()["code"] == "upstream_unreachable"
+        assert SECRET not in res.text
