@@ -244,3 +244,34 @@ async def test_cold_first_lookup_is_fast_without_cache(tmp_path):
     assert format_market_price(87_299.1349, "BTCUSDT") == "87,299.13"
     assert time.perf_counter() - t0 < 0.05
     cache.clear()
+
+
+async def test_pepe_magnitude_fallback_then_recovers_after_failed_fetch():
+    """One failure must not disable lookups until restart (old `_FETCHED_ALL` bug)."""
+    clock = Clock()
+    attempts = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise httpx.ConnectError("offline")
+        return httpx.Response(200, json=_info("PEPEUSDT", "0.00000001"))
+
+    cache = set_tick_cache_for_tests(
+        TickSizeCache(transport=httpx.MockTransport(handler), clock=clock)
+    )
+    price = 0.00001234
+    assert tick_size_for_symbol("PEPEUSDT", reference_price=price) == pytest.approx(1e-8)
+    first = next(iter(cache._tasks.values()))
+    assert await first is None  # network down
+    assert tick_size_for_symbol("PEPEUSDT", reference_price=price) == pytest.approx(1e-8)
+    assert format_market_price(price, "PEPEUSDT") == "0.00001234"
+    clock.now += 31  # backoff elapsed, network back
+    tick_size_for_symbol("PEPEUSDT", reference_price=price)
+    retry = next(iter(cache._tasks.values()))
+    assert await retry == pytest.approx(1e-8)
+    assert cache.cached("PEPEUSDT") == pytest.approx(1e-8)
+    assert attempts["n"] == 2
+    # Other symbols were never blocked by the PEPE failure.
+    assert tick_size_for_symbol("BTCUSDT", reference_price=87_000.0) == 0.01
+    cache.clear()
