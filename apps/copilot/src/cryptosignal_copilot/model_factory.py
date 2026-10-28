@@ -1,10 +1,7 @@
 from __future__ import annotations
 
-from anthropic import AsyncAnthropic
 from openai import AsyncOpenAI
-from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.openai import OpenAIChatModel
-from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from cryptosignal_copilot.config import LlmConfig, LlmConfigError, health_payload
@@ -34,6 +31,16 @@ def build_model(cfg: LlmConfig, model_id: str | None = None):
         client = AsyncOpenAI(**client_kwargs)
         return OpenAIChatModel(model_name, provider=OpenAIProvider(openai_client=client))
     if cfg.style == "anthropic":
+        # Lazy: the anthropic SDK costs ~22 MB RSS and only this style needs it.
+        try:
+            from anthropic import AsyncAnthropic
+            from pydantic_ai.models.anthropic import AnthropicModel
+            from pydantic_ai.providers.anthropic import AnthropicProvider
+        except ImportError as exc:
+            raise LlmConfigError(
+                "LLM_API_STYLE=anthropic needs the anthropic extra: "
+                "pip install 'cryptosignal-copilot[anthropic]'"
+            ) from exc
         client = AsyncAnthropic(
             base_url=cfg.base_url,
             api_key=cfg.api_key,
