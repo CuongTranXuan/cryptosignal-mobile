@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { AnalysisSseEventSchema } from "../lib/copilot-schema";
 import { mapCopilotHttpError } from "../lib/copilot-errors";
 import { upstreamErrorLabel } from "../lib/copilot-model-probe";
-import { COPILOT_ERROR_UPSTREAM_UNREACHABLE } from "../lib/copilot-strings";
+import { COPILOT_ERROR_REQUEST_TOO_LARGE, COPILOT_ERROR_UPSTREAM_UNREACHABLE } from "../lib/copilot-strings";
 import { evidenceTexts, preferEvidenceItems } from "../lib/vi-evidence";
 
 describe("phase-2 wire additions", () => {
@@ -32,6 +32,15 @@ describe("phase-2 wire additions", () => {
     expect(mapCopilotHttpError(503, body)).toBe(body.message);
     expect(mapCopilotHttpError(503, { code: "upstream_unreachable", message: "" })).toBe(
       COPILOT_ERROR_UPSTREAM_UNREACHABLE,
+    );
+  });
+
+  it("413 request_too_large on analyze/session: Vietnamese, server message kept when Vietnamese", () => {
+    expect(mapCopilotHttpError(413, { code: "request_too_large", message: "Request body too large" })).toBe(
+      COPILOT_ERROR_REQUEST_TOO_LARGE,
+    );
+    expect(mapCopilotHttpError(413, { code: "request_too_large", message: "Yêu cầu vượt 1,5 MB." })).toBe(
+      "Yêu cầu vượt 1,5 MB.",
     );
   });
 

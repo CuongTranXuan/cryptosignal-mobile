@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
 import { render, screen } from "@testing-library/react";
 import { ChartHistoryBar } from "../components/chart-history-bar";
 import { CopilotReasoningControl } from "../components/copilot/copilot-reasoning-control";
@@ -15,13 +17,22 @@ import {
   switchChart,
   useChartHistoryStore,
 } from "../lib/chart-history";
-import { createChartStateApi, createMockChartStateApi, type ChartStateApi } from "../lib/chart-state";
-import { COPILOT_DEVICE_TOKEN_HEADER, setCopilotDeviceTokenProvider } from "../lib/copilot-auth";
+import {
+  chartTooLargeNotice,
+  createMockChartStateApi,
+  sanitizeChartPutBody,
+  type ChartStateApi,
+} from "../lib/chart-state";
 import { CopilotApiError, createCopilotApi, resetCopilotApiMockSessionsForTests } from "../lib/copilot-api";
 import { clearCopilotModelsCache, loadCopilotModels } from "../lib/copilot-models-cache";
 import {
-  CHART_HISTORY_FORBIDDEN,
+  CHART_HISTORY_DUPLICATE_ID,
   CHART_HISTORY_INVALID,
+  CHART_HISTORY_INVALID_INTERVAL,
+  CHART_HISTORY_INVALID_NUMBER,
+  CHART_HISTORY_INVALID_VIEW,
+  CHART_HISTORY_REQUEST_TOO_LARGE,
+  CHART_HISTORY_SAVE_FAILED,
   CHART_HISTORY_UNSAVED,
 } from "../lib/copilot-strings";
 import { mapShapeToPixels, mapZoneToRect } from "../lib/overlay-map";
@@ -174,18 +185,41 @@ describe("(1) chart save retry with backoff on 5xx / network", () => {
   });
 });
 
-describe("(3) 401/403/413/422 on save: Vietnamese notice, no retry loop, local state kept", () => {
+describe("save errors that never fix themselves: Vietnamese notice, no retry, local state kept", () => {
   afterEach(() => {
     vi.useRealTimers();
   });
 
+  const body = (status: number, b: Record<string, unknown>) =>
+    new CopilotApiError(status, b as never, String(b.code ?? "x"));
+
   it.each([
-    [401, "unauthorized", CHART_HISTORY_FORBIDDEN],
-    [403, "forbidden", CHART_HISTORY_FORBIDDEN],
-    [413, "chart_state_too_large", /Biểu đồ quá lớn để lưu/],
-    [422, "validation_error", CHART_HISTORY_INVALID],
-  ] as const)("%i", async (status, code, notice) => {
-    const { api, puts } = failingApi([http(status, code), http(status, code), http(status, code)]);
+    ["400 malformed JSON", body(400, { code: "invalid_json" }), CHART_HISTORY_INVALID],
+    ["401 (unused; generic)", body(401, { code: "unauthorized" }), CHART_HISTORY_SAVE_FAILED],
+    ["403 (unused; generic)", body(403, { code: "forbidden" }), CHART_HISTORY_SAVE_FAILED],
+    [
+      "413 chart_state_too_large with a Vietnamese message",
+      body(413, { code: "chart_state_too_large", limit: 200, field: "shapes", message: "Biểu đồ có quá nhiều hình (tối đa 200)." }),
+      "Biểu đồ có quá nhiều hình (tối đa 200).",
+    ],
+    [
+      "413 chart_state_too_large without message → field + limit",
+      body(413, { code: "chart_state_too_large", limit: 200, field: "shapes" }),
+      "Biểu đồ quá lớn để lưu (giới hạn: số hình 200) — hãy xoá bớt hình hoặc điểm neo.",
+    ],
+    ["413 request_too_large", body(413, { code: "request_too_large", message: "Request body too large" }), CHART_HISTORY_REQUEST_TOO_LARGE],
+    ["422 invalid_number", body(422, { code: "invalid_number" }), CHART_HISTORY_INVALID_NUMBER],
+    ["422 invalid_view_range", body(422, { code: "invalid_view_range" }), CHART_HISTORY_INVALID_VIEW],
+    ["422 duplicate_shape_id", body(422, { code: "duplicate_shape_id" }), CHART_HISTORY_DUPLICATE_ID],
+    ["422 invalid_interval", body(422, { code: "invalid_interval" }), CHART_HISTORY_INVALID_INTERVAL],
+    ["422 other", body(422, { code: "validation_error" }), CHART_HISTORY_INVALID],
+    [
+      "422 other code with a Vietnamese message",
+      body(422, { code: "chart_key_mismatch", message: "Hình vẽ không thuộc biểu đồ này" }),
+      "Máy chủ từ chối biểu đồ: Hình vẽ không thuộc biểu đồ này — hình vẽ vẫn giữ trên thiết bị.",
+    ],
+  ] as const)("%s", async (_name, error, notice) => {
+    const { api, puts } = failingApi([error, error, error]);
     await bootSession(api);
     const key = currentChartKey()!;
     useShapeStore.getState().setChartShapes([userShape("u1")]);
@@ -194,7 +228,7 @@ describe("(3) 401/403/413/422 on save: Vietnamese notice, no retry loop, local s
     await vi.advanceTimersByTimeAsync(180_000);
     await flushAsync();
     expect(puts).toHaveLength(1);
-    expect(useChartHistoryStore.getState().notice).toMatch(notice);
+    expect(useChartHistoryStore.getState().notice).toBe(notice);
     expect(useChartHistoryStore.getState().unsaved[key]).toBe("failed");
     expect(ids()).toEqual(["u1"]);
   });
@@ -202,24 +236,62 @@ describe("(3) 401/403/413/422 on save: Vietnamese notice, no retry loop, local s
   it("classifies errors", () => {
     expect(classifyChartSaveError(new TypeError("Failed to fetch"))).toBe("retry");
     expect(classifyChartSaveError(http(504))).toBe("retry");
-    expect(classifyChartSaveError(http(401))).toBe("forbidden");
-    expect(classifyChartSaveError(http(404, "x"))).toBe("session_gone");
+    expect(classifyChartSaveError(http(503, "db_unavailable"))).toBe("retry");
+    expect(classifyChartSaveError(http(400, "invalid_json"))).toBe("invalid");
+    expect(classifyChartSaveError(http(401))).toBe("other");
+    expect(classifyChartSaveError(http(404, "session_not_found"))).toBe("session_gone");
+    expect(classifyChartSaveError(new CopilotApiError(404, { error: "session not found" }, "x"))).toBe("session_gone");
+    expect(classifyChartSaveError(http(404, "x"))).toBe("no_route");
     expect(classifyChartSaveError(http(404, "chart_state_not_found"))).toBe("other");
   });
+});
 
-  it("device token header: sent when a provider is set, absent otherwise", async () => {
-    const seen: Array<Record<string, string>> = [];
-    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
-      seen.push((init?.headers ?? {}) as Record<string, string>);
-      return new Response(JSON.stringify({ charts: [] }), { status: 200 });
+const API_ERRORS = path.resolve(__dirname, "../../copilot/tests/fixtures/wire/api_errors.json");
+
+describe("413 envelopes from the backend fixture (apps/copilot/tests/fixtures/wire/api_errors.json)", () => {
+  it.skipIf(!existsSync(API_ERRORS))("shows the server's Vietnamese message for both caps", () => {
+    const fixture = JSON.parse(readFileSync(API_ERRORS, "utf8")) as Record<string, { status: number; body: Record<string, unknown> }>;
+    for (const name of ["chart_state_too_large", "request_too_large"]) {
+      const { status, body } = fixture[name]!;
+      const err = new CopilotApiError(status, body as never, name);
+      expect(chartTooLargeNotice(err), name).toBe(body.message);
+      expect(classifyChartSaveError(err), name).toBe("too_large");
+    }
+  });
+});
+
+describe("(d) PUT body is sanitized before sending (prevents 422s)", () => {
+  it("drops NaN/Inf shapes and markers, clamps confidence, dedupes ids, orders the view", () => {
+    const ok = userShape("a");
+    const out = sanitizeChartPutBody({
+      shapes: [
+        ok,
+        { ...userShape("a"), name: "dup" },
+        { ...userShape("nan"), points: [{ time: Number.NaN, price: 1 }, { time: 1, price: 2 }] },
+        { ...userShape("inf"), kind: "zone", priceLow: 1, priceHigh: Number.POSITIVE_INFINITY },
+        { ...userShape("conf"), confidence: 7 },
+      ],
+      markers: [
+        { id: "m1", symbol: "BTCUSDT", interval: "1h", time: 1_710_000_000, side: "buy", position: "belowBar", shape: "arrowUp", confidence: Number.NaN, source: "agent" },
+        { id: "m2", symbol: "BTCUSDT", interval: "1h", time: Number.NaN, side: "buy", position: "belowBar", shape: "arrowUp", confidence: 0.5, source: "agent" },
+      ],
+      view: { from: 1_710_007_200.7, to: 1_710_000_000.2 },
     });
-    const api = createChartStateApi({ fetchImpl: fetchImpl as unknown as typeof fetch, baseUrl: "http://x" });
-    await api.listCharts("s1");
-    setCopilotDeviceTokenProvider(() => "tok-123");
-    await api.listCharts("s1");
-    setCopilotDeviceTokenProvider(null);
-    expect(seen[0]).not.toHaveProperty(COPILOT_DEVICE_TOKEN_HEADER);
-    expect(seen[1]?.[COPILOT_DEVICE_TOKEN_HEADER]).toBe("tok-123");
+    expect(out.shapes.map((s) => s.id)).toEqual(["a", "conf"]);
+    expect(out.shapes[0]?.name).toBe("Support trendline"); // first wins
+    expect(out.shapes[1]?.confidence).toBe(1);
+    expect(out.markers?.map((m) => [m.id, m.confidence])).toEqual([["m1", 0]]);
+    expect(out.view).toEqual({ from: 1_710_000_000, to: 1_710_007_201 });
+    expect(sanitizeChartPutBody({ shapes: [], view: { from: Number.NaN, to: 1 } })).not.toHaveProperty("view");
+  });
+
+  it("the controller sends the sanitized body", async () => {
+    const { api, puts } = failingApi([]);
+    await bootSession(api);
+    useShapeStore.getState().setChartShapes([userShape("u1"), userShape("bad", Number.NaN)]);
+    await saveChartNow(currentChartKey()!);
+    await flushAsync();
+    expect(puts).toEqual([["u1"]]);
   });
 });
 

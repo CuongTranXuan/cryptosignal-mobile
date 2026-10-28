@@ -18,6 +18,7 @@ import {
   type StylesListResponse,
   type UpdateSessionRequest,
 } from "./copilot-schema";
+import { withCopilotCredentials } from "./copilot-fetch";
 import { parseRetryAfterSeconds } from "./copilot-model-probe";
 import { stripLegacyReasoningFromTitle } from "./copilot-session-legacy-title";
 
@@ -42,6 +43,20 @@ export type ApiErrorBody = {
   message?: string;
   detail?: unknown;
 };
+
+/**
+ * 404 `session_not_found` (also the older `{"error": "session not found"}`): the session was
+ * deleted or belongs to another device (`csm_device` cookie). Never retried.
+ */
+export function isSessionGoneBody(status: number, body: ApiErrorBody | null | undefined): boolean {
+  if (status !== 404 || !body) return false;
+  const raw = typeof body.code === "string" ? body.code : typeof body.error === "string" ? body.error : "";
+  return raw.trim().toLowerCase().replace(/\s+/g, "_") === "session_not_found";
+}
+
+export function isSessionGoneError(err: unknown): boolean {
+  return err instanceof CopilotApiError && isSessionGoneBody(err.status, err.body);
+}
 
 export class CopilotApiError extends Error {
   readonly status: number;
@@ -368,7 +383,7 @@ export type CreateCopilotApiOptions = {
 };
 
 export function createCopilotApi(opts: CreateCopilotApiOptions = {}): CopilotApiClient {
-  const fetchImpl = opts.fetchImpl ?? fetch;
+  const fetchImpl = withCopilotCredentials(opts.fetchImpl ?? fetch);
   const baseUrl = resolveCopilotBaseUrl(opts.baseUrl);
   const fallbackMock = opts.fallbackMockOnMissing ?? true;
 

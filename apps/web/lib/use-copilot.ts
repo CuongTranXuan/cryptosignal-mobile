@@ -1,4 +1,5 @@
 import { mergeCandles } from "./binance";
+import { withCopilotCredentials } from "./copilot-fetch";
 import { mapCopilotHttpError, mapCopilotSseErrorPayload } from "./copilot-errors";
 import { rememberShapeLabels, shapeDisplayName } from "./shape-labels";
 import {
@@ -28,7 +29,7 @@ import {
 } from "./copilot-model-probe";
 import { getModelProbeReport } from "../components/copilot/use-copilot-models";
 import { reasoningEffortForAnalyze } from "./copilot-reasoning";
-import { resolveCopilotBaseUrl, type ApiErrorBody } from "./copilot-api";
+import { isSessionGoneBody, resolveCopilotBaseUrl, type ApiErrorBody } from "./copilot-api";
 import {
   AUTO_DRAW_PROMPT,
   COPILOT_ERROR,
@@ -41,6 +42,7 @@ import {
   COPILOT_SERVER_PICKED_SHAPES,
   CHART_HISTORY_KEPT_PREVIOUS_INVALID,
   COPILOT_ERROR_INVALID_REASONING,
+  COPILOT_SESSION_GONE,
   CHART_HISTORY_N25_KEPT_PREVIOUS,
   copilotUnhealthyModelError,
 } from "./copilot-strings";
@@ -116,6 +118,11 @@ async function readHttpErrorBody(res: Response): Promise<ApiErrorBody> {
 /** Maps an analyze HTTP error; an unhealthy-model 4xx also triggers a models refresh + auto-switch. */
 async function handleAnalyzeHttpError(res: Response): Promise<string> {
   const body = await readHttpErrorBody(res);
+  if (isSessionGoneBody(res.status, body)) {
+    const session = useCopilotSessionStore.getState();
+    if (session.activeSessionId) void session.handleSessionGone(session.activeSessionId);
+    return COPILOT_SESSION_GONE;
+  }
   if (res.status === 400 && (body.code ?? body.error) === "invalid_reasoning_effort") {
     // The model takes no reasoning effort (e.g. `reasoning_efforts: []`): drop the stored
     // effort and refresh the catalog so the control hides and the next run omits it.
@@ -281,7 +288,7 @@ function noteDroppedMarkers(ids: string[]): void {
 }
 
 export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient {
-  const fetchImpl = deps.fetchImpl ?? fetch;
+  const fetchImpl = withCopilotCredentials(deps.fetchImpl ?? fetch);
   const fetchKlines = deps.fetchKlines ?? defaultFetchKlines;
   const baseUrl = resolveCopilotBaseUrl(deps.baseUrl);
 
@@ -322,7 +329,8 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
     } else if (streamChartStateError === "chart_state_too_large") {
       noteChartTooLarge();
     } else if (streamChartStateError === "session_not_found") {
-      noteChartStateError(streamChartStateError);
+      // Gone (or another device's): nothing to save into; the session store moves on.
+      void useCopilotSessionStore.getState().handleSessionGone(key.split("|")[0] ?? "");
     } else {
       // Backend did not save this run (older backend or a failed save): save what is shown.
       const error = streamChartStateError;

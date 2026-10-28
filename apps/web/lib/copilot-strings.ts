@@ -134,6 +134,8 @@ export const COPILOT_SESSION_DELETE_CONFIRM = "Xóa phiên này?";
 export const COPILOT_SESSION_EMPTY = "Chưa có phiên — tạo phiên mới để lưu lịch sử.";
 export const COPILOT_SESSIONS_OFFLINE =
   "Không lưu được phiên lên máy chủ — tin nhắn vẫn giữ trên thiết bị này. Sẽ thử lại khi kết nối lại.";
+export const COPILOT_SESSION_GONE =
+  "Phiên này không còn trên máy chủ (đã bị xoá hoặc không thuộc thiết bị này) — đã chuyển sang phiên khác.";
 export const COPILOT_SESSIONS_SAVE_FAILED =
   "Không lưu được phiên — thay đổi được giữ tạm trên thiết bị. Thử lại sau.";
 export const COPILOT_SESSIONS_MIGRATION_PARTIAL =
@@ -265,12 +267,22 @@ export const CHART_HISTORY_SERVER_SAVE_FAILED =
   "Máy chủ không lưu được biểu đồ của lần phân tích này — đã lưu lại từ thiết bị.";
 export const CHART_HISTORY_SESSION_MISSING =
   "Phiên này không còn trên máy chủ — hình vẽ của lần phân tích này chưa được lưu.";
+export const COPILOT_ERROR_REQUEST_TOO_LARGE =
+  "Yêu cầu quá lớn (giới hạn ~1,5 MB) — hãy giảm số nến hoặc bớt hình đang vẽ rồi thử lại.";
 export const COPILOT_ERROR_UPSTREAM_UNREACHABLE =
   "Không kết nối được máy chủ mô hình AI — vui lòng thử lại sau.";
-export const CHART_HISTORY_FORBIDDEN =
-  "Không có quyền lưu biểu đồ của phiên này (thiếu hoặc sai mã thiết bị) — hình vẽ vẫn giữ trên thiết bị.";
 export const CHART_HISTORY_INVALID =
   "Máy chủ từ chối dữ liệu biểu đồ (không hợp lệ) — hình vẽ vẫn giữ trên thiết bị.";
+export const CHART_HISTORY_INVALID_NUMBER =
+  "Máy chủ từ chối biểu đồ: có giá trị số không hợp lệ (NaN/∞) — hình vẽ vẫn giữ trên thiết bị.";
+export const CHART_HISTORY_INVALID_VIEW =
+  "Máy chủ từ chối biểu đồ: khung nhìn không hợp lệ (đầu lớn hơn cuối) — hình vẽ vẫn giữ trên thiết bị.";
+export const CHART_HISTORY_DUPLICATE_ID =
+  "Máy chủ từ chối biểu đồ: có hình bị trùng mã — hình vẽ vẫn giữ trên thiết bị.";
+export const CHART_HISTORY_INVALID_INTERVAL =
+  "Máy chủ từ chối biểu đồ: khung thời gian không được hỗ trợ — hình vẽ vẫn giữ trên thiết bị.";
+export const CHART_HISTORY_REQUEST_TOO_LARGE =
+  "Dữ liệu biểu đồ vượt giới hạn kích thước yêu cầu (~1,5 MB) — hãy xoá bớt hình hoặc điểm neo.";
 export const CHART_HISTORY_UNSAVED = "chưa lưu";
 export const CHART_HISTORY_UNSAVED_RETRYING_TITLE =
   "Chưa lưu lên máy chủ — đang tự thử lại; hình vẽ vẫn giữ trên thiết bị.";

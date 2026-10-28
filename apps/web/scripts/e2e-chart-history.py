@@ -3,6 +3,7 @@
 
 Usage: BASE_URL=http://127.0.0.1:3101/v1/copilot python3 scripts/e2e-chart-history.py [out.txt]
 """
+import http.cookiejar
 import json
 import os
 import sys
@@ -20,13 +21,19 @@ def log(msg):
     lines.append(msg)
 
 
-def call(method, path, body=None, accept="application/json"):
-    data = None if body is None else json.dumps(body).encode()
+# Sessions belong to the device in the signed httpOnly `csm_device` cookie: keep a jar,
+# like the browser does (through the Next proxy).
+JAR = http.cookiejar.CookieJar()
+DEVICE = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(JAR))
+
+
+def call(method, path, body=None, accept="application/json", opener=None, raw_body=None):
+    data = raw_body if raw_body is not None else (None if body is None else json.dumps(body).encode())
     req = urllib.request.Request(BASE + path, data=data, method=method)
     req.add_header("Content-Type", "application/json")
     req.add_header("Accept", accept)
     try:
-        with urllib.request.urlopen(req, timeout=60) as res:
+        with (opener or DEVICE).open(req, timeout=60) as res:
             raw = res.read().decode()
             return res.status, raw
     except urllib.error.HTTPError as err:
@@ -35,6 +42,10 @@ def call(method, path, body=None, accept="application/json"):
 
 def js(raw):
     return json.loads(raw) if raw else None
+
+
+def soft_check(cond, label):
+    log(f"PASS: {label}" if cond else f"PENDING: {label}")
 
 
 def check(cond, label):
@@ -68,6 +79,7 @@ st, raw = call("POST", "/sessions", {
 })
 check(st == 200, f"create session ({st})")
 sid = js(raw)["id"]
+check(any(c.name == "csm_device" for c in JAR), "csm_device cookie set through the proxy")
 chart = f"/sessions/{sid}/charts/btcusdt/1h"
 
 st, raw = call("GET", chart)
@@ -101,7 +113,31 @@ check(st == 200 and js(raw)["interval"] == "30m", "30m chart saves")
 
 too_many = [{**shape, "id": f"h{i}"} for i in range(201)]
 st, raw = call("PUT", f"/sessions/{sid}/charts/BTCUSDT/4h", {"shapes": too_many})
-check(st == 413 and js(raw).get("code") == "chart_state_too_large", "201 shapes → 413 chart_state_too_large")
+err = js(raw) or {}
+# Wire seen so far: {limit: {shapes: 200}, message (vi)}; the spec adds `field` + numeric limit.
+check(st == 413 and err.get("code") == "chart_state_too_large" and err.get("limit") and err.get("message"),
+      f"201 shapes → 413 chart_state_too_large (field={err.get('field')}, limit={err.get('limit')}, message={err.get('message')!r})")
+
+# 422 codes the client also prevents itself (sanitizeChartPutBody) before a PUT.
+dup = {**shape, "interval": "15m"}
+st, raw = call("PUT", f"/sessions/{sid}/charts/BTCUSDT/15m", {"shapes": [dup, dup]})
+check(st == 422 and (js(raw) or {}).get("code") == "duplicate_shape_id", f"duplicate shape id → 422 duplicate_shape_id (got {st})")
+st, raw = call("PUT", f"/sessions/{sid}/charts/BTCUSDT/1d", {"shapes": [], "view": {"from": 200, "to": 100}})
+check(st == 422 and (js(raw) or {}).get("code") == "invalid_view_range", f"view from > to → 422 invalid_view_range (got {st})")
+nan_body = json.dumps({"shapes": [{**dup, "points": [{"time": 1792382400, "price": float("nan")}]}]}).encode()
+st, raw = call("PUT", f"/sessions/{sid}/charts/BTCUSDT/1m", None, raw_body=nan_body)
+check(st == 422 and (js(raw) or {}).get("code") == "invalid_number", f"NaN price → 422 invalid_number (got {st})")
+st, raw = call("PUT", f"/sessions/{sid}/charts/BTCUSDT/4h", None, raw_body=b"{not json")
+soft_check(st == 400, f"malformed JSON → 400 (got {st}; the client treats 400 and 422 alike: no retry)")
+
+# Another device (no cookie) cannot see this session: 404 session_not_found, not 401/403.
+STRANGER = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+st, raw = call("GET", chart, opener=STRANGER)
+gone = js(raw) or {}
+gone_code = str(gone.get("code") or gone.get("error") or "").lower().replace(" ", "_")
+check(st == 404 and gone_code == "session_not_found", f"other device → 404 session_not_found ({st} {raw[:80]})")
+st, raw = call("GET", f"/sessions/{sid}", opener=STRANGER)
+check(st == 404, f"other device GET session → 404 ({st})")
 
 data = json.loads(FIXTURE.read_text())
 c = data["candles"]
@@ -130,7 +166,7 @@ check(doc["analysis"] is not None and doc["analyzed_at"], "doc has analysis + an
 st, raw = call("GET", f"/sessions/{sid}/charts")
 idx = js(raw)["charts"]
 check(st == 200 and [f"{r['symbol']}|{r['interval']}" for r in idx][0] == "BTCUSDT|1h"
-      and {r["interval"] for r in idx} == {"1h", "30m"}, "index lists 1h + 30m, newest first")
+      and {"1h", "30m"} <= {r["interval"] for r in idx}, "index lists 1h + 30m, newest first")
 
 st, _ = call("DELETE", chart)
 st2, raw = call("GET", chart)

@@ -13,7 +13,10 @@ REPO_ROOT="$(cd "$WEB_DIR/../.." && pwd)"
 TMP_ANALYZE="$(mktemp)"
 TMP_BIAS="$(mktemp)"
 TMP_EMPTY="$(mktemp)"
-trap 'rm -f "$TMP_ANALYZE" "$TMP_BIAS" "$TMP_EMPTY"' EXIT
+COOKIE_JAR="$(mktemp)"
+trap 'rm -f "$TMP_ANALYZE" "$TMP_BIAS" "$TMP_EMPTY" "$COOKIE_JAR"' EXIT
+# Sessions belong to the device in the httpOnly csm_device cookie: one jar, like a browser.
+curl() { command curl -b "$COOKIE_JAR" -c "$COOKIE_JAR" "$@"; }
 
 pass() { echo "PASS: $1"; }
 fail() { echo "FAIL: $1"; exit 1; }

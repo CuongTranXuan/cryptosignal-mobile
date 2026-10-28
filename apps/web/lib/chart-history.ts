@@ -7,17 +7,17 @@
  * - User edits (shape-store user-edit listener) and view changes → debounced PUT with the base
  *   revision; 409 → merge (server AI shapes + local pins/user shapes) and retry once.
  * - 5xx / network → "chưa lưu" + background retry with backoff (2 s, 4 s … 60 s) until saved.
- *   401/403/413/422 → Vietnamese notice + "chưa lưu", no retry. Local edits always stay.
+ *   400/413/422 (and a stray 401/403) → Vietnamese notice + "chưa lưu", no retry.
+ *   404 session_not_found → the session is gone (or another device's): session store moves on.
+ *   Local edits always stay.
  * - Analyze saves server-side; the client only records `chart_state_revision` (no PUT back).
  */
 import { create } from "zustand";
 import { parseAnalysisSseEvent } from "./copilot-chart-ai";
-import { CopilotApiError } from "./copilot-api";
+import { CopilotApiError, isSessionGoneError } from "./copilot-api";
 import type { CopilotSessionV1 } from "./copilot-schema";
 import {
   CHART_HISTORY_CONFLICT,
-  CHART_HISTORY_FORBIDDEN,
-  CHART_HISTORY_INVALID,
   CHART_HISTORY_SAVE_FAILED,
   chartHistoryTooLarge,
   CHART_HISTORY_SERVER_SAVE_FAILED,
@@ -26,7 +26,9 @@ import {
 import {
   chartConflictCurrent,
   chartKey,
-  chartTooLargeLimit,
+  chartInvalidNotice,
+  chartTooLargeNotice,
+  sanitizeChartPutBody,
   isChartStateNotFound,
   type ChartIndexEntry,
   type ChartStateApi,
@@ -246,7 +248,7 @@ function putBody(snap: Snapshot, meta: ChartDocMeta | undefined, revision: numbe
   const view = snap.view ?? meta?.view ?? null;
   if (view) body.view = view;
   if (revision != null) body.revision = revision;
-  return body;
+  return sanitizeChartPutBody(body);
 }
 
 function setNotice(notice: string | null): void {
@@ -305,18 +307,27 @@ function markUnsaved(key: string, snap: Snapshot, retry: boolean): void {
   }, delay);
 }
 
-type SaveFailure = "retry" | "forbidden" | "too_large" | "invalid" | "session_gone" | "other";
+type SaveFailure = "retry" | "too_large" | "invalid" | "session_gone" | "no_route" | "other";
 
-/** 5xx / network → retry; auth, size and validation errors never fix themselves → no retry. */
+/**
+ * 5xx (incl. 503 db_unavailable) / network → retry. Size and validation errors (400 malformed
+ * JSON, 413, 422) never fix themselves → no retry. 401/403 are not used by the backend
+ * (ownership is a 404) and fall through to the generic no-retry notice.
+ */
 export function classifyChartSaveError(err: unknown): SaveFailure {
   if (!(err instanceof CopilotApiError)) return "retry"; // fetch rejected: offline / network
   const { status } = err;
   if (status >= 500 || status === 408 || status === 429) return "retry";
-  if (status === 401 || status === 403) return "forbidden";
   if (status === 413) return "too_large";
   if (status === 422 || status === 400) return "invalid";
-  if (status === 404 && !isChartStateNotFound(err)) return "session_gone";
+  if (isSessionGoneError(err)) return "session_gone";
+  if (status === 404 && !isChartStateNotFound(err)) return "no_route";
   return "other";
+}
+
+/** 404 session_not_found from a chart route: let the session store drop the session. */
+function sessionGone(key: string): void {
+  void useCopilotSessionStore.getState().handleSessionGone(parseKey(key).sessionId);
 }
 
 /** Shared failure path of a save attempt: notice (if any) and the "chưa lưu" state. */
@@ -325,17 +336,18 @@ function failSave(key: string, snap: Snapshot, err: unknown, otherNotice: string
     case "retry":
       markUnsaved(key, snap, true);
       return;
-    case "forbidden":
-      setNotice(CHART_HISTORY_FORBIDDEN);
-      break;
     case "too_large":
-      setNotice(chartHistoryTooLarge(chartTooLargeLimit(err) ?? ""));
+      setNotice(chartTooLargeNotice(err) ?? chartHistoryTooLarge(""));
       break;
     case "invalid":
-      setNotice(CHART_HISTORY_INVALID);
+      setNotice(chartInvalidNotice(err));
       break;
     case "session_gone":
-      return; // unknown session / no chart routes: nothing to save into
+      clearUnsaved(key);
+      sessionGone(key);
+      return;
+    case "no_route":
+      return; // older backend without chart routes: nothing to save into
     case "other":
       setNotice(otherNotice);
       break;
@@ -527,6 +539,11 @@ async function loadChart(key: string, legacy?: Legacy): Promise<void> {
     });
   } catch (err) {
     if (token !== loadToken) return;
+    if (isSessionGoneError(err)) {
+      useChartHistoryStore.setState({ loadingKey: null });
+      sessionGone(key);
+      return;
+    }
     const own = legacyForKey(legacy, symbol, interval);
     if (unsavedSnaps.has(key)) {
       // Not on the server yet (save failing): the local edits are the truth.
@@ -567,6 +584,10 @@ export async function refreshChartIndex(sessionId?: string): Promise<void> {
       useChartHistoryStore.setState({ index: charts });
     }
   } catch (err) {
+    if (isSessionGoneError(err)) {
+      void useCopilotSessionStore.getState().handleSessionGone(sid);
+      return;
+    }
     if (err instanceof CopilotApiError && err.status === 404 && err.code !== "chart_state_not_found") {
       if (useChartHistoryStore.getState().sessionId === sid) {
         useChartHistoryStore.setState({ index: [] });

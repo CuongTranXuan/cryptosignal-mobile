@@ -22,6 +22,8 @@ const FORWARD_REQUEST_HEADERS = [
   "if-none-match",
   "if-modified-since",
   "cache-control",
+  // Device identity: the backend's httpOnly `csm_device` cookie must reach it.
+  "cookie",
 ];
 
 export type CopilotProxyErrorBody = {
@@ -61,12 +63,22 @@ export function pickForwardRequestHeaders(incoming: Headers): Headers {
   return out;
 }
 
+/** Every upstream `Set-Cookie`, one entry per cookie (never comma-joined). */
+export function upstreamSetCookies(headers: Headers): string[] {
+  const getSetCookie = (headers as Headers & { getSetCookie?: () => string[] }).getSetCookie;
+  if (typeof getSetCookie === "function") return getSetCookie.call(headers);
+  const joined = headers.get("set-cookie");
+  return joined ? [joined] : [];
+}
+
 export function stripHopByHopResponseHeaders(headers: Headers): Headers {
   const out = new Headers();
   for (const [key, value] of headers.entries()) {
-    if (HOP_BY_HOP_REQUEST_HEADERS.has(key.toLowerCase())) continue;
+    const lower = key.toLowerCase();
+    if (HOP_BY_HOP_REQUEST_HEADERS.has(lower) || lower === "set-cookie") continue;
     out.set(key, value);
   }
+  for (const cookie of upstreamSetCookies(headers)) out.append("set-cookie", cookie);
   out.set("X-Accel-Buffering", "no");
   out.set("Cache-Control", "no-cache");
   return out;

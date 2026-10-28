@@ -6,8 +6,17 @@
  *          | 409 revision_conflict {current} | 413 chart_state_too_large {limit}
  *   DELETE same path
  */
+import {
+  CHART_HISTORY_DUPLICATE_ID,
+  CHART_HISTORY_INVALID,
+  CHART_HISTORY_INVALID_INTERVAL,
+  CHART_HISTORY_INVALID_NUMBER,
+  CHART_HISTORY_INVALID_VIEW,
+  CHART_HISTORY_REQUEST_TOO_LARGE,
+  chartHistoryTooLarge,
+} from "./copilot-strings";
 import { z } from "zod";
-import { copilotAuthHeaders } from "./copilot-auth";
+import { withCopilotCredentials } from "./copilot-fetch";
 import { CopilotApiError, resolveCopilotBaseUrl, type ApiErrorBody } from "./copilot-api";
 import { coerceAgentMarker, coerceAgentShape } from "./normalize-agent-shape";
 import {
@@ -64,9 +73,12 @@ export const ChartConflictBodySchema = z.object({
   current: ChartStateDocWireSchema,
 });
 
+/** 413 envelope: `chart_state_too_large` {limit, field, message (vi)} or `request_too_large`. */
 export const ChartTooLargeBodySchema = z.object({
-  code: z.literal("chart_state_too_large"),
+  code: z.enum(["chart_state_too_large", "request_too_large"]),
   limit: z.unknown().optional(),
+  field: z.string().nullable().optional(),
+  message: z.string().nullable().optional(),
 });
 
 export type ChartStatePutBody = {
@@ -132,6 +144,118 @@ export function chartConflictCurrent(err: unknown): ChartStateDoc | null {
   return parsed.success ? normalizeChartDoc(parsed.data.current) : null;
 }
 
+const TOO_LARGE_FIELD_VI: Record<string, string> = {
+  shapes: "số hình",
+  markers: "số điểm neo",
+  points: "số điểm mỗi hình",
+  analysis: "dữ liệu phân tích",
+  summary_text: "độ dài tóm tắt",
+  doc: "kích thước biểu đồ",
+  body: "kích thước yêu cầu",
+  body_bytes: "số byte của yêu cầu",
+};
+
+function hasVietnamese(text: string): boolean {
+  return /[à-ỹÀ-ỸđĐ]/u.test(text);
+}
+
+/**
+ * Vietnamese notice for a 413: the server's `message` when it is Vietnamese, else one built
+ * from `field` + `limit` (`request_too_large` is the ~1.5 MB raw body cap).
+ */
+export function chartTooLargeNotice(err: unknown): string | null {
+  if (!(err instanceof CopilotApiError) || err.status !== 413) return null;
+  const parsed = ChartTooLargeBodySchema.safeParse(err.body);
+  const message = parsed.success ? parsed.data.message?.trim() : "";
+  if (message && hasVietnamese(message)) return message;
+  if (parsed.success && parsed.data.code === "request_too_large") return CHART_HISTORY_REQUEST_TOO_LARGE;
+  const field = parsed.success ? parsed.data.field : null;
+  const limit = chartTooLargeLimit(err) ?? "";
+  if (field && limit && !/[a-z_]+\s/i.test(limit)) {
+    return chartHistoryTooLarge(`${TOO_LARGE_FIELD_VI[field] ?? field} ${limit}`);
+  }
+  return chartHistoryTooLarge(limit);
+}
+
+/** Vietnamese notice for a 422 on save (codes from the backend's validation). */
+export function chartInvalidNotice(err: unknown): string {
+  const code = err instanceof CopilotApiError ? err.code : null;
+  switch (code) {
+    case "invalid_number":
+      return CHART_HISTORY_INVALID_NUMBER;
+    case "invalid_view_range":
+      return CHART_HISTORY_INVALID_VIEW;
+    case "duplicate_shape_id":
+      return CHART_HISTORY_DUPLICATE_ID;
+    case "invalid_interval":
+      return CHART_HISTORY_INVALID_INTERVAL;
+    default: {
+      // Other codes (e.g. chart_key_mismatch): the server's Vietnamese message when it has one.
+      const message = err instanceof CopilotApiError ? err.body.message?.trim() : "";
+      return message && hasVietnamese(message)
+        ? `Máy chủ từ chối biểu đồ: ${message.replace(/[.。]+$/u, "")} — hình vẽ vẫn giữ trên thiết bị.`
+        : CHART_HISTORY_INVALID;
+    }
+  }
+}
+
+const finite = (n: unknown): n is number => typeof n === "number" && Number.isFinite(n);
+
+function finiteShape(shape: PatternShape): PatternShape | null {
+  if (!shape.points.every((p) => finite(p.time) && finite(p.price))) return null;
+  if ((shape.priceLow != null && !finite(shape.priceLow)) || (shape.priceHigh != null && !finite(shape.priceHigh))) {
+    return null;
+  }
+  const confidence = finite(shape.confidence) ? Math.min(1, Math.max(0, shape.confidence)) : 0;
+  return confidence === shape.confidence ? shape : { ...shape, confidence };
+}
+
+function finiteMarker(marker: AgentMarker): AgentMarker | null {
+  if (!finite(marker.time)) return null;
+  const confidence = finite(marker.confidence) ? Math.min(1, Math.max(0, marker.confidence)) : 0;
+  return confidence === marker.confidence ? marker : { ...marker, confidence };
+}
+
+/** Integer seconds with from <= to; null when either end is not a finite number. */
+export function sanitizeChartView(view: ChartView | null | undefined): ChartView | null {
+  if (!view || !finite(view.from) || !finite(view.to)) return null;
+  const a = Math.floor(Math.min(view.from, view.to));
+  const b = Math.ceil(Math.max(view.from, view.to));
+  return { from: a, to: b };
+}
+
+/**
+ * Head off the backend's 422s before a PUT: drop shapes/markers with NaN/±Inf numbers
+ * (clamp confidence), keep the first shape per id, and send a well-formed view.
+ */
+export function sanitizeChartPutBody(body: ChartStatePutBody): ChartStatePutBody {
+  const seen = new Set<string>();
+  const shapes: PatternShape[] = [];
+  for (const raw of body.shapes) {
+    if (seen.has(raw.id)) continue;
+    const shape = finiteShape(raw);
+    if (!shape) continue;
+    seen.add(shape.id);
+    shapes.push(shape);
+  }
+  const out: ChartStatePutBody = { ...body, shapes };
+  if (body.markers) {
+    const markerIds = new Set<string>();
+    out.markers = body.markers.flatMap((m) => {
+      const marker = finiteMarker(m);
+      if (!marker || markerIds.has(marker.id)) return [];
+      markerIds.add(marker.id);
+      return [marker];
+    });
+  }
+  if (body.view !== undefined) {
+    const view = sanitizeChartView(body.view);
+    if (view) out.view = view;
+    else delete out.view;
+  }
+  return out;
+}
+
 export function chartTooLargeLimit(err: unknown): string | null {
   if (!(err instanceof CopilotApiError) || err.status !== 413) return null;
   const parsed = ChartTooLargeBodySchema.safeParse(err.body);
@@ -182,19 +306,10 @@ export function shapeForChartState(shape: PatternShape): PatternShape {
 }
 
 export function createChartStateApi(
-  opts: {
-    fetchImpl?: typeof fetch;
-    baseUrl?: string;
-    forceMock?: boolean;
-    /** Extra headers per request (device token); defaults to `copilotAuthHeaders`. */
-    authHeaders?: () => Record<string, string>;
-  } = {},
+  opts: { fetchImpl?: typeof fetch; baseUrl?: string; forceMock?: boolean } = {},
 ): ChartStateApi {
   if (opts.forceMock) return createMockChartStateApi();
-  const rawFetch = opts.fetchImpl ?? fetch;
-  const authHeaders = opts.authHeaders ?? copilotAuthHeaders;
-  const fetchImpl = (url: string, init: RequestInit = {}) =>
-    rawFetch(url, { ...init, headers: { ...authHeaders(), ...(init.headers as Record<string, string>) } });
+  const fetchImpl = withCopilotCredentials(opts.fetchImpl ?? fetch);
   const baseUrl = resolveCopilotBaseUrl(opts.baseUrl);
   return {
     listCharts: async (sessionId) =>

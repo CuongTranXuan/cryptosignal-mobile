@@ -175,7 +175,10 @@ describe("model auto-switch and re-probe", () => {
     const err = await api.runModelProbe().catch((e: unknown) => e);
     expect(err).toBeInstanceOf(CopilotProbeRateLimitError);
     expect((err as CopilotProbeRateLimitError).retryAfterS).toBe(17);
-    expect(fetchImpl).toHaveBeenCalledWith("/v1/copilot/models/probe", { method: "POST" });
+    expect(fetchImpl).toHaveBeenCalledWith("/v1/copilot/models/probe", {
+      method: "POST",
+      credentials: "same-origin",
+    });
   });
 
   it("live client returns null when the probe is disabled (409 probe_disabled)", async () => {

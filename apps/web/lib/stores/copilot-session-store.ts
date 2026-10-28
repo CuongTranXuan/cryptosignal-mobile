@@ -30,10 +30,11 @@ import {
   COPILOT_CANDLE_CLAMPED_TO_MAX,
   COPILOT_SESSIONS_MIGRATION_PARTIAL,
   COPILOT_SESSIONS_OFFLINE,
+  COPILOT_SESSION_GONE,
   COPILOT_SESSIONS_SAVE_FAILED,
   copilotModelSwitchedNotice,
 } from "../copilot-strings";
-import { CopilotApiError } from "../copilot-api";
+import { CopilotApiError, isSessionGoneError } from "../copilot-api";
 import { mapCopilotHttpError } from "../copilot-errors";
 import { migrateLegacyChartIntentLocalStorage } from "../copilot-intent-migration";
 import type {
@@ -174,6 +175,11 @@ type CopilotSessionState = {
   switchSession: (id: string) => Promise<void>;
   renameSession: (id: string, title: string) => Promise<void>;
   deleteSession: (id: string) => Promise<void>;
+  /**
+   * The backend answered 404 session_not_found for `id` (deleted, or another device's):
+   * drop it from the list and, if it was active, select another session or start a new one.
+   */
+  handleSessionGone: (id: string) => Promise<void>;
   persistActiveSession: () => void;
   flushPersist: () => Promise<void>;
   recordAnalysisWindow: (from: number, to: number) => void;
@@ -245,6 +251,12 @@ function buildActiveSessionSnapshot(get: () => CopilotSessionState): CopilotSess
 }
 
 let persistTimer: ReturnType<typeof setTimeout> | null = null;
+/** Sessions already handled as gone (one notice, no loops while requests drain). */
+const goneSessionIds = new Set<string>();
+
+export function resetGoneSessionsForTests(): void {
+  goneSessionIds.clear();
+}
 let persistInFlight: Promise<void> | null = null;
 
 export const useCopilotSessionStore = create<CopilotSessionState>((set, get) => ({
@@ -341,8 +353,17 @@ export const useCopilotSessionStore = create<CopilotSessionState>((set, get) => 
         set({
           sessionCache: { ...get().sessionCache, [activeId]: activeSession },
         });
-      } catch {
-        listError = listError ?? COPILOT_SESSIONS_OFFLINE;
+      } catch (err) {
+        if (isSessionGoneError(err)) {
+          // Gone (or another device's): forget it and start a new session below.
+          goneSessionIds.add(activeId);
+          listRows = listRows.filter((s) => s.id !== activeId);
+          set({ sessions: listRows });
+          saveActiveSessionId(null);
+          listError = listError ?? COPILOT_SESSION_GONE;
+        } else {
+          listError = listError ?? COPILOT_SESSIONS_OFFLINE;
+        }
       }
     }
 
@@ -439,7 +460,11 @@ export const useCopilotSessionStore = create<CopilotSessionState>((set, get) => 
           sessionsDirty: false,
           sessionsError: null,
         });
-      } catch {
+      } catch (err) {
+        if (isSessionGoneError(err)) {
+          void get().handleSessionGone(snapshot.id);
+          return;
+        }
         if (previous) {
           set({ sessionCache: { ...get().sessionCache, [snapshot.id]: previous } });
         }
@@ -627,7 +652,11 @@ export const useCopilotSessionStore = create<CopilotSessionState>((set, get) => 
         const apiSession = await repairLegacyEncodedSessionTitle(api, await api.getSession(id));
         session = apiSessionToClient(apiSession);
         set({ sessionCache: { ...get().sessionCache, [id]: session } });
-      } catch {
+      } catch (err) {
+        if (isSessionGoneError(err)) {
+          await get().handleSessionGone(id);
+          return;
+        }
         set({ sessionsError: COPILOT_SESSIONS_OFFLINE });
         return;
       }
@@ -686,7 +715,11 @@ export const useCopilotSessionStore = create<CopilotSessionState>((set, get) => 
           s.id === id ? { ...summaryFromApiSession(updated), title: trimmed } : s,
         ),
       });
-    } catch {
+    } catch (err) {
+      if (isSessionGoneError(err)) {
+        await get().handleSessionGone(id);
+        return;
+      }
       if (previousTitle) {
         set({
           sessions: get().sessions.map((s) => (s.id === id ? { ...s, title: previousTitle } : s)),
@@ -740,7 +773,11 @@ export const useCopilotSessionStore = create<CopilotSessionState>((set, get) => 
     try {
       await api.deleteSession(id);
       set({ listFetchedAt: Date.now(), sessionsError: null });
-    } catch {
+    } catch (err) {
+      if (isSessionGoneError(err)) {
+        set({ listFetchedAt: Date.now(), sessionsError: null }); // already gone: deleted
+        return;
+      }
       set({
         sessions: previousSessions,
         sessionCache: previousCache,
@@ -752,6 +789,30 @@ export const useCopilotSessionStore = create<CopilotSessionState>((set, get) => 
       }
       saveActiveSessionId(previousActive);
     }
+  },
+
+  handleSessionGone: async (id) => {
+    if (goneSessionIds.has(id)) return;
+    goneSessionIds.add(id);
+    const wasActive = get().activeSessionId === id;
+    const remaining = get().sessions.filter((s) => s.id !== id);
+    const cache = { ...get().sessionCache };
+    delete cache[id];
+    set({ sessions: remaining, sessionCache: cache });
+    if (wasActive) {
+      // Nothing more to save for it: drop the pending PATCH, then move on.
+      if (persistTimer) {
+        clearTimeout(persistTimer);
+        persistTimer = null;
+      }
+      set({ activeSessionId: null });
+      saveActiveSessionId(null);
+      const next = remaining[0]?.id;
+      if (next) await get().switchSession(next);
+      if (!get().activeSessionId) await get().createSession();
+    }
+    // After the switch/create (their success clears sessionsError).
+    set({ sessionsError: COPILOT_SESSION_GONE });
   },
 
   recordAnalysisWindow: (from, to) => {
@@ -780,6 +841,10 @@ export const useCopilotSessionStore = create<CopilotSessionState>((set, get) => 
         sessionsError: null,
       });
     } catch (err) {
+      if (isSessionGoneError(err)) {
+        await get().handleSessionGone(id);
+        return;
+      }
       set({
         sessionCache: {
           ...get().sessionCache,

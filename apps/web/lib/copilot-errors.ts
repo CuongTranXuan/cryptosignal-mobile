@@ -9,6 +9,7 @@ import {
   COPILOT_ERROR_CREDITS_EXHAUSTED,
   COPILOT_ERROR_INVALID_MODEL,
   COPILOT_ERROR_INVALID_REASONING,
+  COPILOT_ERROR_REQUEST_TOO_LARGE,
   COPILOT_ERROR_UPSTREAM_UNREACHABLE,
   COPILOT_ERROR_RATE_LIMITED,
   COPILOT_ERROR_UNAUTHORIZED,
@@ -36,6 +37,8 @@ export function mapCopilotErrorCode(code: string, messageVi: string): string {
     case "invalid_intent_pattern":
     case "invalid_intent":
       return messageVi.trim() ? messageVi : COPILOT_ERROR;
+    case "request_too_large":
+      return /[à-ỹÀ-ỸđĐ]/u.test(messageVi) ? messageVi : COPILOT_ERROR_REQUEST_TOO_LARGE;
     case "upstream_unreachable":
       return messageVi.trim() ? messageVi : COPILOT_ERROR_UPSTREAM_UNREACHABLE;
     case "provider_error":

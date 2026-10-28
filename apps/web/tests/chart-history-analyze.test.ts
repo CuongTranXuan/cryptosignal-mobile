@@ -15,13 +15,13 @@ import {
   CHART_HISTORY_N25_KEPT_PREVIOUS,
   COPILOT_ERROR_INVALID_REASONING,
   CHART_HISTORY_SERVER_SAVE_FAILED,
-  CHART_HISTORY_SESSION_MISSING,
+  COPILOT_SESSION_GONE,
 } from "../lib/copilot-strings";
 import { resetShapeLabelsForTests, shapeDisplayName } from "../lib/shape-labels";
 import type { Candle, PatternShape } from "../lib/pattern-shape";
 import { useAiStore } from "../lib/stores/ai-store";
 import { useChartStore } from "../lib/stores/chart-store";
-import { useCopilotSessionStore } from "../lib/stores/copilot-session-store";
+import { resetGoneSessionsForTests, useCopilotSessionStore } from "../lib/stores/copilot-session-store";
 import { useMarkerStore } from "../lib/stores/marker-store";
 import { useShapeStore } from "../lib/stores/shape-store";
 import { createCopilotClient } from "../lib/use-copilot";
@@ -74,6 +74,7 @@ let inner: ChartStateApi;
 
 async function setup(): Promise<string> {
   localStorage.clear();
+  resetGoneSessionsForTests();
   resetCopilotApiMockSessionsForTests();
   resetChartHistoryForTests();
   const copilot = createCopilotApi({ forceMock: true });
@@ -151,10 +152,16 @@ describe("analyze with chart history", () => {
     expect(a!.name).toBe("Support trendline");
   });
 
-  it("chart_state_error session_not_found: Vietnamese notice and no client PUT", async () => {
+  it("chart_state_error session_not_found: session dropped with the Vietnamese notice, no client PUT", async () => {
+    const sid = useCopilotSessionStore.getState().activeSessionId;
     await analyze([shape("drw_a")], false, { meta: { chart_state_error: "session_not_found" } });
+    await new Promise((r) => setTimeout(r, 0));
+    await chartSavesSettled();
     expect(puts).toHaveLength(0);
-    expect(useChartHistoryStore.getState().notice).toBe(CHART_HISTORY_SESSION_MISSING);
+    const session = useCopilotSessionStore.getState();
+    expect(session.sessionsError).toBe(COPILOT_SESSION_GONE);
+    expect(session.activeSessionId).not.toBe(sid);
+    expect(session.sessions.map((s) => s.id)).not.toContain(sid);
   });
 
   it("chart_state_error chart_state_save_failed: Vietnamese notice and the client saves", async () => {
