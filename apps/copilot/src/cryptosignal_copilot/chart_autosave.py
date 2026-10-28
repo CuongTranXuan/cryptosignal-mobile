@@ -75,7 +75,12 @@ class AnalyzeRecorder:
         except SessionNotFoundError:
             return {**self._meta, "chart_state_error": "session_not_found"}
         except ChartStateTooLargeError as exc:
-            return {**self._meta, "chart_state_error": "chart_state_too_large", "limit": exc.limit}
+            return {
+                **self._meta,
+                "chart_state_error": "chart_state_too_large",
+                "field": exc.field,
+                "limit": exc.limit,
+            }
         except ChartKeyError as exc:
             return {**self._meta, "chart_state_error": exc.code}
         except Exception:

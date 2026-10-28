@@ -17,6 +17,7 @@ from pydantic import ValidationError
 from cryptosignal_copilot.agent import AgentRunner, PydanticAiRunner
 from cryptosignal_copilot.analyze_prep import AnalyzePrepError, prepare_analyze
 from cryptosignal_copilot.autoscan.scheduler import AutoScanScheduler, scheduler_from_env
+from cryptosignal_copilot.body_limit import BodyLimitMiddleware, max_body_bytes_from_env
 from cryptosignal_copilot.chart_autosave import AnalyzeRecorder
 from cryptosignal_copilot.chart_state import (
     ChartKeyError,
@@ -66,6 +67,7 @@ from cryptosignal_copilot.sessions_store import (
     get_sessions_store,
 )
 from cryptosignal_copilot.symbol_tick import get_tick_cache, prefetch_tick_size
+from cryptosignal_copilot.vi_text import chart_too_large_vi
 
 
 def sse(event: str, data: dict) -> str:
@@ -142,6 +144,8 @@ def create_app(
 
     app = FastAPI(lifespan=lifespan)
     app.state.autoscan = scheduler
+    # Innermost of the three, so its 413 still gets CORS headers and the device cookie.
+    app.add_middleware(BodyLimitMiddleware, max_bytes=max_body_bytes_from_env())
     cors_origins, cors_credentials = cors_settings()
     app.add_middleware(
         CORSMiddleware,
@@ -360,8 +364,8 @@ def create_app(
         )
 
     def _too_large(exc: ChartStateTooLargeError) -> JSONResponse:
-        body = error_payload("chart_state_too_large", "Lịch sử biểu đồ vượt giới hạn lưu")
-        return JSONResponse({**body, "limit": exc.limit}, status_code=413)
+        body = error_payload("chart_state_too_large", chart_too_large_vi(exc.field))
+        return JSONResponse({**body, "field": exc.field, "limit": exc.limit}, status_code=413)
 
     def _invalid(code: str, message: str, detail: object = None) -> JSONResponse:
         body: dict[str, object] = error_payload(code, message)
@@ -436,6 +440,7 @@ def create_app(
                 raw["shapes"],
                 markers if isinstance(markers, list) else None,
                 analysis if isinstance(analysis, dict) else None,
+                raw.get("summary_text"),
             )
         except ChartStateTooLargeError as exc:
             return _too_large(exc)

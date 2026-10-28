@@ -313,28 +313,30 @@ async def test_revision_on_a_missing_doc_is_404(chart_app):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("body", "limit"),
+    ("body", "field", "limit"),
     [
-        ({"shapes": [shape(f"s{i}") for i in range(MAX_SHAPES + 1)]}, {"shapes": MAX_SHAPES}),
+        ({"shapes": [shape(f"s{i}") for i in range(MAX_SHAPES + 1)]}, "shapes", MAX_SHAPES),
         (
             {"shapes": [], "markers": [anchor(f"d{i}") for i in range(MAX_MARKERS + 1)]},
-            {"markers": MAX_MARKERS},
+            "markers",
+            MAX_MARKERS,
         ),
         (
             {"shapes": [], "analysis": {"blob": "x" * MAX_ANALYSIS_BYTES}},
-            {"analysis_bytes": MAX_ANALYSIS_BYTES},
+            "analysis_bytes",
+            MAX_ANALYSIS_BYTES,
         ),
     ],
     ids=["shapes", "markers", "analysis"],
 )
-async def test_too_large_is_413(chart_app, body, limit):
+async def test_too_large_is_413(chart_app, body, field, limit):
     async with _client(chart_app()) as client:
         sid = await _session(client)
         res = await client.put(_url(sid), json=body)
         missing = await client.get(_url(sid))
     assert res.status_code == 413
     assert res.json()["code"] == "chart_state_too_large"
-    assert res.json()["limit"] == limit
+    assert (res.json()["field"], res.json()["limit"]) == (field, limit)
     assert missing.status_code == 404  # nothing written
 
 

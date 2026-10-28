@@ -334,3 +334,22 @@ def localize_guardrail(guard: dict[str, Any], symbol: str) -> dict[str, Any]:
     if isinstance(inv, dict):
         out["invalidation"] = localize_invalidation(inv, symbol)
     return out
+
+
+# --------------------------------------------------------------------------- API errors
+
+ERR_REQUEST_TOO_LARGE = "Yêu cầu quá lớn"
+_TOO_LARGE_VI = {
+    "shapes": "Biểu đồ có quá nhiều hình vẽ",
+    "markers": "Biểu đồ có quá nhiều điểm đánh dấu",
+    "points": "Một hình vẽ có quá nhiều điểm",
+    "string_bytes": "Nhãn hoặc nội dung quá dài",
+    "summary_text_bytes": "Tóm tắt phân tích quá dài",
+    "analysis_bytes": "Dữ liệu phân tích quá lớn",
+    "doc_bytes": "Lịch sử biểu đồ vượt giới hạn lưu",
+    "charts": "Phiên này đã lưu đủ số biểu đồ cho phép",
+}
+
+
+def chart_too_large_vi(field: str) -> str:
+    return _TOO_LARGE_VI.get(field, _TOO_LARGE_VI["doc_bytes"])

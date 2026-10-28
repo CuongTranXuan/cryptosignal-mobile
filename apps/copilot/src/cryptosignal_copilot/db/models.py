@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -57,3 +57,6 @@ class ChartStateRow(Base):
     doc: Mapped[str] = mapped_column(Text, nullable=False)
     updated_at: Mapped[float] = mapped_column(Float, nullable=False)
     analyzed_at: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Index metadata, so `GET …/charts` never parses the docs.
+    shape_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    has_analysis: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

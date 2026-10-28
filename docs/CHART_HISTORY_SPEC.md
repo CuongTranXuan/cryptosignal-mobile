@@ -100,10 +100,29 @@ ignored (the path is the key; the server owns the timestamps).
 | doc exists, `revision` == stored | save, `revision + 1` |
 | doc exists, `revision` ≠ stored | `409 {code: "revision_conflict", message, current: <doc>}` |
 | doc exists, no `revision` | `409 {code: "revision_conflict", message, current: <doc>}` (create-only) |
-| over a limit | `413 {code: "chart_state_too_large", message, limit: {shapes: 200} \| {markers: 300} \| {analysis_bytes: 65536}}` |
+| over a limit | `413 {code: "chart_state_too_large", message, field, limit}` (see Limits) |
 | bad body / a shape or marker for another symbol/interval | `422 {code: "invalid_chart_state" \| "chart_key_mismatch", message, detail}` |
 
 Limits are checked before per-item validation, so an oversized body is 413, not 422.
+
+### Limits
+
+Every 413 uses the error envelope plus `field` (which cap) and `limit` (a number), with a
+Vietnamese `message`:
+
+| code | `field` | `limit` |
+|---|---|---|
+| `request_too_large` | `body_bytes` | raw request body, any `/v1/copilot` POST/PUT/PATCH: `COPILOT_MAX_BODY_BYTES`, default 1572864 (1.5 MiB) |
+| `chart_state_too_large` | `shapes` | 200 shapes |
+| | `markers` | 300 markers |
+| | `points` | 500 points in one shape |
+| | `string_bytes` | 2048 UTF-8 bytes for any string inside a shape or marker (names, labels, text) |
+| | `summary_text_bytes` | 16384 UTF-8 bytes |
+| | `analysis_bytes` | 65536 (compact JSON) |
+| | `doc_bytes` | 1048576, the stored doc |
+| | `charts` | 50 saved charts per session (a new `(symbol, interval)` beyond it; updates are fine) |
+
+Example bodies: `apps/copilot/tests/fixtures/wire/api_errors.json`.
 Writes are optimistic: `UPDATE … WHERE revision = base`, so two writers never both win.
 
 ### Session delete
@@ -131,7 +150,8 @@ Stream changes (additive):
   event adds `labels: {<id>: <Vietnamese name>}`.
 - A final `meta` event right before `done` carries `chart_state_revision` (the saved
   revision). If the save fails, that `meta` carries `chart_state_error` instead
-  (`session_not_found`, `chart_state_too_large` + `limit`, `chart_state_save_failed`).
+  (`session_not_found`, `chart_state_too_large` + `field` + `limit`,
+  `chart_state_save_failed`).
 - A run that ends with an `error` event saves nothing.
 
 Without `session_id`, nothing is saved and no `chart_state_revision` is sent.
@@ -143,7 +163,8 @@ interval, revision INT, doc TEXT (JSON), updated_at FLOAT, analyzed_at FLOAT NUL
 UNIQUE(session_id, symbol, interval))`, index on `session_id`. Same database as the
 sessions (SQLite locally, Postgres or Turso/libSQL in deploy), via SQLAlchemy + alembic.
 `doc` holds `shapes`, `markers`, `analysis`, `summary_text`, `model`, `view`; the other
-doc fields are columns.
+doc fields are columns. `shape_count` and `has_analysis` columns (alembic `20261028_0005`)
+serve the index, which never parses the docs.
 
 ## Fixtures and tests
 

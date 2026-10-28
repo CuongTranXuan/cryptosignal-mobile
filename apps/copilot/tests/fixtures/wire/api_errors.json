@@ -1,0 +1,20 @@
+{
+  "chart_state_too_large": {
+    "status": 413,
+    "body": {
+      "code": "chart_state_too_large",
+      "message": "Biểu đồ có quá nhiều hình vẽ",
+      "field": "shapes",
+      "limit": 200
+    }
+  },
+  "request_too_large": {
+    "status": 413,
+    "body": {
+      "code": "request_too_large",
+      "message": "Yêu cầu quá lớn",
+      "field": "body_bytes",
+      "limit": 100000
+    }
+  }
+}

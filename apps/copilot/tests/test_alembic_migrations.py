@@ -39,6 +39,8 @@ def test_alembic_head_creates_chart_states_and_downgrades(tmp_path):
         "doc",
         "updated_at",
         "analyzed_at",
+        "shape_count",
+        "has_analysis",
     }
     uniques = [u["column_names"] for u in inspector.get_unique_constraints("chart_states")]
     assert ["session_id", "symbol", "interval"] in uniques
@@ -65,3 +67,36 @@ def test_alembic_0004_adds_session_owner_and_downgrades(tmp_path):
     cols = {c["name"] for c in inspect(create_engine(url)).get_columns("copilot_sessions")}
     assert "owner_id" not in cols
     command.upgrade(ini, "head")
+
+
+def test_alembic_0005_backfills_chart_index_columns(tmp_path):
+    import json
+
+    from sqlalchemy import text
+
+    url = sqlite_url_for_path(tmp_path / "index.sqlite3")
+    ini = alembic_config(url)
+    command.upgrade(ini, "20261028_0004")
+    engine = create_engine(url)
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO copilot_sessions (id, title, created_at, updated_at, payload)"
+                " VALUES ('s', 't', 0, 0, '{}')"
+            )
+        )
+        doc = json.dumps({"shapes": [{}, {}, {}], "analysis": {"bias": "x"}})
+        conn.execute(
+            text(
+                "INSERT INTO chart_states (session_id, symbol, interval, revision, doc,"
+                " updated_at) VALUES ('s', 'BTCUSDT', '4h', 1, :doc, 0)"
+            ),
+            {"doc": doc},
+        )
+    command.upgrade(ini, "head")
+    with engine.connect() as conn:
+        row = conn.execute(text("SELECT shape_count, has_analysis FROM chart_states")).one()
+    assert (row[0], bool(row[1])) == (3, True)
+    command.downgrade(ini, "20261028_0004")
+    cols = {c["name"] for c in inspect(create_engine(url)).get_columns("chart_states")}
+    assert "shape_count" not in cols

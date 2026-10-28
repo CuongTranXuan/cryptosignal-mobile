@@ -80,6 +80,7 @@ Copilot normalizes `/models` ids (`models/gemini-2.5-flash` → `gemini-2.5-flas
 | `COPILOT_DEVICE_SECRET` | **prod** | dev: generated in `$TMPDIR` | HMAC key (≥ 32 chars, e.g. `openssl rand -base64 48`) for the `csm_device` ownership cookie. Missing in production = startup error. Rotating it gives every browser a new device (old sessions become unreachable) |
 | `COPILOT_DEVICE_COOKIE_OPTIONAL` | no | off | Dev only (refused in production): requests without the cookie are served unscoped (every session), for a web proxy that does not forward `Cookie` yet |
 | `COPILOT_DEVICE_COOKIE_SECURE` | no | on in production | Adds `Secure` to the cookie |
+| `COPILOT_MAX_BODY_BYTES` | no | `1572864` | Raw body cap for `/v1/copilot` POST/PUT/PATCH (413 `request_too_large`); keep nginx `client_max_body_size` at or above it (e.g. `2m`) |
 | `AUTOSCAN_ENABLED` | no | `false` | Start the in-process auto-analysis scheduler in the FastAPI lifespan (lifecycle only so far; the tick does nothing) |
 | `AUTOSCAN_EVERY` | no | `1h` | Scheduler period: `1h` or `2h` |
 | `PORT` | no | `8000` | Uvicorn bind (Docker / Cloud Run) |

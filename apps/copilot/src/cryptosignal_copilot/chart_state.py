@@ -22,7 +22,7 @@ from pydantic import (
     ValidationError,
     model_validator,
 )
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -36,6 +36,11 @@ logger = logging.getLogger(__name__)
 MAX_SHAPES = 200
 MAX_MARKERS = 300
 MAX_ANALYSIS_BYTES = 64 * 1024
+MAX_POINTS_PER_SHAPE = 500
+MAX_STRING_BYTES = 2 * 1024  # any string inside a shape or marker (names, labels, text)
+MAX_SUMMARY_TEXT_BYTES = 16 * 1024
+MAX_DOC_BYTES = 1024 * 1024  # the stored JSON doc
+MAX_CHARTS_PER_SESSION = 50
 _SYMBOL_RE = re.compile(r"[A-Z0-9][A-Z0-9._-]{0,39}")
 # PUT fields that keep the stored value when omitted (`shapes` is always required).
 _OPTIONAL_DOC_FIELDS = ("markers", "analysis", "summary_text", "model", "analyzed_at", "view")
@@ -112,7 +117,10 @@ class RevisionConflictError(Exception):
 
 @dataclass
 class ChartStateTooLargeError(Exception):
-    limit: dict[str, int]
+    """413 `chart_state_too_large`: `field` names the cap, `limit` its value."""
+
+    field: str
+    limit: int
 
 
 class ChartKeyError(ValueError):
@@ -131,14 +139,36 @@ def normalize_key(symbol: str, interval: str) -> tuple[str, str]:
 
 
 def check_limits(
-    shapes: list[Any], markers: list[Any] | None, analysis: dict[str, Any] | None
+    shapes: list[Any],
+    markers: list[Any] | None,
+    analysis: dict[str, Any] | None,
+    summary_text: Any = None,
 ) -> None:
+    """Size caps on raw (unvalidated) doc parts; ChartStateTooLargeError on the first hit."""
     if len(shapes) > MAX_SHAPES:
-        raise ChartStateTooLargeError({"shapes": MAX_SHAPES})
+        raise ChartStateTooLargeError("shapes", MAX_SHAPES)
     if markers is not None and len(markers) > MAX_MARKERS:
-        raise ChartStateTooLargeError({"markers": MAX_MARKERS})
+        raise ChartStateTooLargeError("markers", MAX_MARKERS)
+    for item in shapes:
+        points = item.get("points") if isinstance(item, dict) else None
+        if isinstance(points, list) and len(points) > MAX_POINTS_PER_SHAPE:
+            raise ChartStateTooLargeError("points", MAX_POINTS_PER_SHAPE)
+    if _max_string_bytes([shapes, markers]) > MAX_STRING_BYTES:
+        raise ChartStateTooLargeError("string_bytes", MAX_STRING_BYTES)
     if analysis is not None and _json_bytes(analysis) > MAX_ANALYSIS_BYTES:
-        raise ChartStateTooLargeError({"analysis_bytes": MAX_ANALYSIS_BYTES})
+        raise ChartStateTooLargeError("analysis_bytes", MAX_ANALYSIS_BYTES)
+    if isinstance(summary_text, str) and len(summary_text.encode()) > MAX_SUMMARY_TEXT_BYTES:
+        raise ChartStateTooLargeError("summary_text_bytes", MAX_SUMMARY_TEXT_BYTES)
+
+
+def _max_string_bytes(value: Any) -> int:
+    if isinstance(value, str):
+        return len(value.encode())
+    if isinstance(value, dict):
+        value = list(value.values())
+    if isinstance(value, list):
+        return max((_max_string_bytes(v) for v in value), default=0)
+    return 0
 
 
 def _json_bytes(value: Any) -> int:
@@ -199,17 +229,27 @@ def _doc(row: ChartStateRow, body: dict[str, Any] | None = None) -> dict[str, An
     }
 
 
-def _index_entry(row: ChartStateRow) -> dict[str, Any]:
-    body = json.loads(row.doc)
-    return {
-        "symbol": row.symbol,
-        "interval": row.interval,
-        "updated_at": row.updated_at,
-        "revision": row.revision,
-        "analyzed_at": row.analyzed_at,
-        "shape_count": len(body.get("shapes") or []),
-        "has_analysis": body.get("analysis") is not None,
+_INDEX_COLUMNS = (
+    ChartStateRow.symbol,
+    ChartStateRow.interval,
+    ChartStateRow.updated_at,
+    ChartStateRow.revision,
+    ChartStateRow.analyzed_at,
+    ChartStateRow.shape_count,
+    ChartStateRow.has_analysis,
+)
+
+
+def _serialize(doc_body: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    """The stored JSON and its metadata columns; the doc-size cap applies here."""
+    raw = json.dumps(doc_body, ensure_ascii=False)
+    if len(raw.encode()) > MAX_DOC_BYTES:
+        raise ChartStateTooLargeError("doc_bytes", MAX_DOC_BYTES)
+    meta = {
+        "shape_count": len(doc_body.get("shapes") or []),
+        "has_analysis": doc_body.get("analysis") is not None,
     }
+    return raw, meta
 
 
 class ChartStateStore:
@@ -240,11 +280,11 @@ class ChartStateStore:
         with self._lock, self._session_factory() as session:
             self._require_session(session, session_id, owner)
             rows = session.execute(
-                select(ChartStateRow)
+                select(*_INDEX_COLUMNS)
                 .where(ChartStateRow.session_id == session_id)
                 .order_by(ChartStateRow.updated_at.desc(), ChartStateRow.id.desc())
-            ).scalars()
-            return [_index_entry(row) for row in rows]
+            )
+            return [{**row._asdict(), "has_analysis": bool(row.has_analysis)} for row in rows]
 
     def get_chart(
         self, session_id: str, symbol: str, interval: str, *, owner: str | None = None
@@ -327,7 +367,7 @@ class ChartStateStore:
                 merged_shapes, merged_markers = merge_analysis_shapes(
                     current.get("shapes") or [], current.get("markers") or [], shapes, markers
                 )
-                check_limits(merged_shapes, merged_markers, analysis)
+                check_limits(merged_shapes, merged_markers, analysis, summary_text)
                 doc_body = {
                     **current,
                     "shapes": merged_shapes,
@@ -355,14 +395,23 @@ class ChartStateStore:
         doc_body: dict[str, Any],
         analyzed_at: float | None,
     ) -> dict[str, Any]:
+        raw, meta = _serialize(doc_body)
+        charts = session.scalar(
+            select(func.count())
+            .select_from(ChartStateRow)
+            .where(ChartStateRow.session_id == session_id)
+        )
+        if (charts or 0) >= MAX_CHARTS_PER_SESSION:
+            raise ChartStateTooLargeError("charts", MAX_CHARTS_PER_SESSION)
         row = ChartStateRow(
             session_id=session_id,
             symbol=symbol,
             interval=interval,
             revision=1,
-            doc=json.dumps(doc_body, ensure_ascii=False),
+            doc=raw,
             updated_at=self._now(),
             analyzed_at=analyzed_at,
+            **meta,
         )
         session.add(row)
         try:
@@ -382,6 +431,7 @@ class ChartStateStore:
         doc_body: dict[str, Any],
         analyzed_at: float | None,
     ) -> dict[str, Any]:
+        raw, meta = _serialize(doc_body)
         base = row.revision
         now = self._now()
         result = session.execute(
@@ -389,9 +439,10 @@ class ChartStateStore:
             .where(ChartStateRow.id == row.id, ChartStateRow.revision == base)
             .values(
                 revision=base + 1,
-                doc=json.dumps(doc_body, ensure_ascii=False),
+                doc=raw,
                 updated_at=now,
                 analyzed_at=analyzed_at,
+                **meta,
             )
             .execution_options(synchronize_session=False)
         )
