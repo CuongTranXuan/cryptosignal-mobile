@@ -15,6 +15,7 @@ from pydantic import ValidationError
 
 from cryptosignal_copilot.agent import AgentRunner, PydanticAiRunner
 from cryptosignal_copilot.analyze_prep import AnalyzePrepError, prepare_analyze
+from cryptosignal_copilot.autoscan.scheduler import AutoScanScheduler, scheduler_from_env
 from cryptosignal_copilot.chart_autosave import AnalyzeRecorder
 from cryptosignal_copilot.chart_state import (
     ChartKeyError,
@@ -84,10 +85,12 @@ def create_app(
     feedback_store: FeedbackStore | None = None,
     model_probe: ModelProbeService | None = None,
     chart_store: ChartStateStore | None = None,
+    autoscan: AutoScanScheduler | None = None,
 ) -> FastAPI:
     use_runner: AgentRunner = runner if runner is not None else PydanticAiRunner()
     catalog = models_catalog if models_catalog is not None else get_models_catalog()
     probe = model_probe if model_probe is not None else ModelProbeService(catalog)
+    scheduler = autoscan if autoscan is not None else scheduler_from_env()
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -100,9 +103,14 @@ def create_app(
             cfg = None
         if cfg is not None and cfg.style == "openai" and probe.settings.enabled:
             probe.start_background(cfg)
-        yield
+        scheduler.start()
+        try:
+            yield
+        finally:
+            await scheduler.stop()
 
     app = FastAPI(lifespan=lifespan)
+    app.state.autoscan = scheduler
     cors_origins, cors_credentials = _cors_settings()
     app.add_middleware(
         CORSMiddleware,
