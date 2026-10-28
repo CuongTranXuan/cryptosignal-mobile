@@ -339,6 +339,9 @@ def localize_guardrail(guard: dict[str, Any], symbol: str) -> dict[str, Any]:
 # --------------------------------------------------------------------------- API errors
 
 ERR_REQUEST_TOO_LARGE = "Yêu cầu quá lớn"
+ERR_INVALID_NUMBER = "Giá trị số không hợp lệ (NaN hoặc vô cực)"
+ERR_INVALID_VIEW_RANGE = "Khoảng hiển thị không hợp lệ: from phải nhỏ hơn hoặc bằng to"
+ERR_DUPLICATE_SHAPE_ID = "Có hình vẽ bị trùng mã"
 ERR_DB_UNAVAILABLE = "Cơ sở dữ liệu tạm thời không khả dụng, vui lòng thử lại sau"
 _TOO_LARGE_VI = {
     "shapes": "Biểu đồ có quá nhiều hình vẽ",

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 import threading
 import time
@@ -97,6 +98,36 @@ class ChartStatePut(BaseModel):
     interval: str | None = None
     updated_at: float | None = None
     chart_state_revision: int | None = None
+
+
+class NonFiniteNumberError(ValueError):
+    pass
+
+
+def _reject_constant(token: str) -> float:
+    raise NonFiniteNumberError(token)
+
+
+def _finite_float(token: str) -> float:
+    value = float(token)
+    if not math.isfinite(value):
+        raise NonFiniteNumberError(token)
+    return value
+
+
+def loads_finite(raw: bytes) -> Any:
+    """`json.loads` that refuses NaN/Infinity literals and overflowing floats (1e999)."""
+    return json.loads(raw, parse_constant=_reject_constant, parse_float=_finite_float)
+
+
+def duplicate_ids(ids: list[str]) -> list[str]:
+    seen: set[str] = set()
+    dupes: list[str] = []
+    for item_id in ids:
+        if item_id in seen and item_id not in dupes:
+            dupes.append(item_id)
+        seen.add(item_id)
+    return dupes
 
 
 def is_pinned(shape: dict[str, Any]) -> bool:
@@ -242,7 +273,7 @@ _INDEX_COLUMNS = (
 
 def _serialize(doc_body: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     """The stored JSON and its metadata columns; the doc-size cap applies here."""
-    raw = json.dumps(doc_body, ensure_ascii=False)
+    raw = json.dumps(doc_body, ensure_ascii=False, allow_nan=False)  # never store NaN
     if len(raw.encode()) > MAX_DOC_BYTES:
         raise ChartStateTooLargeError("doc_bytes", MAX_DOC_BYTES)
     meta = {

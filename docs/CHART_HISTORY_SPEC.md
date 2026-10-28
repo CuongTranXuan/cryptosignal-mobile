@@ -102,8 +102,16 @@ ignored (the path is the key; the server owns the timestamps).
 | doc exists, no `revision` | `409 {code: "revision_conflict", message, current: <doc>}` (create-only) |
 | over a limit | `413 {code: "chart_state_too_large", message, field, limit}` (see Limits) |
 | bad body / a shape or marker for another symbol/interval | `422 {code: "invalid_chart_state" \| "chart_key_mismatch", message, detail}` |
+| a `NaN`/`Infinity` literal or an overflowing number (`1e999`) anywhere | `422 {code: "invalid_number", message, detail: <token>}` |
+| `view.from > view.to` (equal is fine) | `422 {code: "invalid_view_range", message, detail: {from, to}}` |
+| two shapes with the same `id` | `422 {code: "duplicate_shape_id", message, detail: {ids}}` |
 
 Limits are checked before per-item validation, so an oversized body is 413, not 422.
+All 422 `message`s are Vietnamese. A chart PUT never answers 400; a body that is not JSON
+at all is `422 invalid_chart_state` (unchanged). Order: `invalid_interval`/`invalid_symbol`
+(path), `invalid_number`/not JSON, 413 caps, `invalid_chart_state` (schema),
+`invalid_view_range`, `duplicate_shape_id`, `chart_key_mismatch`. Stored docs never
+contain NaN.
 
 ### Limits
 
@@ -122,7 +130,7 @@ Vietnamese `message`:
 | | `doc_bytes` | 1048576, the stored doc |
 | | `charts` | 50 saved charts per session (a new `(symbol, interval)` beyond it; updates are fine) |
 
-Example bodies: `apps/copilot/tests/fixtures/wire/api_errors.json`.
+Example bodies (413, 422 and 503): `apps/copilot/tests/fixtures/wire/api_errors.json`.
 
 ### Database unavailable
 
@@ -182,5 +190,10 @@ serve the index, which never parses the docs.
   of user, kept, edited and plain AI shapes.
 - `apps/copilot/tests/fixtures/wire/chart_index.json`: `GET …/charts`.
 - `apps/copilot/tests/fixtures/wire/chart_conflict_409.json`: PUT with a stale revision.
+- `apps/copilot/tests/fixtures/wire/api_errors.json`: one body per new error code
+  (`request_too_large`, `chart_state_too_large`, `db_unavailable`, `invalid_number`,
+  `invalid_view_range`, `duplicate_shape_id`, `invalid_interval`), asserted against live
+  responses in `test_size_caps.py`, `test_db_unavailable.py`, `test_chart_validation.py`.
+- `tests/test_device_ownership.py`: cookie, per-device scoping, adoption, eviction.
 - `tests/test_chart_state.py` (CRUD, 404/409/413/422, cascade, merge) and
   `tests/test_chart_autosave.py` (analyze save, fixtures, web Zod via `chart-state.ts`).

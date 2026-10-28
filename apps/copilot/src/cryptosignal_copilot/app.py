@@ -26,8 +26,11 @@ from cryptosignal_copilot.chart_state import (
     ChartStatePut,
     ChartStateStore,
     ChartStateTooLargeError,
+    NonFiniteNumberError,
     RevisionConflictError,
     check_limits,
+    duplicate_ids,
+    loads_finite,
     normalize_key,
     validation_detail,
 )
@@ -69,7 +72,13 @@ from cryptosignal_copilot.sessions_store import (
     get_sessions_store,
 )
 from cryptosignal_copilot.symbol_tick import get_tick_cache, prefetch_tick_size
-from cryptosignal_copilot.vi_text import ERR_DB_UNAVAILABLE, chart_too_large_vi
+from cryptosignal_copilot.vi_text import (
+    ERR_DB_UNAVAILABLE,
+    ERR_DUPLICATE_SHAPE_ID,
+    ERR_INVALID_NUMBER,
+    ERR_INVALID_VIEW_RANGE,
+    chart_too_large_vi,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -446,7 +455,9 @@ def create_app(
         except ChartKeyError as exc:
             return _invalid(exc.code, "Mã hoặc khung thời gian không hợp lệ", str(exc))
         try:
-            raw = await request.json()
+            raw = loads_finite(await request.body())
+        except NonFiniteNumberError as exc:
+            return _invalid("invalid_number", ERR_INVALID_NUMBER, str(exc))
         except ValueError:
             return _invalid(
                 "invalid_chart_state", "Dữ liệu biểu đồ không hợp lệ", "body is not JSON"
@@ -473,6 +484,11 @@ def create_app(
             return _invalid(
                 "invalid_chart_state", "Dữ liệu biểu đồ không hợp lệ", validation_detail(exc)
             )
+        if body.view is not None and body.view.from_ > body.view.to:
+            return _invalid("invalid_view_range", ERR_INVALID_VIEW_RANGE, body.view.to_wire())
+        dupes = duplicate_ids([s.id for s in body.shapes])
+        if dupes:
+            return _invalid("duplicate_shape_id", ERR_DUPLICATE_SHAPE_ID, {"ids": dupes[:20]})
         keyed = [(s.id, s.symbol, s.interval) for s in body.shapes]
         keyed += [(m.id, m.symbol, m.interval) for m in body.markers or []]
         stray = [item_id for item_id, s, i in keyed if s.upper() != sym or i != ivl]
