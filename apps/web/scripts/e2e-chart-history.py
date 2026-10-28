@@ -44,10 +44,6 @@ def js(raw):
     return json.loads(raw) if raw else None
 
 
-def soft_check(cond, label):
-    log(f"PASS: {label}" if cond else f"PENDING: {label}")
-
-
 def check(cond, label):
     if not cond:
         log(f"FAIL: {label}")
@@ -111,24 +107,45 @@ check(st == 422, f"interval outside enum → 422 ({st})")
 st, raw = call("PUT", f"/sessions/{sid}/charts/BTCUSDT/30m", {"shapes": [{**shape, "interval": "30m"}]})
 check(st == 200 and js(raw)["interval"] == "30m", "30m chart saves")
 
-too_many = [{**shape, "id": f"h{i}"} for i in range(201)]
-st, raw = call("PUT", f"/sessions/{sid}/charts/BTCUSDT/4h", {"shapes": too_many})
-err = js(raw) or {}
-# Wire seen so far: {limit: {shapes: 200}, message (vi)}; the spec adds `field` + numeric limit.
-check(st == 413 and err.get("code") == "chart_state_too_large" and err.get("limit") and err.get("message"),
-      f"201 shapes → 413 chart_state_too_large (field={err.get('field')}, limit={err.get('limit')}, message={err.get('message')!r})")
+def cap_check(path, body, field, limit, code="chart_state_too_large", raw_body=None):
+    st, raw = call("PUT", path, body, raw_body=raw_body)
+    err = js(raw) or {}
+    check(st == 413 and err.get("code") == code and err.get("field") == field
+          and err.get("limit") == limit and isinstance(err.get("limit"), int) and err.get("message"),
+          f"413 {code} field={field} limit={limit} ({st} {raw[:100]})")
+
+
+# 413 envelope {code, message (vi), field, limit: number} (fixtures/wire/api_errors.json).
+cap4h = f"/sessions/{sid}/charts/BTCUSDT/4h"
+s4 = {**shape, "interval": "4h"}
+cap_check(cap4h, {"shapes": [{**s4, "id": f"h{i}"} for i in range(201)]}, "shapes", 200)
+marker = {"id": "m0", "symbol": "BTCUSDT", "interval": "4h", "time": 1792382400, "side": "neutral",
+          "position": "inBar", "shape": "circle", "confidence": 0.5, "source": "agent"}
+cap_check(cap4h, {"shapes": [], "markers": [{**marker, "id": f"m{i}"} for i in range(301)]}, "markers", 300)
+many_points = [{"time": 1792382400 + i * 3600, "price": 83000.0} for i in range(501)]
+cap_check(cap4h, {"shapes": [{**s4, "kind": "polyline", "points": many_points}]}, "points", 500)
+cap_check(cap4h, {"shapes": [{**s4, "name": "x" * 2049}]}, "string_bytes", 2048)
+cap_check(cap4h, {"shapes": [], "summary_text": "x" * 16385}, "summary_text_bytes", 16384)
+big = json.dumps({"shapes": [], "summary_text": "x" * 1_600_000}).encode()
+cap_check(cap4h, None, "body_bytes", 1572864, code="request_too_large", raw_body=big)
 
 # 422 codes the client also prevents itself (sanitizeChartPutBody) before a PUT.
 dup = {**shape, "interval": "15m"}
 st, raw = call("PUT", f"/sessions/{sid}/charts/BTCUSDT/15m", {"shapes": [dup, dup]})
-check(st == 422 and (js(raw) or {}).get("code") == "duplicate_shape_id", f"duplicate shape id → 422 duplicate_shape_id (got {st})")
+err = js(raw) or {}
+check(st == 422 and err.get("code") == "duplicate_shape_id" and err.get("detail") == {"ids": [dup["id"]]},
+      f"duplicate shape id → 422 duplicate_shape_id detail {{ids}} ({st} {raw[:100]})")
 st, raw = call("PUT", f"/sessions/{sid}/charts/BTCUSDT/1d", {"shapes": [], "view": {"from": 200, "to": 100}})
-check(st == 422 and (js(raw) or {}).get("code") == "invalid_view_range", f"view from > to → 422 invalid_view_range (got {st})")
+err = js(raw) or {}
+check(st == 422 and err.get("code") == "invalid_view_range" and err.get("detail") == {"from": 200, "to": 100},
+      f"view from > to → 422 invalid_view_range detail {{from,to}} ({st} {raw[:100]})")
 nan_body = json.dumps({"shapes": [{**dup, "points": [{"time": 1792382400, "price": float("nan")}]}]}).encode()
 st, raw = call("PUT", f"/sessions/{sid}/charts/BTCUSDT/1m", None, raw_body=nan_body)
-check(st == 422 and (js(raw) or {}).get("code") == "invalid_number", f"NaN price → 422 invalid_number (got {st})")
+err = js(raw) or {}
+check(st == 422 and err.get("code") == "invalid_number" and err.get("detail") == "NaN",
+      f"NaN price → 422 invalid_number detail token ({st} {raw[:100]})")
 st, raw = call("PUT", f"/sessions/{sid}/charts/BTCUSDT/4h", None, raw_body=b"{not json")
-soft_check(st == 400, f"malformed JSON → 400 (got {st}; the client treats 400 and 422 alike: no retry)")
+check(st == 422 and (js(raw) or {}).get("code") == "invalid_chart_state", f"non-JSON body → 422 invalid_chart_state (got {st}; a chart PUT never answers 400)")
 
 # Another device (no cookie) cannot see this session: 404 session_not_found, not 401/403.
 STRANGER = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))

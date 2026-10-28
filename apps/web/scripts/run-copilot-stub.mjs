@@ -262,11 +262,14 @@ if STUB_CHARTS:
         body = await request.json()
         shapes = body.get("shapes") or []
         markers = body.get("markers") or []
-        if len(shapes) > 200 or len(markers) > 300:
-            return JSONResponse(
-                {"code": "chart_state_too_large", "limit": {"shapes": 200, "markers": 300}},
-                status_code=413,
-            )
+        # Same envelope as the backend (fixtures/wire/api_errors.json): field + numeric limit.
+        for field, items, limit in (("shapes", shapes, 200), ("markers", markers, 300)):
+            if len(items) > limit:
+                return JSONResponse(
+                    {"code": "chart_state_too_large", "message": "Biểu đồ có quá nhiều hình vẽ",
+                     "field": field, "limit": limit},
+                    status_code=413,
+                )
         key = _chart_key(sid, symbol, interval)
         cur = CHART_DOCS.get(key)
         rev = body.get("revision")

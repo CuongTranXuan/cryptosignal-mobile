@@ -237,6 +237,9 @@ export const AnalyzeMetaEventSchema = z.object({
   /** Final meta: revision of the chart-state doc the server saved, or why it did not. */
   chart_state_revision: z.number().int().optional(),
   chart_state_error: z.string().optional(),
+  /** With `chart_state_error: chart_state_too_large`: which cap and its number. */
+  field: z.string().optional(),
+  limit: z.number().optional(),
 });
 
 export type AnalyzeMetaEvent = z.infer<typeof AnalyzeMetaEventSchema>;

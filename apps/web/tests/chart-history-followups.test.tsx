@@ -18,12 +18,20 @@ import {
   useChartHistoryStore,
 } from "../lib/chart-history";
 import {
+  ChartTooLargeBodySchema,
+  chartInvalidNotice,
   chartTooLargeNotice,
+  createChartStateApi,
   createMockChartStateApi,
   sanitizeChartPutBody,
   type ChartStateApi,
 } from "../lib/chart-state";
-import { CopilotApiError, createCopilotApi, resetCopilotApiMockSessionsForTests } from "../lib/copilot-api";
+import {
+  CopilotApiError,
+  createCopilotApi,
+  resetCopilotApiMockSessionsForTests,
+  retryAfterHeaderMs,
+} from "../lib/copilot-api";
 import { clearCopilotModelsCache, loadCopilotModels } from "../lib/copilot-models-cache";
 import {
   CHART_HISTORY_DUPLICATE_ID,
@@ -116,9 +124,51 @@ describe("(1) chart save retry with backoff on 5xx / network", () => {
   });
 
   it("backoff is 2 s, 4 s, 8 s … capped at 60 s", () => {
-    expect([0, 1, 2, 3, 4, 5, 6].map(chartSaveRetryDelay)).toEqual([
+    expect([0, 1, 2, 3, 4, 5, 6].map((a) => chartSaveRetryDelay(a))).toEqual([
       2000, 4000, 8000, 16000, 32000, 60000, 60000,
     ]);
+  });
+
+  it("Retry-After is a floor on the backoff (still capped at 60 s)", () => {
+    expect(chartSaveRetryDelay(0, 5000)).toBe(5000);
+    expect(chartSaveRetryDelay(3, 5000)).toBe(16000);
+    expect(chartSaveRetryDelay(0, 600_000)).toBe(60000);
+    expect(retryAfterHeaderMs("5")).toBe(5000);
+    expect(retryAfterHeaderMs(null)).toBeNull();
+    expect(retryAfterHeaderMs("soon")).toBeNull();
+    expect(retryAfterHeaderMs(new Date(10_000).toUTCString(), 4_000)).toBe(6000);
+  });
+
+  it("503 db_unavailable with Retry-After: 5 waits 5 s (not 2 s) before the retry", async () => {
+    const dbDown = new CopilotApiError(503, { code: "db_unavailable" }, "db_unavailable", 5000);
+    const { api, puts } = failingApi([dbDown]);
+    await bootSession(api);
+    const key = currentChartKey()!;
+    useShapeStore.getState().setChartShapes([userShape("u1")]);
+    vi.useFakeTimers();
+    await saveChartNow(key);
+    expect(useChartHistoryStore.getState().unsaved[key]).toBe("retrying");
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(puts).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1100);
+    await flushAsync();
+    expect(puts).toHaveLength(2);
+    expect(useChartHistoryStore.getState().unsaved[key]).toBeUndefined();
+    vi.useRealTimers();
+  });
+
+  it("the chart client reads Retry-After from a 503", async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response(JSON.stringify({ code: "db_unavailable", message: "Cơ sở dữ liệu tạm thời không khả dụng" }), {
+        status: 503,
+        headers: { "Content-Type": "application/json", "Retry-After": "5" },
+      }),
+    );
+    const client = createChartStateApi({ baseUrl: "http://copilot.test", fetchImpl: fetchImpl as unknown as typeof fetch });
+    const err = await client.getChart("s1", "BTCUSDT", "1h").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(CopilotApiError);
+    expect((err as CopilotApiError).retryAfterMs).toBe(5000);
+    expect(classifyChartSaveError(err)).toBe("retry");
   });
 
   it("503 then network error: 'chưa lưu' while retrying, cleared once saved; local edits stay", async () => {
@@ -194,23 +244,59 @@ describe("save errors that never fix themselves: Vietnamese notice, no retry, lo
     new CopilotApiError(status, b as never, String(b.code ?? "x"));
 
   it.each([
-    ["400 malformed JSON", body(400, { code: "invalid_json" }), CHART_HISTORY_INVALID],
+    ["400 (a chart PUT never sends it; generic)", body(400, { code: "invalid_json" }), CHART_HISTORY_INVALID],
+    ["422 invalid_chart_state (non-JSON body)", body(422, { code: "invalid_chart_state" }), CHART_HISTORY_INVALID],
     ["401 (unused; generic)", body(401, { code: "unauthorized" }), CHART_HISTORY_SAVE_FAILED],
     ["403 (unused; generic)", body(403, { code: "forbidden" }), CHART_HISTORY_SAVE_FAILED],
     [
       "413 chart_state_too_large with a Vietnamese message",
-      body(413, { code: "chart_state_too_large", limit: 200, field: "shapes", message: "Biểu đồ có quá nhiều hình (tối đa 200)." }),
-      "Biểu đồ có quá nhiều hình (tối đa 200).",
+      body(413, { code: "chart_state_too_large", limit: 200, field: "shapes", message: "Biểu đồ có quá nhiều hình vẽ" }),
+      "Biểu đồ có quá nhiều hình vẽ (giới hạn: số hình 200) — hình vẽ vẫn giữ trên thiết bị.",
+    ],
+    [
+      "413 points per shape",
+      body(413, { code: "chart_state_too_large", limit: 500, field: "points", message: "Biểu đồ có quá nhiều hình vẽ" }),
+      "Biểu đồ có quá nhiều hình vẽ (giới hạn: số điểm mỗi hình 500) — hình vẽ vẫn giữ trên thiết bị.",
+    ],
+    [
+      "413 charts per session, no message",
+      body(413, { code: "chart_state_too_large", limit: 50, field: "charts" }),
+      "Biểu đồ quá lớn để lưu (giới hạn: số biểu đồ mỗi phiên 50) — hãy xoá bớt hình hoặc điểm neo.",
+    ],
+    [
+      "413 old object limit form (gone) → generic",
+      body(413, { code: "chart_state_too_large", limit: { shapes: 200 } }),
+      "Biểu đồ quá lớn để lưu — hãy xoá bớt hình hoặc điểm neo.",
     ],
     [
       "413 chart_state_too_large without message → field + limit",
       body(413, { code: "chart_state_too_large", limit: 200, field: "shapes" }),
       "Biểu đồ quá lớn để lưu (giới hạn: số hình 200) — hãy xoá bớt hình hoặc điểm neo.",
     ],
-    ["413 request_too_large", body(413, { code: "request_too_large", message: "Request body too large" }), CHART_HISTORY_REQUEST_TOO_LARGE],
+    ["413 request_too_large, no cap", body(413, { code: "request_too_large", message: "Request body too large" }), CHART_HISTORY_REQUEST_TOO_LARGE],
+    [
+      "413 request_too_large body_bytes 1572864",
+      body(413, { code: "request_too_large", message: "Yêu cầu quá lớn", field: "body_bytes", limit: 1572864 }),
+      "Yêu cầu quá lớn (giới hạn: kích thước yêu cầu 1,5 MB) — hình vẽ vẫn giữ trên thiết bị.",
+    ],
     ["422 invalid_number", body(422, { code: "invalid_number" }), CHART_HISTORY_INVALID_NUMBER],
+    [
+      "422 invalid_number detail token",
+      body(422, { code: "invalid_number", detail: "NaN" }),
+      CHART_HISTORY_INVALID_NUMBER.replace(" — ", " (NaN) — "),
+    ],
     ["422 invalid_view_range", body(422, { code: "invalid_view_range" }), CHART_HISTORY_INVALID_VIEW],
+    [
+      "422 invalid_view_range detail {from,to}",
+      body(422, { code: "invalid_view_range", detail: { from: 2, to: 1 } }),
+      CHART_HISTORY_INVALID_VIEW.replace(" — ", " (from 2 > to 1) — "),
+    ],
     ["422 duplicate_shape_id", body(422, { code: "duplicate_shape_id" }), CHART_HISTORY_DUPLICATE_ID],
+    [
+      "422 duplicate_shape_id detail {ids}",
+      body(422, { code: "duplicate_shape_id", detail: { ids: ["a", "b"] } }),
+      CHART_HISTORY_DUPLICATE_ID.replace(" — ", " (mã: a, b) — "),
+    ],
     ["422 invalid_interval", body(422, { code: "invalid_interval" }), CHART_HISTORY_INVALID_INTERVAL],
     ["422 other", body(422, { code: "validation_error" }), CHART_HISTORY_INVALID],
     [
@@ -249,14 +335,30 @@ describe("save errors that never fix themselves: Vietnamese notice, no retry, lo
 const API_ERRORS = path.resolve(__dirname, "../../copilot/tests/fixtures/wire/api_errors.json");
 
 describe("413 envelopes from the backend fixture (apps/copilot/tests/fixtures/wire/api_errors.json)", () => {
-  it.skipIf(!existsSync(API_ERRORS))("shows the server's Vietnamese message for both caps", () => {
+  it.skipIf(!existsSync(API_ERRORS))("parses every fixture body: 413 message + cap, 422 detail, 503 retry", () => {
     const fixture = JSON.parse(readFileSync(API_ERRORS, "utf8")) as Record<string, { status: number; body: Record<string, unknown> }>;
     for (const name of ["chart_state_too_large", "request_too_large"]) {
       const { status, body } = fixture[name]!;
+      expect(ChartTooLargeBodySchema.safeParse(body).success, name).toBe(true);
+      expect(typeof body.limit, name).toBe("number");
       const err = new CopilotApiError(status, body as never, name);
-      expect(chartTooLargeNotice(err), name).toBe(body.message);
+      expect(chartTooLargeNotice(err), name).toContain(String(body.message));
+      expect(chartTooLargeNotice(err), name).toContain("giới hạn:");
       expect(classifyChartSaveError(err), name).toBe("too_large");
     }
+    const detailShown: Record<string, string> = {
+      invalid_number: "(NaN)",
+      invalid_view_range: "(from 2 > to 1)",
+      duplicate_shape_id: "(mã: a)",
+    };
+    for (const [name, needle] of Object.entries(detailShown)) {
+      const { status, body } = fixture[name]!;
+      const err = new CopilotApiError(status, body as never, name);
+      expect(classifyChartSaveError(err), name).toBe("invalid");
+      expect(chartInvalidNotice(err), name).toContain(needle);
+    }
+    const db = fixture.db_unavailable!;
+    expect(classifyChartSaveError(new CopilotApiError(db.status, db.body as never, "db"))).toBe("retry");
   });
 });
 

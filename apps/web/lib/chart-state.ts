@@ -3,7 +3,7 @@
  *   GET    /v1/copilot/sessions/{sid}/charts                     → index
  *   GET    /v1/copilot/sessions/{sid}/charts/{symbol}/{interval} → doc | 404 chart_state_not_found
  *   PUT    same path {shapes, markers?, analysis?, summary_text?, view?, revision?} → doc
- *          | 409 revision_conflict {current} | 413 chart_state_too_large {limit}
+ *          | 409 revision_conflict {current} | 413 chart_state_too_large {field, limit}
  *   DELETE same path
  */
 import {
@@ -17,7 +17,7 @@ import {
 } from "./copilot-strings";
 import { z } from "zod";
 import { withCopilotCredentials } from "./copilot-fetch";
-import { CopilotApiError, resolveCopilotBaseUrl, type ApiErrorBody } from "./copilot-api";
+import { CopilotApiError, resolveCopilotBaseUrl, retryAfterHeaderMs, type ApiErrorBody } from "./copilot-api";
 import { coerceAgentMarker, coerceAgentShape } from "./normalize-agent-shape";
 import {
   AgentMarkerSchema,
@@ -73,12 +73,12 @@ export const ChartConflictBodySchema = z.object({
   current: ChartStateDocWireSchema,
 });
 
-/** 413 envelope: `chart_state_too_large` {limit, field, message (vi)} or `request_too_large`. */
+/** 413 envelope `{code, message (vi), field, limit: number}` (fixtures/wire/api_errors.json). */
 export const ChartTooLargeBodySchema = z.object({
   code: z.enum(["chart_state_too_large", "request_too_large"]),
-  limit: z.unknown().optional(),
-  field: z.string().nullable().optional(),
   message: z.string().nullable().optional(),
+  field: z.string().nullable().optional(),
+  limit: z.number().nullable().optional(),
 });
 
 export type ChartStatePutBody = {
@@ -144,51 +144,115 @@ export function chartConflictCurrent(err: unknown): ChartStateDoc | null {
   return parsed.success ? normalizeChartDoc(parsed.data.current) : null;
 }
 
+/** Vietnamese name of each 413 `field` (docs/CHART_HISTORY_SPEC.md "Limits"). */
 const TOO_LARGE_FIELD_VI: Record<string, string> = {
+  body_bytes: "kích thước yêu cầu",
   shapes: "số hình",
   markers: "số điểm neo",
   points: "số điểm mỗi hình",
-  analysis: "dữ liệu phân tích",
-  summary_text: "độ dài tóm tắt",
-  doc: "kích thước biểu đồ",
-  body: "kích thước yêu cầu",
-  body_bytes: "số byte của yêu cầu",
+  string_bytes: "độ dài mỗi tên/nhãn",
+  summary_text_bytes: "độ dài tóm tắt",
+  analysis_bytes: "dữ liệu phân tích",
+  doc_bytes: "kích thước biểu đồ",
+  charts: "số biểu đồ mỗi phiên",
 };
 
 function hasVietnamese(text: string): boolean {
   return /[à-ỹÀ-ỸđĐ]/u.test(text);
 }
 
+const viNumber = (n: number): string => n.toLocaleString("vi-VN", { maximumFractionDigits: 1 });
+
+/** "1,5 MB", "16 KB", "200" — `*_bytes` limits read as sizes. */
+function formatTooLargeLimit(field: string, limit: number): string {
+  if (!field.endsWith("_bytes")) return viNumber(limit);
+  if (limit >= 1024 * 1024) return `${viNumber(limit / (1024 * 1024))} MB`;
+  if (limit >= 1024) return `${viNumber(limit / 1024)} KB`;
+  return `${viNumber(limit)} byte`;
+}
+
+/** "số hình 200" / "kích thước yêu cầu 1,5 MB"; "" when the cap is unknown. */
+export function chartTooLargeLimitText(field: string | null | undefined, limit: number | null | undefined): string {
+  if (!field || typeof limit !== "number" || !Number.isFinite(limit)) return "";
+  return `${TOO_LARGE_FIELD_VI[field] ?? field} ${formatTooLargeLimit(field, limit)}`;
+}
+
 /**
- * Vietnamese notice for a 413: the server's `message` when it is Vietnamese, else one built
- * from `field` + `limit` (`request_too_large` is the ~1.5 MB raw body cap).
+ * The notice for a size cap, from a PUT 413 body or the analyze autosave meta
+ * (`chart_state_error: chart_state_too_large` + `field` + `limit`): the server's Vietnamese
+ * `message` plus the cap, else a client sentence built from `field` + `limit`.
  */
+export function chartTooLargeText(info: {
+  code?: string | null;
+  message?: string | null;
+  field?: string | null;
+  limit?: number | null;
+}): string {
+  const cap = chartTooLargeLimitText(info.field, info.limit);
+  const message = info.message?.trim().replace(/[.。]+$/u, "") ?? "";
+  if (message && hasVietnamese(message)) {
+    return `${message}${cap ? ` (giới hạn: ${cap})` : ""} — hình vẽ vẫn giữ trên thiết bị.`;
+  }
+  if (info.code === "request_too_large" && !cap) return CHART_HISTORY_REQUEST_TOO_LARGE;
+  return chartHistoryTooLarge(cap);
+}
+
+/** Vietnamese notice for a 413 (`chart_state_too_large` or the raw-body `request_too_large`). */
 export function chartTooLargeNotice(err: unknown): string | null {
   if (!(err instanceof CopilotApiError) || err.status !== 413) return null;
   const parsed = ChartTooLargeBodySchema.safeParse(err.body);
-  const message = parsed.success ? parsed.data.message?.trim() : "";
-  if (message && hasVietnamese(message)) return message;
-  if (parsed.success && parsed.data.code === "request_too_large") return CHART_HISTORY_REQUEST_TOO_LARGE;
-  const field = parsed.success ? parsed.data.field : null;
-  const limit = chartTooLargeLimit(err) ?? "";
-  if (field && limit && !/[a-z_]+\s/i.test(limit)) {
-    return chartHistoryTooLarge(`${TOO_LARGE_FIELD_VI[field] ?? field} ${limit}`);
-  }
-  return chartHistoryTooLarge(limit);
+  if (!parsed.success) return chartHistoryTooLarge("");
+  return chartTooLargeText(parsed.data);
 }
 
-/** Vietnamese notice for a 422 on save (codes from the backend's validation). */
+const InvalidNumberDetailSchema = z.union([z.string(), z.number()]);
+const InvalidViewDetailSchema = z.object({ from: z.unknown(), to: z.unknown() });
+const DuplicateIdsDetailSchema = z.object({ ids: z.array(z.string()) });
+
+/** Short "(…)" suffix from a 422 `detail`, or "". */
+function invalidDetailSuffix(code: string | null, detail: unknown): string {
+  if (code === "invalid_number") {
+    const token = InvalidNumberDetailSchema.safeParse(detail);
+    return token.success && String(token.data).trim() ? ` (${String(token.data).trim().slice(0, 32)})` : "";
+  }
+  if (code === "invalid_view_range") {
+    const view = InvalidViewDetailSchema.safeParse(detail);
+    return view.success ? ` (from ${String(view.data.from)} > to ${String(view.data.to)})` : "";
+  }
+  if (code === "duplicate_shape_id") {
+    const dup = DuplicateIdsDetailSchema.safeParse(detail);
+    if (!dup.success || dup.data.ids.length === 0) return "";
+    const shown = dup.data.ids.slice(0, 3).join(", ");
+    return ` (mã: ${shown}${dup.data.ids.length > 3 ? ", …" : ""})`;
+  }
+  return "";
+}
+
+/** Insert the detail before the " — hình vẽ vẫn giữ …" tail of a notice. */
+function withDetail(notice: string, suffix: string): string {
+  if (!suffix) return notice;
+  const cut = notice.indexOf(" — ");
+  return cut < 0 ? `${notice}${suffix}` : `${notice.slice(0, cut)}${suffix}${notice.slice(cut)}`;
+}
+
+/**
+ * Vietnamese notice for a 422 on save. A chart PUT never answers 400 (non-JSON is
+ * `invalid_chart_state`); a stray 400 lands on the generic notice.
+ */
 export function chartInvalidNotice(err: unknown): string {
   const code = err instanceof CopilotApiError ? err.code : null;
+  const detail = err instanceof CopilotApiError ? err.body.detail : undefined;
   switch (code) {
     case "invalid_number":
-      return CHART_HISTORY_INVALID_NUMBER;
+      return withDetail(CHART_HISTORY_INVALID_NUMBER, invalidDetailSuffix(code, detail));
     case "invalid_view_range":
-      return CHART_HISTORY_INVALID_VIEW;
+      return withDetail(CHART_HISTORY_INVALID_VIEW, invalidDetailSuffix(code, detail));
     case "duplicate_shape_id":
-      return CHART_HISTORY_DUPLICATE_ID;
+      return withDetail(CHART_HISTORY_DUPLICATE_ID, invalidDetailSuffix(code, detail));
     case "invalid_interval":
       return CHART_HISTORY_INVALID_INTERVAL;
+    case "invalid_chart_state":
+      return CHART_HISTORY_INVALID;
     default: {
       // Other codes (e.g. chart_key_mismatch): the server's Vietnamese message when it has one.
       const message = err instanceof CopilotApiError ? err.body.message?.trim() : "";
@@ -256,19 +320,6 @@ export function sanitizeChartPutBody(body: ChartStatePutBody): ChartStatePutBody
   return out;
 }
 
-export function chartTooLargeLimit(err: unknown): string | null {
-  if (!(err instanceof CopilotApiError) || err.status !== 413) return null;
-  const parsed = ChartTooLargeBodySchema.safeParse(err.body);
-  const limit = parsed.success ? parsed.data.limit : undefined;
-  if (limit == null) return "";
-  if (typeof limit === "object") {
-    return Object.entries(limit as Record<string, unknown>)
-      .map(([k, v]) => `${k} ${String(v)}`)
-      .join(", ");
-  }
-  return String(limit);
-}
-
 export type ChartStateApi = {
   listCharts: (sessionId: string) => Promise<ChartIndexResponse>;
   getChart: (sessionId: string, symbol: string, interval: Interval) => Promise<ChartStateDoc>;
@@ -289,8 +340,12 @@ async function readBody(res: Response): Promise<ApiErrorBody> {
   }
 }
 
+async function chartApiError(res: Response, fallback: string): Promise<CopilotApiError> {
+  return new CopilotApiError(res.status, await readBody(res), fallback, retryAfterHeaderMs(res.headers.get("Retry-After")));
+}
+
 async function okJson(res: Response, fallback: string): Promise<unknown> {
-  if (!res.ok) throw new CopilotApiError(res.status, await readBody(res), fallback);
+  if (!res.ok) throw await chartApiError(res, fallback);
   return res.json();
 }
 
@@ -337,7 +392,7 @@ export function createChartStateApi(
     deleteChart: async (sessionId, symbol, interval) => {
       const res = await fetchImpl(chartPath(baseUrl, sessionId, symbol, interval), { method: "DELETE" });
       if (!res.ok && res.status !== 404) {
-        throw new CopilotApiError(res.status, await readBody(res), "chart_delete_failed");
+        throw await chartApiError(res, "chart_delete_failed");
       }
     },
   };

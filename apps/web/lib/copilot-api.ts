@@ -58,12 +58,26 @@ export function isSessionGoneError(err: unknown): boolean {
   return err instanceof CopilotApiError && isSessionGoneBody(err.status, err.body);
 }
 
+/**
+ * `Retry-After` (delta seconds or an HTTP date) in ms, or null when absent/invalid.
+ * The backend sends `Retry-After: 5` on 503 db_unavailable.
+ */
+export function retryAfterHeaderMs(header: string | null | undefined, now: number = Date.now()): number | null {
+  const raw = header?.trim();
+  if (!raw) return null;
+  if (/^\d+(\.\d+)?$/.test(raw)) return Math.round(Number(raw) * 1000);
+  const date = Date.parse(raw);
+  return Number.isFinite(date) ? Math.max(0, date - now) : null;
+}
+
 export class CopilotApiError extends Error {
   readonly status: number;
   readonly code: string | null;
   readonly body: ApiErrorBody;
+  /** From the response's `Retry-After` header (ms), when it had one. */
+  readonly retryAfterMs: number | null;
 
-  constructor(status: number, body: ApiErrorBody, fallbackMessage: string) {
+  constructor(status: number, body: ApiErrorBody, fallbackMessage: string, retryAfterMs: number | null = null) {
     const code =
       typeof body.code === "string"
         ? body.code
@@ -78,6 +92,7 @@ export class CopilotApiError extends Error {
     this.status = status;
     this.code = code;
     this.body = body;
+    this.retryAfterMs = retryAfterMs;
   }
 }
 
@@ -306,7 +321,7 @@ function createMockSessionsApi(): Pick<
 async function jsonOrThrow<T>(res: Response, fallback: string): Promise<T> {
   if (!res.ok) {
     const body = await readErrorBody(res);
-    throw new CopilotApiError(res.status, body, fallback);
+    throw new CopilotApiError(res.status, body, fallback, retryAfterHeaderMs(res.headers.get("Retry-After")));
   }
   return (await res.json()) as T;
 }

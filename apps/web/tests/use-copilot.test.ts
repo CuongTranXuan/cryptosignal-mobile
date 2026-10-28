@@ -140,7 +140,7 @@ describe("use-copilot / createCopilotClient", () => {
 
   it("pollHealth hits /v1/copilot/health on public base URL", async () => {
     const prev = process.env.NEXT_PUBLIC_COPILOT_URL;
-    process.env.NEXT_PUBLIC_COPILOT_URL = "https://copilot.example.onrender.com";
+    process.env.NEXT_PUBLIC_COPILOT_URL = "https://copilot.example.com";
     try {
       const fetchMock = vi.fn(async () =>
         new Response(JSON.stringify({ ok: true, style: "openai", model: "m", baseHost: "x" }), {
@@ -152,7 +152,7 @@ describe("use-copilot / createCopilotClient", () => {
       });
       await client.pollHealth();
       const calls = fetchMock.mock.calls as unknown as [string][];
-      expect(calls[0]?.[0]).toBe("https://copilot.example.onrender.com/v1/copilot/health");
+      expect(calls[0]?.[0]).toBe("https://copilot.example.com/v1/copilot/health");
     } finally {
       if (prev === undefined) delete process.env.NEXT_PUBLIC_COPILOT_URL;
       else process.env.NEXT_PUBLIC_COPILOT_URL = prev;
@@ -161,7 +161,7 @@ describe("use-copilot / createCopilotClient", () => {
 
   it("uses NEXT_PUBLIC_COPILOT_URL when set", async () => {
     const prev = process.env.NEXT_PUBLIC_COPILOT_URL;
-    process.env.NEXT_PUBLIC_COPILOT_URL = "https://copilot.example.onrender.com/";
+    process.env.NEXT_PUBLIC_COPILOT_URL = "https://copilot.example.com/";
     try {
       const fetchMock = vi.fn(async () =>
         streamResponse([sseChunk("done", {})]),
@@ -172,7 +172,7 @@ describe("use-copilot / createCopilotClient", () => {
       });
       await client.analyze("hi");
       const calls = fetchMock.mock.calls as unknown as [string][];
-      expect(calls[0]?.[0]).toBe("https://copilot.example.onrender.com/v1/copilot/analyze");
+      expect(calls[0]?.[0]).toBe("https://copilot.example.com/v1/copilot/analyze");
     } finally {
       if (prev === undefined) delete process.env.NEXT_PUBLIC_COPILOT_URL;
       else process.env.NEXT_PUBLIC_COPILOT_URL = prev;

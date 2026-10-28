@@ -170,6 +170,33 @@ describe("analyze with chart history", () => {
     expect(useChartHistoryStore.getState().notice).toBe(CHART_HISTORY_SERVER_SAVE_FAILED);
   });
 
+  it("chart_state_error chart_state_too_large + field + limit (numbers): Vietnamese notice with the cap, no PUT", async () => {
+    await analyze([shape("drw_a")], false, {
+      meta: { chart_state_error: "chart_state_too_large", field: "markers", limit: 300 },
+    });
+    expect(puts).toHaveLength(0);
+    expect(useChartHistoryStore.getState().notice).toBe(
+      "Biểu đồ quá lớn để lưu (giới hạn: số điểm neo 300) — hãy xoá bớt hình hoặc điểm neo.",
+    );
+  });
+
+  it("chart_state_error db_unavailable: 'chưa lưu' (retrying), saved after Retry-After 5 s", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
+    try {
+      await analyze([shape("drw_a")], false, { meta: { chart_state_error: "db_unavailable" } });
+      const key = currentChartKey()!;
+      expect(puts).toHaveLength(0);
+      expect(useChartHistoryStore.getState().unsaved[key]).toBe("retrying");
+      expect(ids()).toEqual(["drw_a"]);
+      await vi.advanceTimersByTimeAsync(5100);
+      await chartSavesSettled();
+      expect(puts).toEqual([{ revision: undefined, ids: ["drw_a"] }]);
+      expect(useChartHistoryStore.getState().unsaved[key]).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("without chart_state_revision (backend did not save) the client saves what it shows", async () => {
     await analyze([shape("drw_a")], false);
     expect(puts).toEqual([{ revision: undefined, ids: ["drw_a"] }]);

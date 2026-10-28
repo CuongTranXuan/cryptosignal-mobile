@@ -6,8 +6,10 @@
  *   overlays at once (no stale drawings), GET the target doc and paint it (404 → clean chart).
  * - User edits (shape-store user-edit listener) and view changes → debounced PUT with the base
  *   revision; 409 → merge (server AI shapes + local pins/user shapes) and retry once.
- * - 5xx / network → "chưa lưu" + background retry with backoff (2 s, 4 s … 60 s) until saved.
- *   400/413/422 (and a stray 401/403) → Vietnamese notice + "chưa lưu", no retry.
+ * - 5xx / network → "chưa lưu" + background retry with backoff (2 s, 4 s … 60 s, never sooner
+ *   than Retry-After, e.g. 5 s on 503 db_unavailable) until saved; the same for an analyze
+ *   autosave that reports `chart_state_error: db_unavailable`.
+ *   413/422 (and a stray 400/401/403) → Vietnamese notice + "chưa lưu", no retry.
  *   404 session_not_found → the session is gone (or another device's): session store moves on.
  *   Local edits always stay.
  * - Analyze saves server-side; the client only records `chart_state_revision` (no PUT back).
@@ -28,6 +30,7 @@ import {
   chartKey,
   chartInvalidNotice,
   chartTooLargeNotice,
+  chartTooLargeText,
   sanitizeChartPutBody,
   isChartStateNotFound,
   type ChartIndexEntry,
@@ -274,13 +277,20 @@ function clearUnsaved(key: string): void {
   if (useChartHistoryStore.getState().unsaved[key]) setUnsavedState(key, null);
 }
 
-/** Backoff delay before retry number `attempt` (0-based): 2 s, 4 s, 8 s … capped at 60 s. */
-export function chartSaveRetryDelay(attempt: number): number {
-  return Math.min(CHART_SAVE_RETRY_BASE_MS * 2 ** attempt, CHART_SAVE_RETRY_MAX_MS);
+/** `Retry-After` the backend sends with 503 db_unavailable (also used for the autosave meta). */
+export const CHART_DB_RETRY_AFTER_MS = 5000;
+
+/**
+ * Backoff delay before retry number `attempt` (0-based): 2 s, 4 s, 8 s … capped at 60 s.
+ * A server `Retry-After` is a floor: never retry sooner than it asks (still capped).
+ */
+export function chartSaveRetryDelay(attempt: number, retryAfterMs: number | null = null): number {
+  const backoff = CHART_SAVE_RETRY_BASE_MS * 2 ** attempt;
+  return Math.min(Math.max(backoff, retryAfterMs ?? 0), CHART_SAVE_RETRY_MAX_MS);
 }
 
 /** Keep `snap` as the unsaved local state of `key`; `retry` starts/continues the backoff. */
-function markUnsaved(key: string, snap: Snapshot, retry: boolean): void {
+function markUnsaved(key: string, snap: Snapshot, retry: boolean, retryAfterMs: number | null = null): void {
   const entry = unsavedSnaps.get(key) ?? { snap, attempt: 0, timer: null };
   entry.snap = snap;
   unsavedSnaps.set(key, entry);
@@ -293,7 +303,7 @@ function markUnsaved(key: string, snap: Snapshot, retry: boolean): void {
   }
   setUnsavedState(key, "retrying");
   if (entry.timer) return; // a retry is already scheduled; it will send the newest snapshot
-  const delay = chartSaveRetryDelay(entry.attempt);
+  const delay = chartSaveRetryDelay(entry.attempt, retryAfterMs);
   entry.attempt += 1;
   entry.timer = setTimeout(() => {
     entry.timer = null;
@@ -334,7 +344,7 @@ function sessionGone(key: string): void {
 function failSave(key: string, snap: Snapshot, err: unknown, otherNotice: string): void {
   switch (classifyChartSaveError(err)) {
     case "retry":
-      markUnsaved(key, snap, true);
+      markUnsaved(key, snap, true, err instanceof CopilotApiError ? err.retryAfterMs : null);
       return;
     case "too_large":
       setNotice(chartTooLargeNotice(err) ?? chartHistoryTooLarge(""));
@@ -674,9 +684,18 @@ export function saveChartNow(key: string): Promise<void> {
   return enqueueSave(key, localSnapshot());
 }
 
-/** Analyze autosave hit a size limit (`chart_state_error: chart_state_too_large`). */
-export function noteChartTooLarge(limit = ""): void {
-  setNotice(chartHistoryTooLarge(limit));
+/** Analyze autosave hit a size cap (`chart_state_error: chart_state_too_large` + `field` + `limit`). */
+export function noteChartTooLarge(field: string | null = null, limit: number | null = null): void {
+  setNotice(chartTooLargeText({ code: "chart_state_too_large", field, limit }));
+}
+
+/**
+ * Analyze autosave could not reach the database (`chart_state_error: db_unavailable`): the run
+ * is only on this device. Show "chưa lưu" and save it with the backoff (from Retry-After 5 s).
+ */
+export function retryChartSaveLater(key: string): void {
+  if (currentChartKey() !== key) return;
+  markUnsaved(key, localSnapshot(), true, CHART_DB_RETRY_AFTER_MS);
 }
 
 /** Final analyze meta carried `chart_state_error` (backend did not save this run). */

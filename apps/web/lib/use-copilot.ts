@@ -52,6 +52,7 @@ import {
   endAnalyzeRun,
   noteChartStateError,
   noteChartTooLarge,
+  retryChartSaveLater,
   useChartHistoryStore,
   recordAnalyzeSaved,
   saveChartNow,
@@ -89,7 +90,7 @@ export {
 
 export { AUTO_DRAW_PROMPT, HEAD_SHOULDERS_PROMPT, TRIANGLES_PROMPT } from "./copilot-strings";
 
-/** Render/Vercel: set NEXT_PUBLIC_COPILOT_URL to HTTPS origin only (no /v1). Paths: /v1/copilot/health, /v1/copilot/analyze. */
+/** Cross-origin backend: set NEXT_PUBLIC_COPILOT_URL to its HTTPS origin only (no /v1). Paths: /v1/copilot/health, /v1/copilot/analyze. */
 
 export type CopilotClientDeps = {
   fetchImpl?: typeof fetch;
@@ -307,6 +308,7 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
   let streamChartKey: string | null = null;
   let streamChartStateRevision: number | null = null;
   let streamChartStateError: string | null = null;
+  let streamChartStateCap: { field: string | null; limit: number | null } = { field: null, limit: null };
   let streamAnalysisRaw: Record<string, unknown> | null = null;
   /** N25: every new shape was dropped by the closed-candle filter; previous shapes kept. */
   let streamKeptPreviousShapes = false;
@@ -327,10 +329,13 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
       recordAnalyzeSaved(key, streamChartStateRevision, streamAnalysisRaw);
       if (streamKeptPreviousShapes) void saveChartNow(key);
     } else if (streamChartStateError === "chart_state_too_large") {
-      noteChartTooLarge();
+      noteChartTooLarge(streamChartStateCap.field, streamChartStateCap.limit);
     } else if (streamChartStateError === "session_not_found") {
       // Gone (or another device's): nothing to save into; the session store moves on.
       void useCopilotSessionStore.getState().handleSessionGone(key.split("|")[0] ?? "");
+    } else if (streamChartStateError === "db_unavailable") {
+      // The run is drawn but only on this device: "chưa lưu", saved later with the backoff.
+      retryChartSaveLater(key);
     } else {
       // Backend did not save this run (older backend or a failed save): save what is shown.
       const error = streamChartStateError;
@@ -389,6 +394,7 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
     streamChartKey = null;
     streamChartStateRevision = null;
     streamChartStateError = null;
+    streamChartStateCap = { field: null, limit: null };
     streamAnalysisRaw = null;
     streamKeptPreviousShapes = false;
   };
@@ -441,6 +447,10 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
         }
         if (typeof data.chart_state_error === "string") {
           streamChartStateError = data.chart_state_error;
+          streamChartStateCap = {
+            field: typeof data.field === "string" ? data.field : null,
+            limit: typeof data.limit === "number" ? data.limit : null,
+          };
         }
         const parsed = AnalyzeMetaEventSchema.safeParse(data);
         if (streamIsForOtherChart()) return "ok";

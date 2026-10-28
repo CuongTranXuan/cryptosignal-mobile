@@ -15,7 +15,7 @@ import {
   ChartConflictBodySchema,
   ChartIndexResponseSchema,
   chartConflictCurrent,
-  chartTooLargeLimit,
+  chartTooLargeLimitText,
   createMockChartStateApi,
   isChartStateNotFound,
   parseChartStateDoc,
@@ -153,12 +153,15 @@ describe("chart-state wire fixtures (backend apps/copilot/tests/fixtures/wire)",
   it("recognises 404 chart_state_not_found and 413 limits", () => {
     expect(isChartStateNotFound(new CopilotApiError(404, { code: "chart_state_not_found" }, "x"))).toBe(true);
     expect(isChartStateNotFound(new CopilotApiError(404, { error: "session not found" }, "x"))).toBe(false);
-    const tooLarge = new CopilotApiError(
-      413,
-      { code: "chart_state_too_large", limit: { shapes: 200 } } as never,
-      "x",
-    );
-    expect(chartTooLargeLimit(tooLarge)).toBe("shapes 200");
+    expect(chartTooLargeLimitText("shapes", 200)).toBe("số hình 200");
+    expect(chartTooLargeLimitText("points", 500)).toBe("số điểm mỗi hình 500");
+    expect(chartTooLargeLimitText("body_bytes", 1572864)).toBe("kích thước yêu cầu 1,5 MB");
+    expect(chartTooLargeLimitText("summary_text_bytes", 16384)).toBe("độ dài tóm tắt 16 KB");
+    expect(chartTooLargeLimitText("string_bytes", 2048)).toBe("độ dài mỗi tên/nhãn 2 KB");
+    expect(chartTooLargeLimitText("analysis_bytes", 65536)).toBe("dữ liệu phân tích 64 KB");
+    expect(chartTooLargeLimitText("doc_bytes", 1048576)).toBe("kích thước biểu đồ 1 MB");
+    expect(chartTooLargeLimitText("charts", 50)).toBe("số biểu đồ mỗi phiên 50");
+    expect(chartTooLargeLimitText("shapes", undefined)).toBe("");
   });
 });
 
@@ -343,14 +346,16 @@ describe("chart history controller", () => {
       api: {
         ...api,
         putChart: async () => {
-          throw new CopilotApiError(413, { code: "chart_state_too_large", limit: { shapes: 200 } } as never, "x");
+          throw new CopilotApiError(413, { code: "chart_state_too_large", field: "markers", limit: 300 } as never, "x");
         },
       },
     });
     useShapeStore.getState().addCommitted(shape("u1", "1h", { source: "human", origin: "user" }));
     await new Promise((r) => setTimeout(r, CHART_SAVE_DEBOUNCE_MS + 20));
     await flushAsync();
-    expect(useChartHistoryStore.getState().notice).toMatch(/Biểu đồ quá lớn để lưu \(giới hạn: shapes 200\)/);
+    expect(useChartHistoryStore.getState().notice).toBe(
+      "Biểu đồ quá lớn để lưu (giới hạn: số điểm neo 300) — hãy xoá bớt hình hoặc điểm neo.",
+    );
   });
 
   it("legacy session (no doc yet): message shapes for this chart are kept and saved as a new doc", async () => {
