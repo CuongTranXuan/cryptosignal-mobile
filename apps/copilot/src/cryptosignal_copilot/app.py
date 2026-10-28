@@ -32,6 +32,7 @@ from cryptosignal_copilot.chart_styles import list_styles_payload
 from cryptosignal_copilot.config import (
     LlmConfigError,
     health_payload,
+    is_production,
     load_llm_config,
     validate_llm_env_on_startup,
 )
@@ -64,14 +65,26 @@ def sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
-def _cors_settings() -> tuple[list[str], bool]:
+DEV_CORS_ORIGINS = (
+    "http://localhost:3100,http://127.0.0.1:3100,http://localhost:3000,http://127.0.0.1:3000"
+)
+
+
+class CorsConfigError(RuntimeError):
+    pass
+
+
+def cors_settings() -> tuple[list[str], bool]:
+    """`CORS_ORIGINS` (legacy `COPILOT_CORS_ORIGINS`). Production behind nginx is
+    same-origin, so its default is no cross-origin access, and `*` is refused there."""
     raw = os.environ.get("CORS_ORIGINS")
     if raw is None:
-        raw = os.environ.get(
-            "COPILOT_CORS_ORIGINS",
-            "http://localhost:3000,http://127.0.0.1:3000",
-        )
+        raw = os.environ.get("COPILOT_CORS_ORIGINS")
+    if raw is None:
+        raw = "" if is_production() else DEV_CORS_ORIGINS
     if raw.strip() == "*":
+        if is_production():
+            raise CorsConfigError("CORS_ORIGINS=* is not allowed with COPILOT_ENV=production")
         return ["*"], False
     origins = [o.strip() for o in raw.split(",") if o.strip()]
     return origins, True
@@ -111,7 +124,7 @@ def create_app(
 
     app = FastAPI(lifespan=lifespan)
     app.state.autoscan = scheduler
-    cors_origins, cors_credentials = _cors_settings()
+    cors_origins, cors_credentials = cors_settings()
     app.add_middleware(
         CORSMiddleware,
         allow_origins=cors_origins,
