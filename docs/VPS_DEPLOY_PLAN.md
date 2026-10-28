@@ -1,395 +1,411 @@
-# VPS_DEPLOY_PLAN: Một VPS tự host (không Docker), OmniRoute là provider model duy nhất
+# VPS_DEPLOY_PLAN: một VPS 1 GB tự host (không Docker), OmniRoute slim là provider model duy nhất
 
-> **Trạng thái:** BẢN NHÁP để anh review. Chưa thay đổi code hay hạ tầng nào.
-> **Ngày:** 26/10/2026 (ICT, UTC+7).
-> **Thay thế:** kế hoạch Cloud Run + Turso đang tạm dừng (`deploy/cloudrun/deploy.sh`, `apps/copilot/DEPLOY.md` mục Postgres/Turso). Đồng thời bỏ Render Oregon (`render.yaml`), nơi từng bị Binance trả HTTP 451.
-> **Ký hiệu:**
-> - **[đo]**: số liệu tự đo trên box Linux x64 ngày 26/10/2026, ở commit `61b86fc5` (hoặc mới hơn).
-> - **[giả định]**: chưa đo hoặc ước lượng.
-> - **[chưa xác minh]**: không tìm được nguồn chắc chắn.
-
----
-
-## 0. Tóm tắt một trang
-- **Kích thước VPS:**
-  - **2 vCPU / 2 GB RAM là mức tối thiểu thực tế. 1 GB không đủ.**
-  - Lý do: chỉ riêng OmniRoute 3.8.52 khi rảnh đã chiếm **~490–560 MB RSS [đo]**. Copilot (uvicorn) rảnh ~170 MB, đỉnh ~280 MB khi nạp `exchangeInfo` [đo].
-  - Nếu ngân sách cho phép, 4 GB thoải mái hơn và có chỗ cho engine tự động.
-- **Web:**
-  - Chuyển sang **Next static export** (`out/` chỉ **1,4 MB [đo]**). Caddy phục vụ file tĩnh và reverse-proxy `/v1/copilot/*` thẳng tới uvicorn.
-  - Bỏ hẳn process Node của web, tiết kiệm **~95 MB RSS [đo]** của Next standalone.
-  - Điều kiện: bỏ hoặc tắt có điều kiện route proxy `apps/web/app/v1/copilot/[...path]/route.ts`. Đã thử build export thành công khi tạm bỏ route này.
-- **API:** `uvicorn` **1 worker**, bind `127.0.0.1:8000`. Drain loop trong `app.py` và rate limiter in-memory (`rate_limit.py`) đều giả định chỉ có một process.
-- **DB:**
-  - **SQLite chế độ WAL** tại `/var/lib/cryptosignal/copilot/sessions.sqlite3`.
-  - Backup offsite bằng **Litestream v0.5.17** lên S3-compatible, cộng `sqlite3 .backup` hằng ngày.
-  - Không cần Postgres ở quy mô này.
-- **TLS và biên:** Caddy (tự động HTTPS, ~49 MB RSS [đo]). Hoặc Cloudflare Tunnel nếu không muốn mở cổng 80/443.
-- **OmniRoute:**
-  - Chạy với `--headless`, `OMNIROUTE_SERVER_HOST=127.0.0.1`, `OMNIROUTE_MEMORY_MB=384–512`, systemd service riêng.
-  - **Cảnh báo:** mặc định nó bind `0.0.0.0` [đo] và `REQUIRE_API_KEY=false`. Phải bind loopback và đặt firewall.
-  - Provider `cursor/*` cần `cursor-agent` CLI và đăng nhập, nên khó chạy trên VPS. Đề xuất chỉ dùng `agentrouter/*`.
-- **Vị trí:** Singapore (DigitalOcean/Vultr) hoặc VN (BizFly). **Không đặt ở Mỹ** (Binance 451).
-- **Engine tự động** (`docs/AUTO_ANALYSIS_SPEC.md`): service systemd riêng, `Nice=10`, `MemoryMax`. Không chạy chung process với uvicorn.
+> **Trạng thái:** bản 2, cập nhật 28/10/2026 (ICT, UTC+7). Thay thế bản nháp 26/10/2026 (commit `94686397`).
+> **Quyết định chính (anh đã duyệt 28/10):**
+> - VPS: **Vultr `vc2-1c-1gb` tại Singapore (`sgp`)**, giá $5/tháng.
+> - OS: Debian 13 hoặc Ubuntu 24.04 đã cắt gọn.
+> - Thành phần: nginx phục vụ bản build tĩnh, uvicorn (copilot) và OmniRoute chạy chế độ slim.
+>
+> Bản này vẫn thay thế kế hoạch Cloud Run + Turso đang tạm dừng (`deploy/cloudrun/deploy.sh`, `apps/copilot/DEPLOY.md`). Bản này không đổi region Render (`render.yaml`).
+>
+> **Ký hiệu số liệu:**
+> - **[đo thực tế: nơi đo]**: số tự đo, có ghi nơi đo.
+> - **[ước tính]**: chưa đo, hoặc suy ra.
+> - **[nguồn: ...]**: số lấy từ tài liệu hoặc API công khai, đã kiểm tra ngày 28/10/2026.
+> - **[cấu hình]**: giá trị cài đặt, không phải số đo.
+>
+> **Dữ liệu đo:**
+> - `/workspace/vps/REPORT_vultr_1gb.md` (nghiên cứu 27/10)
+> - `/workspace/omb/*.out` (benchmark OmniRoute, LLM giả lập)
+> - `/workspace/vps/run/bench.out` (benchmark copilot)
+>
+> Tất cả các file trên nằm trên box Linux x64. Các phép đo dùng Python 3.13, Node 22, LLM giả lập, 200 nến BTC 1h. **Chưa đo trên VPS Vultr thật.**
 
 ---
 
-## 1. Hiện trạng trong repo
+## 0. Thay đổi so với bản 26/10 (và lý do)
 
-| File | Nội dung | Tác động |
+| Chủ đề | Bản 26/10 | Bản này (28/10) | Vì sao đổi |
+|---|---|---|---|
+| Kích thước VPS | "2 vCPU / 2 GB là tối thiểu, 1 GB không đủ" | **1 vCPU / 1 GB đủ dùng**, với điều kiện chạy OmniRoute slim, bật zram và đặt giới hạn systemd | Bản cũ đo OmniRoute qua lệnh `omniroute serve` (CLI). Lệnh này sinh **2 process**, trong đó process giám sát (supervisor) chiếm riêng ~100 MB [đo thực tế: `/workspace/omb/A.out`, `M.out`, `C512.out`, cột `per`]. Tổng là ~490-560 MB khi rảnh. Chế độ slim chạy thẳng `node server-ws.mjs` (1 process) với `--max-semi-space-size=2` và tắt dịch vụ nền. Khi đó còn **343-393 MB rảnh, 450-490 MB đỉnh** [đo thực tế: `/workspace/omb/E.out`, `I.out`, `J.out`, `L.out`]. |
+| Proxy biên | Caddy (~49 MB) | **nginx 1.26** (4-5 MB) | nginx nhẹ hơn ~40 MB [đo thực tế: REPORT]. TLS do Cloudflare đảm nhận, nên không cần ACME tự động của Caddy. |
+| TLS | Caddy tự cấp chứng chỉ, hoặc Cloudflare Tunnel | **Cloudflare proxy + Cloudflare Origin CA certificate**, chế độ Full (strict) | Không cần certbot hay ACME trên máy. Không chạy thêm process `cloudflared`. |
+| Engine phân tích tự động | Service systemd riêng | **Chạy trong process copilot** (anh duyệt 28/10) | Tiết kiệm một interpreter Python (~150 MB [đo thực tế: `bench.out`, slim idle 154 MB]), vì 1 GB không đủ chỗ cho hai process Python. |
+| Copilot | `pydantic-ai` bản đầy đủ, 169-277 MB | **`pydantic-ai-slim[openai]`**, lazy import Anthropic, **154 MB rảnh, 164-204 MB đỉnh** | Đo lại trên Python 3.13 [đo thực tế: `/workspace/vps/run/bench.out`]. venv giảm 201 → 109 MB. |
+| `exchangeInfo` | Tải toàn bộ ~17,8 MB đồng bộ, +114 MB đỉnh | **Đã được coder sửa:** tải async theo từng symbol (`exchangeInfo?symbol=X`) và cache ra đĩa (`symbol_tick.py` tại `97369f58`) | Đỉnh +114 MB không còn áp dụng. |
+| Cổng uvicorn | 8000 | **8787** | Theo REPORT |
+| Phương án 2 GB | Là khuyến nghị chính | **Bỏ**, không giữ làm dự phòng | REPORT không đề cập gói 2 GB. Phương án nâng cấp mà REPORT nêu là `vhp-1c-1gb` ($6, CPU nhanh hơn, vẫn 1 GB). |
+| Litestream | Đề xuất chạy liên tục | **Chuyển thành câu hỏi mở.** Mặc định dùng `sqlite3 .backup` theo timer (không có process thường trú) | RAM của Litestream chưa được đo. Trên 1 GB, mỗi MB đều phải tính. |
+
+---
+
+## 1. Hiện trạng repo liên quan (tại `97369f58`)
+
+| File | Hiện trạng | Việc cần làm |
 |---|---|---|
-| `DEPLOY.md` | Web lên Vercel, copilot lên Render | Thay bằng VPS |
-| `render.yaml` | Plan free, region **oregon** | Không đổi region khi chưa có OK của anh. Kế hoạch này chỉ *bỏ dùng* Render sau khi VPS chạy ổn. |
-| `deploy/DEPLOY.md`, `deploy/docker-compose.yml` | VPS bằng Docker Compose: web :3000 proxy tới copilot :8000, có profile Postgres 16 | Kế hoạch này **không dùng Docker**, nhưng tái dùng ý tưởng proxy |
-| `deploy/cloudrun/deploy.sh` | Cloud Run `asia-southeast1`, min-instances 0, timeout 600, Secret Manager | Kế hoạch đang dừng, thay thế |
-| `apps/copilot/Dockerfile`, `apps/web/Dockerfile` | python:3.12-slim; node:22-alpine standalone | Tham khảo bước build |
-| `apps/copilot/pyproject.toml` | fastapi, uvicorn[standard], pydantic-ai (bản **đầy đủ**), httpx, sqlalchemy, alembic, **psycopg[binary]** | Đề xuất làm gọn (§10) |
-| `apps/copilot/src/cryptosignal_copilot/config.py` (`load_database_url`) | `DATABASE_URL` → `COPILOT_SESSIONS_DB` → `COPILOT_DATA_DIR/sessions.sqlite3` → **`/tmp`** | Phải đặt `COPILOT_DATA_DIR`, nếu không sẽ mất dữ liệu khi reboot |
-| `db/engine.py` | `create_engine(url, pool_pre_ping=True)`, SQLite `check_same_thread=False`, **chưa bật WAL** | Đề xuất bật WAL (§4) |
-| `app.py` | Drain loop toàn cục, keepalive SSE mỗi 12 s, migration khi `COPILOT_RUN_DB_MIGRATIONS` | Chạy 1 worker. Keepalive 12 s thỏa giới hạn của Cloudflare. |
-| `symbol_tick.py` | Tải `exchangeInfo` (~17,8 MB) bằng urllib đồng bộ, cache trong RAM | +114 MB RSS đỉnh, 2,56 s [đo]. Đề xuất sửa (§10) |
-| `klines.py` | `data-api.binance.vision` | Phải truy cập được từ VPS (§11) |
-| `apps/web/next.config.ts` | `output: "standalone"` | Chuyển sang `export` (§3) |
-| `apps/web/app/v1/copilot/[...path]/route.ts` + `lib/server/copilot-proxy.ts` | Route handler duy nhất (proxy, `force-dynamic`) | Chặn static export. Caddy làm thay vai trò này. |
-| `apps/web/lib/copilot-api.ts` | Client gọi `NEXT_PUBLIC_COPILOT_URL` nếu có, nếu không thì gọi cùng origin `/v1/copilot/*` | Để trống ⇒ cùng origin, đúng với Caddy |
-| `docs/OMNIROUTE_CONFIG.md`, `apps/copilot/config/omniroute.env.example` | OmniRoute 3.8.51 trên Mac `127.0.0.1:20128`, `LLM_MODEL=agentrouter/deepseek-v4-flash`, `LLM_TIMEOUT_S=180` | Tái dùng trên VPS |
+| `apps/copilot/pyproject.toml` | `pydantic-ai>=2.55,<3` (bản đầy đủ), `psycopg[binary]` bắt buộc | Mục 9, thay đổi #1 và #8 |
+| `apps/copilot/src/cryptosignal_copilot/model_factory.py` | Import `anthropic`, `AnthropicModel`, `AnthropicProvider` ngay ở đầu file | Thay đổi #2 (lazy import, tiết kiệm ~22 MB [đo thực tế: REPORT]) |
+| `apps/web/next.config.ts` | `output: "standalone"` | Thay đổi #3 |
+| `apps/web/app/v1/copilot/[...path]/route.ts` | Proxy Node, route động duy nhất | Loại khỏi bản build export (#3) |
+| `apps/copilot/src/cryptosignal_copilot/db/engine.py` | Chưa bật WAL | Thay đổi #4 |
+| `apps/copilot/src/cryptosignal_copilot/app.py` | Có `CORSMiddleware` đọc `CORS_ORIGINS` / `COPILOT_CORS_ORIGINS`; drain loop toàn cục | #5, #6, #10 |
+| `apps/copilot/src/cryptosignal_copilot/symbol_tick.py` | Đã dùng `httpx` async, `exchangeInfo?symbol=X`, cache ra đĩa | Xong, chỉ cần kiểm tra lại trên VPS |
+| `apps/copilot/src/cryptosignal_copilot/config.py` | Không có cấu hình DB thì rơi về `/tmp` | #7 |
+| `apps/copilot/src/cryptosignal_copilot/rate_limit.py` | IP lấy từ `X-Forwarded-For` | #11 (Cloudflare → nginx → uvicorn) |
 
 ---
 
-## 2. Bố cục hệ thống (systemd, không Docker)
+## 2. Kiến trúc trên VPS
 
 ```
-Internet ──443──► Caddy (cryptosignal-caddy / caddy.service)
-                   ├─ /            → file tĩnh /srv/cryptosignal/web/current/  (Next export)
-                   └─ /v1/copilot/* → 127.0.0.1:8000  (flush ngay, SSE)
-127.0.0.1:8000  ◄─ cryptosignal-copilot.service   (uvicorn, 1 worker, user cryptosignal)
-127.0.0.1:20128 ◄─ omniroute.service              (omniroute serve --headless, user omniroute)
-                   cryptosignal-autoscan.service  (Phase sau; đọc/ghi cùng SQLite)
-                   litestream.service             (stream WAL → S3-compatible)
+Trình duyệt ──HTTPS──► Cloudflare (proxy, cam) ──HTTPS (Origin CA)──► nginx :443 (:80 chỉ để redirect)
+                                                                     ├─ /             → /srv/cryptosignal/web/current/ (Next export `out/`)
+                                                                     └─ /v1/copilot/  → 127.0.0.1:8787 (proxy_buffering off, SSE)
+127.0.0.1:8787  ◄─ cryptosignal-copilot.service  (uvicorn --workers 1; scheduler auto-analysis chạy trong process này)
+127.0.0.1:20128 ◄─ omniroute.service             (node server-ws.mjs, headless, slim)
+                   cryptosignal-backup.timer     (sqlite3 .backup + rclone, oneshot)
 ```
 
-**User và thư mục:**
-- Hai user hệ thống `cryptosignal` và `omniroute`, không có shell đăng nhập.
-- Code: `/srv/cryptosignal/{copilot,web}/releases/<sha>`, symlink `current`.
-- Dữ liệu: `/var/lib/cryptosignal/copilot/`, `/var/lib/omniroute/` (`DATA_DIR`).
-- Biến môi trường: `/etc/cryptosignal/copilot.env`, `/etc/omniroute/omniroute.env`, quyền `0600`, chủ sở hữu là user service. **Không commit**, không đặt trong repo.
-
-**Unit `cryptosignal-copilot.service` (phác thảo cấu hình):**
-- `ExecStart=/srv/cryptosignal/copilot/current/.venv/bin/uvicorn cryptosignal_copilot.app:app --host 127.0.0.1 --port 8000 --workers 1 --proxy-headers --forwarded-allow-ips 127.0.0.1 --timeout-keep-alive 75`
-- `EnvironmentFile=/etc/cryptosignal/copilot.env`
-- `COPILOT_DATA_DIR=/var/lib/cryptosignal/copilot`, `COPILOT_RUN_DB_MIGRATIONS=1`
-- `Restart=on-failure`, `MemoryHigh=400M`, `MemoryMax=600M` (trên VPS 2 GB) **[giả định, chỉnh sau khi đo tải thật]**
-- Hardening: `NoNewPrivileges=yes`, `ProtectSystem=strict`, `ReadWritePaths=/var/lib/cryptosignal`, `PrivateTmp=yes`, `ProtectHome=yes`.
-
-**Unit `omniroute.service`:**
-- `ExecStart=/usr/bin/omniroute serve --headless --no-open --no-tray --port 20128`
-- `Environment=OMNIROUTE_SERVER_HOST=127.0.0.1 OMNIROUTE_MEMORY_MB=512 DATA_DIR=/var/lib/omniroute`
-- Secret đặt trong `EnvironmentFile`, gồm `OMNIROUTE_WS_BRIDGE_SECRET`, bắt buộc ở production theo Docker guide.
-- `MemoryMax=900M`.
-- Lưu ý:
-  - **Không dùng `HOSTNAME`** để bind. `.env.example` của OmniRoute ghi rõ biến này bị shell ghi đè; phải dùng `OMNIROUTE_SERVER_HOST`.
-  - `omniroute autostart enable` tạo *user service* cộng linger. Trên VPS nên viết system unit thay vì dùng lệnh này.
-  - Node ≥ 22.22.2 (hoặc 24). Cài từ NodeSource hoặc tarball chính thức.
-
-**Python:** dùng `uv` hoặc `python3.12 -m venv`, cài từ lockfile. Box có `apps/copilot/uv.lock` chưa được track; cần chốt có commit lockfile hay không.
+- **Firewall:** chỉ mở 22, 80, 443. Cổng 8787 và 20128 chỉ nghe trên `127.0.0.1`.
+- **Copilot:** gọi OmniRoute tại `http://127.0.0.1:20128/v1`, bằng API key riêng đặt trong file env (không commit).
+- **Trình duyệt:** vẫn lấy nến trực tiếp từ `api.binance.com` (`apps/web/lib/binance.ts`). Server chỉ dùng `data-api.binance.vision`.
+- **IPv6-only không áp dụng.** Gói `vc2-1c-0.5gb-v6` chỉ có ở Mỹ. Binance, agentrouter và GitHub đều không có bản ghi AAAA [nguồn: REPORT], nên máy IPv6-only sẽ cần NAT64 hoặc WARP.
 
 ---
 
-## 3. Web: Next standalone hay static export
+## 3. Ngân sách RAM cho VPS 1 GB
 
-| | Standalone (hiện tại) | **Static export (đề xuất)** |
+### 3.1 Theo thành phần
+
+| Thành phần | Rảnh | Đỉnh | Nơi đo |
+|---|---|---|---|
+| OS Debian 13 (đã cắt gọn) | 70-90 MB [ước tính] | | REPORT |
+| OS Ubuntu 24.04 (đã cắt gọn) | 120-150 MB [ước tính] | | REPORT |
+| OmniRoute slim (`server-ws.mjs`, headless, heap 512, semi-space 2) | 343-393 MB [đo thực tế: `/workspace/omb/E.out` 343, `I.out` 380, `J.out` 373, `L.out` 393] | 450-490 MB [đo thực tế: `E.out` 462, `J.out` 460, `L.out` 494 sau 600 request] | LLM giả lập, 250-600 request |
+| OmniRoute qua CLI `omniroute serve` (để so sánh) | 465-543 MB [đo thực tế: `C512.out`, `B.out`] | 612-653 MB [đo thực tế: `C512.out`, `A.out`] | Có thêm process supervisor ~100 MB |
+| Copilot, `pydantic-ai-slim` | 154 MB [đo thực tế: `/workspace/vps/run/bench.out`] | 164-204 MB [đo thực tế: `bench.out` 164; REPORT 204] | 200 nến, LLM giả lập |
+| Copilot, `pydantic-ai` đầy đủ (hiện tại) | 181 MB [đo thực tế: `bench.out`] | 225 MB [đo thực tế: `bench.out`] | |
+| Scheduler auto-analysis trong copilot | +10-30 MB [ước tính] | | Detector tốn ~10 ms/lần, RAM không đáng kể [đo thực tế: phiên 26/10, `build_candidate_catalog` ×20] |
+| nginx 1.26 (static + gzip) | 4 MB [đo thực tế: REPORT] | 5 MB [đo thực tế: REPORT] | |
+| journald, sshd, cron, unattended-upgrades | 20-40 MB [ước tính] | | |
+
+Không dùng:
+- Next standalone (97 MB [đo thực tế: phiên 26/10]).
+- Caddy (42-51 MB [đo thực tế: REPORT]).
+
+### 3.2 Tổng
+
+| Trạng thái | Debian 13 | Ubuntu 24.04 cắt gọn |
 |---|---|---|
-| RAM khi chạy | ~**95 MB** RSS rảnh [đo, `node .next/standalone/server.js`] | 0 (Caddy phục vụ file) |
-| Dung lượng | `.next/standalone` 60 MB + static 1,3 MB [đo] | `out/` **1,4 MB** [đo] |
-| Proxy `/v1/copilot/*` | Route handler Node (`copilot-proxy.ts`) | Caddy `reverse_proxy` |
-| Điều kiện | — | Không có route handler đọc request; không dùng rewrites, cookies hay headers động (theo tài liệu Next). Đã kiểm tra: `/` và `/_not-found` đều tĩnh (`○`), chỉ `/v1/copilot/[...path]` là động (`ƒ`). |
-| Build | — | Build **không chạy trên VPS**: build Next đo được tổng RSS cây process **~970 MB** với 5 worker [đo]. Build trên CI hoặc Mac rồi rsync `out/`. |
+| Thường ngày | **~660 MB** [ước tính: REPORT] | ~710-720 MB [ước tính] |
+| Đỉnh | **~870 MB** [ước tính: REPORT] | ~920 MB [ước tính] |
+| RAM dùng được (1024 MB trừ phần kernel giữ lại) | ~950-980 MB [ước tính] | như bên trái |
 
-**Kết quả thử:**
-- Đổi `output: "export"` và tạm bỏ thư mục `app/v1` ⇒ `next build` thành công, chỉ còn trang tĩnh.
-- `next/font/google` được tải lúc build nên không ảnh hưởng.
+⇒ Lúc đỉnh chỉ còn dư khoảng 80-100 MB [ước tính]. **Bắt buộc bật zram** (mục 5). Debian 13 dư nhiều hơn Ubuntu khoảng 50 MB [ước tính].
 
-**Thay đổi đề xuất** (coder làm, chưa làm):
-- `next.config.ts`: `output: process.env.NEXT_OUTPUT === "export" ? "export" : "standalone"`. Giữ standalone cho Docker/Vercel.
-- Route proxy: phải tách khỏi build export. Có hai cách:
-  - (a) xóa route khi build export bằng script `apps/web/scripts/build-export`;
-  - (b) chuyển route sang thư mục chỉ dùng cho standalone.
-  - Next không có cờ "bỏ qua route" sẵn, nên cách (a) đơn giản nhất **[cần coder xác nhận]**.
-- Không đặt `NEXT_PUBLIC_COPILOT_URL` ⇒ client gọi cùng origin (`lib/copilot-api.ts`).
+### 3.3 Thử nghiệm không có lợi (đã đo, không dùng)
+- **Heap OmniRoute 256 MB ⇒ OOM** [đo thực tế: REPORT].
+- Heap 384 MB không bớt RSS so với 512 MB (`I.out` 455 MB, `E.out` 455 MB sau tải [đo thực tế]).
+- `jemalloc` / `MALLOC_ARENA_MAX` trên copilot: không giảm, `jemalloc` còn tăng lên 159/171 MB [đo thực tế: `bench.out`].
 
-**Caddy** (phác thảo):
-- `cryptosignal.example.vn { encode zstd gzip; root * /srv/cryptosignal/web/current; handle /v1/copilot/* { reverse_proxy 127.0.0.1:8000 { flush_interval -1 } } handle { try_files {path} {path}.html /index.html; file_server } }`
-- Caddy tự flush `text/event-stream`; `flush_interval -1` đặt cho chắc.
-- Header bảo mật (HSTS, `X-Content-Type-Options`), và `Cache-Control: immutable` cho `/_next/static/*`.
+### 3.4 Rủi ro đã biết
+OmniRoute có lỗi rò rỉ bộ nhớ chưa được sửa:
+- Issue #17283: "Memory leak: unbounded pending-request retention causes RSS growth".
+- Issue #17284: giới hạn số pending request.
+- PR sửa lỗi #17282 vẫn **open, chưa merge** [nguồn: GitHub API, kiểm tra 28/10/2026; repo đã chuyển sang `cheaper-inference/OmniRoute`].
+
+Giảm thiểu:
+- `MAX_PENDING_REQUEST_AGE_MS=600000` [cấu hình].
+- `RuntimeMaxSec=1d` (khởi động lại hằng ngày).
+- `MemoryMax` cộng `Restart=always`.
 
 ---
 
-## 4. Cơ sở dữ liệu: SQLite WAL hay Postgres
+## 4. Giới hạn systemd
 
-| | **SQLite WAL (đề xuất)** | Postgres 16 |
+| Unit | MemoryHigh | MemoryMax | OOMScoreAdjust | Nice | Khác |
+|---|---|---|---|---|---|
+| `omniroute.service` | **450M** [cấu hình: REPORT] | **560M** [cấu hình: REPORT] | **300** (bị kill trước) | 5 [cấu hình, đề xuất mới, chưa có trong nguồn] | `Restart=always`, `RestartSec=5`, `RuntimeMaxSec=1d`, `Type=notify`, `WatchdogSec=180` |
+| `cryptosignal-copilot.service` | **230M** [cấu hình: REPORT] | **300M** [cấu hình: REPORT] | **0** | 0 | `uvicorn --workers 1`, không `--reload`, `--no-access-log`, `Restart=on-failure` |
+| `nginx.service` (drop-in) | | | **-500** | | `worker_processes 1` |
+| `cryptosignal-backup.service` (oneshot) | | 150M [cấu hình, đề xuất] | 500 | 10 | `IOSchedulingClass=idle` |
+
+**Mâu thuẫn trong nguồn cần anh chốt:**
+- Bản nháp `/workspace/vps/omniroute.service` ghi `MemoryHigh=850M`, `MemoryMax=1G`, không có `OOMScoreAdjust` và không có `RuntimeMaxSec`. Trong khi đó, phần tóm tắt của REPORT ghi 450M / 560M / 300 / 1d.
+- Trên máy 1 GB, `MemoryMax=1G` không có tác dụng bảo vệ. Vì vậy file mẫu `docs/deploy/omniroute.service` dùng **giá trị của REPORT**.
+- `OMNIROUTE_RSS_PRESSURE_MB=800` trong nguồn **cao hơn** `MemoryMax=560M`. Như vậy cơ chế tự khởi động lại của OmniRoute sẽ không bao giờ kích hoạt trước khi cgroup kill process. File mẫu hạ xuống **520** [cấu hình, đề xuất; cần thử trên VPS].
+- `MemoryHigh=450M` thấp hơn mức đỉnh đo được (450-490 MB). Khi chạm ngưỡng, kernel sẽ thu hồi bộ nhớ và đẩy trang sang zram, nên lúc tải cao có thể chậm hơn [ước tính]. Nếu thấy chậm, nâng lên 480M.
+- `Type=notify` với `WatchdogSec=180` cần `server-ws.mjs` gửi được `sd_notify`. Điều này **chưa được kiểm chứng trên VPS**. Nếu unit không lên được trạng thái `active`, chuyển sang `Type=simple` và bỏ `WatchdogSec`.
+
+Hardening chung:
+- `NoNewPrivileges=true`, `ProtectSystem=full` (hoặc `strict`), `ProtectHome=true`, `PrivateTmp=true`.
+- `ReadWritePaths` chỉ trỏ vào thư mục dữ liệu.
+- User hệ thống riêng: `omniroute`, `cryptosignal`.
+
+File mẫu: **`docs/deploy/omniroute.service`** (chỉ dùng tên biến placeholder, không chứa secret).
+
+---
+
+## 5. zram, swap và sysctl
+
+| Thiết lập | Giá trị | Ghi chú |
 |---|---|---|
-| RAM | Trong process, không tốn thêm | Thêm một service; RSS chưa đo trên box **[giả định: vài chục tới >100 MB tùy `shared_buffers`]** |
-| Đồng thời | 1 writer cùng nhiều reader. Đủ cho copilot 1 worker và engine autoscan (ghi ít, mỗi job một transaction ngắn) | Nhiều writer |
-| Driver | Có sẵn (`sqlite:///`) | `postgresql+psycopg://` (đã hỗ trợ trong `config.py`) |
-| Backup | Litestream (stream liên tục) cộng `.backup`/`VACUUM INTO` | `pg_dump` cộng WAL-G/pgBackRest |
-| Migration | Alembic (đã có `20251014_0001`, `20251025_0002`). Lưu ý SQLite cần `batch_alter_table` khi ALTER cột. | Alembic như cũ |
+| zram | zstd, **50% RAM** (~512 MB) [cấu hình], `swap-priority=100` | Debian 13: gói `systemd-zram-generator` (mã nguồn `rust-zram-generator` 1.2.1 có trong trixie [nguồn: sources.debian.org]; tên gói nhị phân [chưa xác minh]). Phương án thay thế là `zram-tools` 0.3.7 [nguồn: sources.debian.org]. |
+| Swapfile | **1 GB**, priority 10 [cấu hình] | Chỉ dùng khi zram đã đầy |
+| `vm.swappiness` | 150 | Kernel ≥ 5.8 cho phép tới 200. Đặt cao để ưu tiên zram. |
+| `vm.page-cluster` | 0 | zram không lợi gì khi đọc trước nhiều trang |
+| `vm.watermark_scale_factor` | 125 | kswapd thu hồi sớm hơn |
+| `net.core.default_qdisc` / `net.ipv4.tcp_congestion_control` | `fq` / `bbr` | |
+| journald | `SystemMaxUse=50M`, `RuntimeMaxUse=16M`, `MaxRetentionSec=2week` | |
 
-**Đề xuất code** (`apps/copilot/src/cryptosignal_copilot/db/engine.py`):
-- Thêm listener `connect` cho SQLite: `PRAGMA journal_mode=WAL`, `PRAGMA busy_timeout=5000`, `PRAGMA synchronous=NORMAL`, `PRAGMA foreign_keys=ON`.
-- Hai process (copilot + autoscan) cùng ghi cần `busy_timeout`. Ghi bằng `BEGIN IMMEDIATE` để tránh lỗi nâng khóa.
-
-**Chuyển sang Postgres khi:**
-- cần nhiều hơn 1 worker hoặc nhiều VPS; hoặc
-- thấy lỗi "database is locked" thường xuyên dù đã bật WAL.
-
-**Phụ thuộc:** `psycopg[binary]` là dependency bắt buộc dù không dùng Postgres. Đề xuất chuyển sang extra `[postgres]`.
+**Cắt gọn OS** (theo REPORT):
+- Gỡ `snapd`, `multipathd`, `ModemManager`, `udisks2`, `packagekit`, `apport`, `fwupd`. Đa số những gói này chỉ có trên Ubuntu.
+- Tắt `cloud-init` sau lần boot đầu (`touch /etc/cloud/cloud-init.disabled`).
+- **Giữ** `unattended-upgrades`.
+- Đĩa dùng ~8/25 GB [ước tính: REPORT], trong đó riêng OmniRoute cài qua npm đã chiếm 2,8 GB [đo thực tế: phiên 26/10].
 
 ---
 
-## 5. Ngân sách RAM
+## 6. Web: nginx phục vụ bản static export
 
-**Số đo** [đo trên box, Linux x64, Python 3.12, Node 22.22.2; RSS khi rảnh]:
-
-| Thành phần | RSS |
-|---|---|
-| uvicorn copilot, 1 worker, probe tắt | **169 MB** (PSS 154) |
-| … sau khi nạp `exchangeInfo` | đỉnh **277 MB**, rồi giảm về **178 MB** |
-| `build_candidate_catalog` ×20 (200 nến 1h) | ~10 ms/lần, RAM không đáng kể |
-| OmniRoute 3.8.52 `serve` đầy đủ (heap tự chỉnh) | **562 MB** (2 process) |
-| OmniRoute `--headless`, heap tự chỉnh | **535 MB** |
-| OmniRoute `--headless`, `OMNIROUTE_MEMORY_MB=384`, sau 30 request | **488 → 494 MB** |
-| Next standalone `server.js` | **97 MB** (bỏ được nếu dùng export) |
-| Caddy 2.11.7 (file_server + reverse_proxy, chưa có TLS) | **49 MB** |
-
-Ghi chú:
-- Số đo OmniRoute là với thư mục dữ liệu trống và chưa cấu hình provider. Khi có tải thật có thể cao hơn **[chưa đo]**.
-- `.env.example` của OmniRoute tự ghi: native memory (better-sqlite3, buffer) khoảng **~300 MB** ngoài heap.
-- Bản cài npm toàn cục của OmniRoute chiếm **2,8 GB đĩa** [đo]. Cần ≥ 25 GB SSD.
-
-| Hạng mục | VPS 1 GB | **VPS 2 GB (đề xuất)** | VPS 4 GB |
-|---|---|---|---|
-| OS + systemd + journald + sshd **[giả định]** | ~150 MB | ~150 MB | ~150 MB |
-| Caddy | ~50 | ~50 | ~50 |
-| OmniRoute (`MEMORY_MB`) | ~490 (384) | ~500–600 (512) | ~600–800 (1024) |
-| Copilot (đỉnh) | ~280 | ~280 | ~280 |
-| Autoscan (cùng import, ~165 MB) | không đủ chỗ; chỉ dùng timer oneshot | ~170 | ~170 |
-| Web | 0 (export) | 0 | 0 |
-| **Tổng** | **~970 MB + autoscan ⇒ vượt** | **~1,15–1,25 GB** | ~1,3–1,5 GB |
-| Swap | 2 GB (bắt buộc, sẽ chậm) | **1–2 GB** swapfile, `vm.swappiness=10` | 1 GB |
-
-⇒ **1 GB chỉ chạy được nếu** OmniRoute tối thiểu, không có autoscan, và chấp nhận swap. Không khuyến nghị. **2 GB** là mức nên dùng. Thêm `zram` là tùy chọn.
+- Build trên Mac hoặc CI, **không build trên VPS**: `next build` cần ~970 MB [đo thực tế: phiên 26/10, tổng RSS cây process]. Sau đó rsync `out/` (1,4 MB [đo thực tế: phiên 26/10]) vào `/srv/cryptosignal/web/releases/<sha>`, rồi trỏ symlink `current`.
+- Để trống `NEXT_PUBLIC_COPILOT_URL` ⇒ client gọi cùng origin `/v1/copilot/*` (`apps/web/lib/copilot-api.ts`).
+- nginx (phác thảo, không phải file hoàn chỉnh):
+  - `worker_processes 1;`
+  - `gzip on;`
+  - `location / { try_files $uri $uri.html /index.html; }`
+  - `location /_next/static/ { expires 1y; add_header Cache-Control "public, immutable"; }`
+  - `location /v1/copilot/ { proxy_pass http://127.0.0.1:8787; proxy_http_version 1.1; proxy_buffering off; proxy_read_timeout 600s; proxy_set_header X-Forwarded-For $remote_addr; }`
+- **IP thật khi đi qua Cloudflare:** dùng `set_real_ip_from <dải IP Cloudflare>` và `real_ip_header CF-Connecting-IP`. Nhờ vậy `$remote_addr` là IP người dùng, và rate limit trong `rate_limit.py` không bị dồn về một IP.
+- **TLS:**
+  - Chứng chỉ Cloudflare Origin CA. Gói Free cũng dùng được [nguồn: Cloudflare docs], chế độ **Full (strict)**.
+  - Chứng chỉ này chỉ được trình duyệt tin khi đi qua proxy Cloudflare (bản ghi phải bật đám mây cam).
+  - Cloudflare **không gửi email nhắc hết hạn** cho Origin CA [nguồn: Cloudflare docs]. Phải tự theo dõi ngày hết hạn.
+  - Khóa riêng của chứng chỉ đặt ở `/etc/ssl/private/`, quyền `0600`, không commit.
+- **SSE qua Cloudflare:** Proxy Read Timeout là 125 s [nguồn: Cloudflare connection limits]. App gửi keepalive mỗi 12 s (`app.py`) nên an toàn.
 
 ---
 
-## 6. Biên mạng: Caddy, nginx+certbot hay Cloudflare Tunnel
+## 7. OmniRoute slim
 
-| | **Caddy (đề xuất)** | nginx + certbot | Cloudflare Tunnel (`cloudflared`) |
-|---|---|---|---|
-| TLS | Tự động (ACME), tự gia hạn | certbot cộng timer | Cloudflare lo; VPS không mở 80/443 |
-| SSE | Tự flush `text/event-stream` | Cần `proxy_buffering off` (app đã gửi `X-Accel-Buffering: no`) | Proxy Read Timeout **125 s**. App gửi keepalive mỗi 12 s (`app.py`) nên ổn |
-| RAM | ~49 MB [đo] | Thấp hơn **[chưa đo]** | `cloudflared` **[chưa đo]** |
-| Ghi chú | 1 binary, cấu hình ngắn | Quen thuộc | Ẩn IP gốc, chống DDoS cơ bản. Thêm phụ thuộc vào Cloudflare. IP client phải lấy từ `CF-Connecting-IP`. |
-
-**Lưu ý rate limit:**
-- `rate_limit.py` lấy IP từ `X-Forwarded-For`. Uvicorn phải chỉ tin proxy `127.0.0.1` (`--forwarded-allow-ips 127.0.0.1`), và không được mở cổng 8000 ra ngoài.
-- Nếu dùng Cloudflare, Caddy phải ghi đè `X-Forwarded-For` bằng `CF-Connecting-IP`. Nếu không, mọi người dùng sẽ chung một IP và cùng bị giới hạn **[cần coder kiểm tra cách `rate_limit.py` chọn hop]**.
-
----
-
-## 7. Firewall và SSH
-- `ufw default deny incoming`. Chỉ mở `22/tcp` (hoặc cổng SSH tùy chọn) và `80,443/tcp` (bỏ nếu dùng Tunnel).
-- **Không mở 8000 hay 20128.** Kiểm tra bằng `ss -ltnp`: chỉ Caddy và sshd được nghe trên `0.0.0.0`.
-- SSH:
-  - `PasswordAuthentication no`, `PermitRootLogin no`, `KbdInteractiveAuthentication no`.
-  - Chỉ dùng key ed25519, `AllowUsers deploy`.
-  - Cài `fail2ban` hoặc `sshguard`.
-- `unattended-upgrades` cho bản vá bảo mật. Bật đồng bộ thời gian (`systemd-timesyncd`), quan trọng cho việc tính giờ đóng nến.
-- Dashboard OmniRoute (nếu không dùng `--headless`): chỉ truy cập qua SSH tunnel `ssh -L 20128:127.0.0.1:20128`.
+- Cài: Node 22 LTS (mới nhất là `v22.23.4` [nguồn: nodejs.org/dist/index.json]), rồi `npm i -g omniroute@3.8.52` (bản mới nhất trên npm ngày 28/10 [nguồn: registry.npmjs.org]).
+  - Debian 13 chỉ có `nodejs` 20.19.2 [nguồn: sources.debian.org], thấp hơn mức OmniRoute yêu cầu (≥ 22.22.2). Vì vậy phải cài Node từ tarball chính thức hoặc từ NodeSource.
+- Chạy thẳng: `node --dns-result-order=ipv4first --max-old-space-size=512 --max-semi-space-size=2 server-ws.mjs`, với `WorkingDirectory=<npm root>/omniroute/dist`.
+  - **Không dùng `omniroute serve`**, vì lệnh này thêm process supervisor ~100 MB [đo thực tế: `/workspace/omb/M.out`].
+- Biến môi trường chính [cấu hình]:
+  - `OMNIROUTE_HEADLESS=1`, `OMNIROUTE_DISABLE_BACKGROUND_SERVICES=true`, `REQUIRE_API_KEY=true`
+  - `OMNIROUTE_SERVER_HOST=127.0.0.1`, cổng 20128
+  - `OMNIROUTE_MEMORY_MB=512`, `MALLOC_ARENA_MAX=2`
+  - `CALL_LOG_RETENTION_DAYS=3`, `CALL_LOG_MAX_ENTRIES=2000`, `MAX_PENDING_REQUEST_AGE_MS=600000`
+  - `APP_LOG_TO_FILE=false`, `APP_LOG_LEVEL=warn`
+- Biến bí mật nằm trong `/var/lib/omniroute/.env` (quyền `0600`, chủ sở hữu `omniroute`). **Chỉ ghi tên, không ghi giá trị:** `STORAGE_ENCRYPTION_KEY`, `JWT_SECRET`, `API_KEY_SECRET`, `INITIAL_PASSWORD`, và `OMNIROUTE_WS_BRIDGE_SECRET` (bắt buộc ở production theo Docker guide của OmniRoute).
+- Rate limit mặc định của OmniRoute cho mỗi API key là **60 req/phút, giãn cách 350 ms** [nguồn: REPORT, Settings > Resilience]. Mức này có thể làm chậm bước probe model của copilot (`model_probe.py` probe lần lượt từng model). Chỉnh trong dashboard nếu cần.
+- Mac dùng chung cấu hình slim qua script `docs/deploy/omniroute-slim-mac.sh` (bản sao của `/workspace/vps/omniroute-slim-mac.sh`; script đọc `~/.omniroute/.env`, không chứa secret).
+- **Provider:**
+  - Chỉ dùng `agentrouter/*` (API key HTTP).
+  - Provider `cursor/*` cần `cursor-agent` CLI và phải đăng nhập, nên không đưa lên VPS (giữ khuyến nghị của bản 26/10).
+- Dashboard bị tắt ở chế độ headless. Cấu hình provider bằng một trong hai cách:
+  - (a) tạm bật dashboard rồi vào qua SSH tunnel `ssh -L 20128:127.0.0.1:20128`;
+  - (b) dùng CLI.
+  - **Không copy** `storage.sqlite` từ Mac, vì file này chứa credential.
 
 ---
 
-## 8. Backup, log và giám sát
+## 8. Copilot (uvicorn) và scheduler trong cùng process
 
-**Backup:**
-- **Litestream v0.5.17** (31/8/2026): stream WAL của `sessions.sqlite3` lên S3-compatible (Cloudflare R2, Backblaze B2, DO Spaces).
-- Cộng thêm `sqlite3 sessions.sqlite3 ".backup /var/backups/cs-$(date +%F).sqlite3"` hằng ngày bằng systemd timer, giữ 14 bản, đẩy offsite bằng `rclone`.
-- Dữ liệu OmniRoute (`/var/lib/omniroute/storage.sqlite`, có cấu hình provider và key đã mã hóa) dùng cùng timer. Bản backup phải **mã hóa** (`age` hoặc `rclone crypt`) vì có chứa credential.
-- Snapshot của nhà cung cấp (+20% giá trên Vultr; DO +20%/tuần hoặc +30%/ngày) là tùy chọn.
-- **Diễn tập khôi phục** mỗi tháng (`litestream restore`).
-
-**journald:**
-- `/etc/systemd/journald.conf.d/size.conf`: `SystemMaxUse=200M`, `SystemMaxFileSize=20M`, `MaxRetentionSec=14day`.
-- Log của app không được in prompt, key hay token.
-
-**Giám sát:**
-- Uptime ngoài (UptimeRobot hoặc Better Stack, free tier) gọi `GET /v1/copilot/health` và `/`.
-- `systemd` `OnFailure=` gửi cảnh báo Telegram cho admin qua một script nhỏ dùng bot admin riêng.
-- Theo dõi RAM và swap bằng `node_exporter` (nhẹ) hoặc chỉ dùng `systemd-cgtop` và cảnh báo khi `MemoryHigh` bị chạm.
-- Có health check riêng cho Binance: kiểm tra `data-api.binance.vision` mỗi 5 phút, cảnh báo khi gặp 451/403.
+- `ExecStart=<venv>/bin/uvicorn cryptosignal_copilot.app:app --host 127.0.0.1 --port 8787 --workers 1 --no-access-log --proxy-headers --forwarded-allow-ips 127.0.0.1`
+- Env (chỉ ghi tên):
+  - `COPILOT_DATA_DIR=/var/lib/cryptosignal/copilot`, `COPILOT_RUN_DB_MIGRATIONS=1`
+  - `CORS_ORIGINS=https://<tên miền thật>`
+  - `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL=agentrouter/deepseek-v4-flash`
+  - Tất cả đặt trong `/etc/cryptosignal/copilot.env`, quyền `0600`.
+- Cài đặt: `uv sync --no-dev`, sau đó `python -m compileall` để tránh biên dịch lúc chạy.
+- **Scheduler auto-analysis chạy trong process này** (anh duyệt 28/10). Các ràng buộc:
+  1. **Bắt buộc `--workers 1`.** Nhiều worker sẽ làm job chạy trùng.
+  2. Scheduler gọi **hàm pipeline trực tiếp**, không gọi HTTP `/v1/copilot/analyze`, để không đụng drain loop "superseded" (`docs/AUTO_ANALYSIS_SPEC.md` §3.3).
+  3. Dùng semaphore LLM = 1. Phần CPU đồng bộ (detector) chạy bằng `asyncio.to_thread` để không chặn SSE của người dùng.
+  4. Nếu copilot vượt `MemoryMax=300M` thì cả API lẫn scheduler đều khởi động lại. Job phải lưu trong DB và idempotent (spec §10.2).
+  5. Phương án dự phòng đã có trong `AUTO_ANALYSIS_SPEC.md` §3.2: systemd timer oneshot. **Không bật** khi chưa có OK của anh.
 
 ---
 
-## 9. Đặt engine tự động ở đâu
+## 9. Danh sách thay đổi code
 
-| | Trong process uvicorn | **Service riêng (đề xuất)** | systemd timer oneshot |
-|---|---|---|---|
-| RAM | +0 | +~170 MB | +~165 MB chỉ khi chạy (~vài chục giây mỗi giờ) |
-| Cô lập lỗi | Kém | Tốt | Tốt |
-| Tranh chấp | Chung event loop với SSE người dùng; tải `exchangeInfo`/klines chặn loop (urllib đồng bộ trong `symbol_tick.py`) | Tách CPU (`Nice=10`, `CPUWeight=50`) | Như service riêng |
-| Retry gửi tin | — | Liên tục | Cần timer thứ hai |
-
-**Tranh chấp tài nguyên:**
-1. **OmniRoute:** engine dùng semaphore LLM = 1, timeout 60 s. Giờ cao điểm có thể tạm hoãn LLM (`AUTOSCAN_LLM_MODE=off` theo khung giờ).
-2. **SQLite:** WAL cộng `busy_timeout` cộng transaction ngắn.
-3. **Binance:** chung IP outbound. Engine giới hạn ≤ 5 request/giây và dùng jitter.
-4. **CPU:** detector chỉ ~10 ms/lần, không đáng kể. Phần nặng là import Python lúc khởi động và LLM (chạy ở xa).
-
----
-
-## 10. Đề xuất thay đổi code (coder làm sau khi anh duyệt)
+**Đã duyệt 28/10** (REPORT, mục "Code changes (approved by user Oct 28)"):
 
 | # | File | Thay đổi | Lợi ích |
 |---|---|---|---|
-| 1 | `apps/copilot/src/cryptosignal_copilot/db/engine.py` | PRAGMA WAL, `busy_timeout`, `synchronous=NORMAL` qua event `connect` (chỉ với SQLite) | An toàn khi 2 process cùng ghi |
-| 2 | `apps/copilot/src/cryptosignal_copilot/config.py` | Khi chạy production (`COPILOT_ENV=production`) mà không có `DATABASE_URL`/`COPILOT_DATA_DIR`, báo lỗi thay vì rơi về `/tmp` | Tránh mất dữ liệu khi reboot |
-| 3 | `apps/copilot/src/cryptosignal_copilot/symbol_tick.py` | Gọi `exchangeInfo?symbol=XYZ` theo từng symbol (Binance hỗ trợ tham số `symbol`), cache theo symbol, có TTL, cache ra đĩa. Dùng `httpx` async thay vì urllib đồng bộ. | Bớt ~100 MB đỉnh RSS và 2,5 s chặn event loop |
-| 4 | `apps/copilot/pyproject.toml` | `pydantic-ai` → `pydantic-ai-slim[openai]` (OmniRoute nói giao thức OpenAI-compatible); `psycopg[binary]` → extra `[postgres]` | venv **243 → 110 MB** đĩa, RSS import 106 → 99 MB [đo]. Cần chạy lại test để chắc không dùng provider khác. |
-| 5 | `apps/web/next.config.ts` + script build export | `NEXT_OUTPUT=export`; loại `app/v1/copilot/[...path]` khỏi build export | Bỏ process Node |
-| 6 | `apps/copilot/src/cryptosignal_copilot/app.py` | Xác minh và ghi tài liệu về drain loop toàn cục (`latest_request`). Nếu nó là toàn cục theo process thì người dùng A có thể bị "superseded" bởi người dùng B. Cân nhắc gắn theo session/client. | Đúng đắn khi có nhiều người dùng |
-| 7 | `apps/copilot/src/cryptosignal_copilot/rate_limit.py` | Chọn IP client theo cấu hình proxy tin cậy (`TRUSTED_PROXY_HOPS`) | Chống giả mạo `X-Forwarded-For` hoặc dùng chung IP |
-| 8 | `deploy/vps/` (mới) | `Caddyfile`, các unit systemd, `journald.conf.d`, `litestream.yml` (không chứa secret), `deploy.sh` | Tái lập được |
-| 9 | `.github/workflows/` | Job build `out/` và wheel/venv, upload artifact. Deploy **chỉ thủ công** (không tự push lên VPS khi chưa duyệt). | Build không chạy trên VPS |
+| 1 | `apps/copilot/pyproject.toml` | `pydantic-ai` → `pydantic-ai-slim[openai]`; chỉ thêm `[anthropic]` nếu thực sự cần | 181 → 154 MB khi rảnh; venv 201 → 109 MB [đo thực tế: `bench.out`, REPORT] |
+| 2 | `apps/copilot/src/cryptosignal_copilot/model_factory.py` | Lazy import `AnthropicModel` / `AnthropicProvider` / `AsyncAnthropic` bên trong nhánh `cfg.style == "anthropic"` | -22 MB [đo thực tế: REPORT] |
+| 3 | `apps/web/next.config.ts` + script build | `output: "export"` bật theo env; build export bỏ route `app/v1/copilot/[...path]`; nginx lo phần proxy | Không cần process Node |
+| 4 | `apps/copilot/src/cryptosignal_copilot/db/engine.py` | SQLite `PRAGMA journal_mode=WAL`, `synchronous=NORMAL` (cùng `busy_timeout`) qua event `connect` | An toàn khi API và scheduler cùng ghi |
+| 5 | `apps/copilot/src/cryptosignal_copilot/app.py` (lifespan) + module mới `autoscan/` | Scheduler auto-analysis chạy trong process copilot | Tiết kiệm một process Python |
+| 6 | `app.py`, file env | CORS chỉ cho tên miền thật (`CORS_ORIGINS`), bind `127.0.0.1` | Bảo mật |
 
----
+**Các mục ở §10 của bản 26/10.** REPORT ghi "plus items in VPS_DEPLOY_PLAN.md section 10" ngay dưới tiêu đề "approved", nên mình hiểu là **đã duyệt**. Anh xác nhận lại giúp, xem phần Quyết định, mục O1:
 
-## 11. Nhà cung cấp VPS, độ trễ và khả năng truy cập Binance
-
-| Nhà cung cấp | Gói phù hợp | Giá (tháng 10/2026) | Vị trí gần VN |
+| # | File | Thay đổi | Trạng thái |
 |---|---|---|---|
-| **DigitalOcean** | 2 GiB / 1 vCPU · **2 GiB / 2 vCPU** · 4 GiB / 2 vCPU | **$12** · **$18** · $24 (1 GiB/1 vCPU: $6). Backup +20%/tuần hoặc +30%/ngày. Tính tiền theo giây từ 1/1/2026. | Singapore (SGP1) |
-| **Vultr** | Regular 1 vCPU/2 GB · **Regular 2 vCPU/2 GB** · High Perf 2/4 GB | **$10** · **$15** · $24 (Regular 1/1 GB: $5; High Perf 1/2 GB: $12, 2/2 GB: $18). Backup +20%. Giá có thể khác theo vùng. | Singapore |
-| **BizFly Cloud** (VN) | 1/2 GB · **2/2 GB** · 2/4 GB | 120.000đ · **170.000đ** · 240.000đ /tháng (chưa VAT, 100 Mbps) | Hà Nội / TP.HCM |
-| Hetzner Cloud | Cost-Optimized / Regular | Từ €5,99 / €6,49 (chưa VAT) tại EU. **Giá và tình trạng tại Singapore [chưa xác minh]**: trang ghi một số gói "currently not available". | Singapore |
-
-**Độ trễ tới VN:**
-- SG → HN/HCM thường vài chục ms; VN nội địa thấp hơn **[chưa đo; nên đo bằng `mtr` sau khi tạo máy thử]**.
-- Với ứng dụng này, độ trễ LLM (giây) lớn hơn nhiều so với độ trễ mạng.
-
-**Truy cập Binance:**
-- Server chỉ dùng `data-api.binance.vision`, endpoint REST công khai chỉ cho market data, cộng `wss://data-stream.binance.vision`.
-- Trình duyệt người dùng vẫn gọi `api.binance.com` (`apps/web/lib/binance.ts`), và điều này không phụ thuộc VPS.
-- **Tránh region Mỹ**: Render Oregon từng gặp 451.
-- Sau khi tạo VPS: `curl -sI https://data-api.binance.vision/api/v3/ping` phải trả 200 **trước khi** chốt nhà cung cấp.
-
-**Gợi ý:**
-- **DigitalOcean SG 2 GiB/2 vCPU ($18)** hoặc **Vultr SG Regular 2/2 ($15)**: hạ tầng quốc tế, ít rủi ro chặn từ phía Binance.
-- **BizFly 2/2 (170.000đ)**: rẻ, gần người dùng. Cần kiểm tra Binance và tuyến quốc tế tới agentrouter.
+| 7 | `config.py` | Ở production, thiếu `DATABASE_URL` / `COPILOT_DATA_DIR` thì báo lỗi, không rơi về `/tmp` | Chưa làm |
+| 8 | `pyproject.toml` | Chuyển `psycopg[binary]` sang extra `[postgres]` | Chưa làm |
+| 9 | `symbol_tick.py` | Tải `exchangeInfo` async theo từng symbol, cache ra đĩa | **Đã xong** ở `97369f58` |
+| 10 | `app.py` | Xác minh phạm vi drain loop (`latest_request`). Gắn theo session/client nếu đang toàn cục | Chưa làm. Quan trọng hơn trước vì scheduler nay chạy chung process. |
+| 11 | `rate_limit.py` | Chọn IP theo cấu hình proxy tin cậy. Qua Cloudflare + nginx thì lấy `$remote_addr` đã được nginx khôi phục | Chưa làm |
+| 12 | `deploy/vps/` (mới) | nginx conf, các unit systemd, `zram-generator.conf`, `sysctl.d`, `journald.conf.d`, `deploy.sh` (không secret) | Chưa làm. Ví dụ `omniroute.service` hiện ở `docs/deploy/`. |
+| 13 | `.github/workflows/` | Job build `out/` và artifact; deploy chỉ chạy thủ công | Chưa làm |
 
 ---
 
-## 12. OmniRoute trên VPS: điểm cần lưu ý
-- Cài bằng `npm install -g omniroute` (Node ≥ 22.22.2). Bản 3.8.52 trên npm chiếm 2,8 GB đĩa [đo].
-- Cổng 20128, API `/v1`. Redis là tùy chọn: không đặt `REDIS_URL` thì dùng limiter in-memory.
-- Hướng dẫn VM chính thức: tối thiểu 1 vCPU / 1 GB, khuyến nghị 2 vCPU / 2 GB. Số đo của mình xác nhận 1 GB là quá chật.
-- `OMNIROUTE_MEMORY_MB`: `.env.example` gợi ý 512 cho 1 GB và **1024 cho 2 GB**. Đề xuất **512** trên VPS 2 GB để chừa chỗ cho copilot và autoscan.
-- **Bảo mật:** `REQUIRE_API_KEY` mặc định là false. Phải bật API key **và** bind loopback. Copilot gọi OmniRoute bằng key riêng, đặt trong `copilot.env`, không commit.
-- **Provider:**
-  - `agentrouter/deepseek-v4-flash` là API key HTTP, chạy được trên VPS. Phải tuân thủ tài liệu agentrouter (https://agentrouter.org/docs/index.html) theo yêu cầu trước đây của anh.
-  - `cursor/*` (`cursor/auto*`, `composer-2.5` trong allowlist ở `docs/OMNIROUTE_CONFIG.md`) chạy qua `cursor-agent` CLI cần đăng nhập. Mỗi lần lỗi có thể mất ~18 s mới trả 502. → Đề xuất **bỏ khỏi allowlist trên VPS**.
-- Chuyển cấu hình từ Mac (`~/.omniroute/storage.sqlite`): **không copy trực tiếp** vì có credential. Nên cấu hình lại trên VPS qua SSH tunnel vào dashboard, hoặc qua CLI.
+## 10. Nhà cung cấp và gói
+
+| Gói Vultr | vCPU / RAM / đĩa / băng thông | Giá/tháng | Có ở `sgp`? | Ghi chú |
+|---|---|---|---|---|
+| **`vc2-1c-1gb`** (đã chọn) | 1 / 1024 MB / 25 GB / 1 TB | **$5** | Có (31 vị trí) | [nguồn: `api.vultr.com/v2/plans`, 28/10/2026] |
+| `vhp-1c-1gb-amd` / `-intel` | 1 / 1024 MB / 25 GB NVMe / 2 TB | $6 | Có | CPU nhanh hơn. Là đường nâng cấp theo REPORT. [nguồn: Vultr API] |
+| `vc2-1c-0.5gb` | 1 / 512 MB / 10 GB | $3,50 | Không (chỉ `ewr`) | [nguồn: Vultr API] |
+| `vc2-1c-0.5gb-v6` | IPv6-only, 512 MB | $2,50 | Không (Mỹ) | [nguồn: Vultr API] |
+
+- Backup tự động của Vultr: +20% [nguồn: REPORT; vultr.com/pricing].
+- Image trên Vultr: `Debian 13 x64 (trixie)` (os id 2625) và `Ubuntu 24.04 LTS x64` (os id 2284) [nguồn: `api.vultr.com/v2/os`, 28/10/2026].
+- **Debian 13 "trixie"** là bản stable hiện hành: ra mắt 9/8/2025, bản cập nhật mới nhất là **13.7 ngày 12/9/2026** [nguồn: debian.org/releases]. Đi kèm nginx 1.26.3 và Python 3.13.5 [nguồn: sources.debian.org], khớp với Python 3.13 dùng khi đo.
+- **Binance:** khả năng truy cập `data-api.binance.vision` từ IP Vultr Singapore **[chưa xác minh]**. Tạo instance tính theo giờ và chạy `curl https://data-api.binance.vision/api/v3/ping` trước khi dùng lâu dài. Tránh region Mỹ (Render Oregon từng gặp 451).
 
 ---
 
-## 13. Quy trình deploy và runbook
+## 11. Các bước dựng máy
 
-### 13.1 Lần đầu
-1. Tạo VPS (Ubuntu 24.04 LTS). Kiểm tra Binance (`curl … /api/v3/ping`) và agentrouter.
-2. Tạo user `deploy` (chỉ dùng key). Hardening SSH, ufw, unattended-upgrades, swapfile 2 GB, journald limits.
-3. Cài Python 3.12, `uv`, Node 22.22.x, Caddy (repo chính thức), Litestream 0.5.17, `sqlite3`, `rclone`.
-4. Tạo user `cryptosignal` và `omniroute`, các thư mục `/srv`, `/var/lib`, `/etc` như §2.
-5. Cài OmniRoute, viết `omniroute.service`, cấu hình provider agentrouter qua SSH tunnel, bật API key.
-6. Deploy copilot: tạo venv từ artifact CI, `copilot.env`, `systemctl enable --now cryptosignal-copilot`. Migration tự chạy.
-7. Deploy web: rsync `out/` vào `/srv/cryptosignal/web/releases/<sha>`, trỏ `current`.
-8. Cấu hình Caddy, trỏ DNS, kiểm tra HTTPS và SSE (`curl -N`).
-9. Bật `litestream.service` và timer backup. Thử khôi phục.
-10. Bật uptime monitor. Chỉ sau khi chạy ổn 1 tuần mới bàn chuyện bỏ Render/Vercel, và phải có OK của anh.
+1. **Tạo server:** Vultr `vc2-1c-1gb`, `sgp`, Debian 13 (hoặc Ubuntu 24.04), thêm SSH key. Firewall chỉ mở 22/80/443. **Kiểm tra ngay:** `curl -sI https://data-api.binance.vision/api/v3/ping` phải trả 200, và agentrouter phải truy cập được. Không đạt thì xóa máy, thử IP hoặc vị trí khác.
+2. **Hardening và cắt gọn:**
+   - User `deploy`, chỉ đăng nhập bằng key.
+   - `PermitRootLogin no`, `PasswordAuthentication no`.
+   - Gỡ các gói thừa ở mục 5, tắt cloud-init sau lần boot đầu, giữ `unattended-upgrades`.
+   - Bật `systemd-timesyncd` (đồng hồ chuẩn cần cho mốc đóng nến).
+3. **zram, swap, sysctl, journald** theo mục 5. Kiểm tra bằng `swapon --show` và `zramctl`.
+4. **Node 22 LTS và OmniRoute slim:**
+   - Cài từ tarball chính thức, `npm i -g omniroute@3.8.52`.
+   - Tạo user `omniroute` và thư mục `/var/lib/omniroute`.
+   - Tạo `.env` với quyền `0600`, chỉ chứa các biến bí mật ở mục 7.
+   - Cài `docs/deploy/omniroute.service`. Cấu hình provider agentrouter qua SSH tunnel và bật API key.
+5. **Copilot:**
+   - Cài `uv`, copy artifact, `uv sync --no-dev`, `python -m compileall`.
+   - Tạo `/etc/cryptosignal/copilot.env` (`0600`) và unit `cryptosignal-copilot.service` (mục 4, mục 8).
+   - Migration tự chạy khi khởi động.
+6. **nginx:**
+   - Cài nginx 1.26 từ repo Debian và đặt chứng chỉ Origin CA.
+   - Cấu hình theo mục 6.
+   - rsync `out/` từ Mac hoặc CI, trỏ symlink `current`.
+7. **systemd:** `systemctl enable --now omniroute cryptosignal-copilot nginx cryptosignal-backup.timer`.
+8. **Smoke test:**
+   - `curl` tới Binance ping.
+   - `curl -H "Authorization: Bearer <key>" 127.0.0.1:20128/v1/models` (gõ key tay, không lưu vào lịch sử shell).
+   - `curl https://<tên miền>/v1/copilot/health`.
+   - Chạy **một lượt phân tích thật** trên web.
+   - Kiểm tra `free -m`, `systemd-cgtop`, `journalctl -k | grep -i oom`.
+9. **Theo dõi 48 giờ** [cấu hình]: RSS của OmniRoute (rò rỉ #17283), số lần restart, swap và zram, độ trễ. Chỉ sau đó mới bàn chuyện ngừng Render/Vercel, và phải có OK của anh.
 
-### 13.2 Mỗi lần cập nhật
-1. CI build artifact.
-2. `deploy.sh <sha>`: rsync sang `releases/<sha>`, `alembic upgrade head` (hoặc để service tự chạy), đổi symlink `current`, `systemctl restart cryptosignal-copilot`. Web chỉ cần đổi symlink.
-3. Health check. Lỗi thì đổi symlink về bản trước và restart. Migration phải tương thích ngược ít nhất 1 phiên bản để rollback được.
+**Cập nhật sau này:** rsync `releases/<sha>`, đổi symlink, `systemctl restart cryptosignal-copilot`. Web chỉ cần đổi symlink. Lỗi thì đổi symlink về bản cũ.
 
-### 13.3 Sự cố thường gặp
+**Backup:**
+- `cryptosignal-backup.timer` chạy hằng ngày: `sqlite3 ... ".backup ..."`, giữ 14 bản [cấu hình], mã hóa (`age` hoặc `rclone crypt`), đẩy offsite.
+- Dữ liệu OmniRoute (`/var/lib/omniroute`) cũng cần backup **có mã hóa**, vì chứa credential.
+- Mỗi tháng thử khôi phục một lần.
+
+**Giám sát:**
+- Uptime ngoài cho `/` và `/v1/copilot/health`.
+- `OnFailure=` gửi cảnh báo admin.
+- Kiểm tra Binance mỗi 5 phút.
+
+---
+
+## 12. Sự cố thường gặp
 
 | Triệu chứng | Kiểm tra | Xử lý |
 |---|---|---|
-| 502 từ Caddy | `systemctl status cryptosignal-copilot`, `journalctl -u … -n 100` | Restart; xem OOM (`journalctl -k \| grep -i oom`) |
-| LLM lỗi hoặc chậm | `journalctl -u omniroute`, `curl 127.0.0.1:20128/v1/models` (có key) | Restart OmniRoute; kiểm tra quota agentrouter |
-| Binance 451/403 | `curl -sI https://data-api.binance.vision/api/v3/ping` | Đổi IP hoặc vùng (cần OK của anh) |
-| "database is locked" | Tiến trình nào giữ transaction lâu | Kiểm tra `busy_timeout`; cân nhắc Postgres |
-| Hết RAM, swap cao | `systemd-cgtop`, `free -m` | Hạ `OMNIROUTE_MEMORY_MB`, tắt autoscan, nâng gói |
-| Đĩa đầy | `du -sh /var/lib/* /var/log/journal` | `journalctl --vacuum-size=100M`; dọn `releases/` cũ |
+| 502 từ nginx | `systemctl status cryptosignal-copilot`, `journalctl -u cryptosignal-copilot -n 100` | Restart; kiểm tra OOM |
+| OmniRoute restart liên tục | `journalctl -u omniroute`, `systemctl show omniroute -p MemoryCurrent` | Nâng `MemoryHigh` lên 480M; kiểm tra rò rỉ #17283; cân nhắc `vhp-1c-1gb` hoặc nâng RAM (cần OK của anh) |
+| Chậm, swap cao | `zramctl`, `vmstat 1` | Giảm `CALL_LOG_MAX_ENTRIES`; tạm tắt scheduler |
+| Binance 451/403 | `curl` ping | Đổi IP hoặc vị trí (cần OK của anh) |
+| "database is locked" | Transaction nào giữ lâu | Kiểm tra WAL và `busy_timeout` |
+| Cloudflare 526 | Chứng chỉ Origin CA hết hạn hoặc sai | Cấp lại chứng chỉ, kiểm tra chế độ Full (strict) |
 
 ---
 
-## 14. Câu hỏi mở
-1. Ngân sách tháng: $15–18 (SG) hay ~170.000đ (BizFly)? Có chấp nhận lên 4 GB (~$24) để thoải mái không?
-2. Tên miền và DNS: có dùng Cloudflare không? Dùng Tunnel hay mở 443 trực tiếp?
-3. Có giữ provider `cursor/*` trên VPS không? (Đề xuất: không.)
-4. Nơi lưu backup offsite: R2, B2 hay Spaces?
-5. Có cho phép coder làm các thay đổi code ở §10 (nhất là #3, #4, #6) trước khi deploy không?
-6. Khi nào ngừng Render/Vercel? (Chưa đổi gì cho đến khi anh OK.)
-7. Có commit `apps/copilot/uv.lock` để cài đặt tái lập được không?
+## 13. Câu hỏi mở
+1. **O1:** các mục §10 của bản 26/10 (thay đổi #7 đến #13 ở trên) có thực sự đã được duyệt không? REPORT ghi "plus items in section 10" dưới tiêu đề approved.
+2. **O2:** Debian 13 hay Ubuntu 24.04 cắt gọn?
+3. **O3:** giá trị cuối cùng cho `MemoryHigh`/`MemoryMax` của OmniRoute (450M/560M theo REPORT hay 850M/1G theo bản nháp unit) và `OMNIROUTE_RSS_PRESSURE_MB` (800 hay 520)?
+4. **O4:** backup offsite để ở đâu (R2, B2, ...)? Có cần Litestream không (RAM chưa đo)?
+5. **O5:** tên miền và tài khoản Cloudflare nào? Bật proxy cho bản ghi nào?
+6. **O6:** khi nào ngừng Render/Vercel?
+7. **O7:** có commit `apps/copilot/uv.lock` không?
+8. **O8:** có nâng rate limit mặc định của OmniRoute (60 req/phút, 350 ms) để probe model nhanh hơn không?
 
 ---
 
 ## Quyết định cần anh chốt
-1. **Kích thước VPS:** *Đề xuất:* **2 vCPU / 2 GB** (DO SG $18 hoặc Vultr SG $15), swap 2 GB. Không dùng 1 GB vì OmniRoute rảnh đã ~490–560 MB [đo].
-2. **Web:** *Đề xuất:* **Next static export** cộng Caddy phục vụ file và proxy `/v1/copilot/*`. Build trên CI vì build cần ~1 GB RAM. Bỏ process Node (~95 MB).
-3. **DB:** *Đề xuất:* **SQLite WAL** cộng Litestream lên S3-compatible và `.backup` hằng ngày. Đặt `COPILOT_DATA_DIR` cố định. Postgres chỉ khi cần nhiều worker.
-4. **Biên và TLS:** *Đề xuất:* **Caddy** mở 443 cộng ufw. Cloudflare Tunnel là phương án thay thế nếu muốn ẩn IP (khi đó phải sửa cách lấy IP cho rate limit).
-5. **OmniRoute:** *Đề xuất:* system service `--headless`, `OMNIROUTE_SERVER_HOST=127.0.0.1`, `OMNIROUTE_MEMORY_MB=512`, bật API key. **Chỉ dùng provider agentrouter**, bỏ `cursor/*`.
-6. **Engine tự động:** *Đề xuất:* service systemd **riêng** (`Nice=10`, `MemoryMax`), dùng chung SQLite WAL, semaphore LLM = 1. Không chạy trong uvicorn.
-7. **Làm gọn code trước khi deploy:** *Đề xuất:* duyệt các mục §10 #1–#4 (WAL, không rơi về `/tmp`, sửa `exchangeInfo`, `pydantic-ai-slim` và bỏ psycopg khỏi core) và #6 (drain loop). #5 làm cùng lúc chuyển sang static export.
-8. **Nhà cung cấp và vị trí:** *Đề xuất:* Singapore (DO/Vultr). Chạy thử 1 ngày để kiểm tra Binance `data-api`, agentrouter và độ trễ trước khi chốt. BizFly là phương án tiết kiệm nếu kiểm tra đạt.
+
+**Đã chốt (28/10):**
+- ✅ **VPS:** Vultr `vc2-1c-1gb`, Singapore, $5/tháng. Không giữ phương án 2 GB. Đường nâng cấp là `vhp-1c-1gb` ($6).
+- ✅ **Web:** Next static export, nginx phục vụ `out/` và proxy `/v1/copilot/` tới uvicorn `127.0.0.1:8787`. Build trên Mac hoặc CI.
+- ✅ **OmniRoute:** chế độ slim (`server-ws.mjs` chạy thẳng, headless, heap 512, semi-space 2, tắt dịch vụ nền), bind loopback, bật API key, chỉ dùng provider agentrouter.
+- ✅ **TLS:** Cloudflare proxy + Origin CA certificate, chế độ Full (strict). Firewall chỉ mở 22/80/443.
+- ✅ **Scheduler auto-analysis:** chạy trong process copilot, `--workers 1`.
+- ✅ **Thay đổi code #1 đến #6** (mục 9).
+- ✅ **zram bắt buộc**, cộng swapfile 1 GB và sysctl ở mục 5.
+
+**Còn mở:**
+1. **OS:** *Đề xuất:* **Debian 13** (stable, bản 13.7; dư hơn Ubuntu ~50 MB RAM [ước tính]; Python 3.13 khớp với số đo).
+2. **Giới hạn bộ nhớ OmniRoute:** *Đề xuất:* `MemoryHigh=450M`, `MemoryMax=560M`, `OOMScoreAdjust=300`, `RuntimeMaxSec=1d` (theo REPORT), và **`OMNIROUTE_RSS_PRESSURE_MB=520`** (dưới `MemoryMax`). Nếu thấy chậm thì nâng `MemoryHigh` lên 480M.
+3. **Xác nhận các mục §10 cũ** (#7 đến #13): *Đề xuất:* duyệt hết. Ưu tiên **#10 (drain loop)**, vì scheduler nay chạy chung process, và **#11 (IP qua Cloudflare)**.
+4. **Backup:** *Đề xuất:* timer `sqlite3 .backup` hằng ngày cộng `rclone crypt` lên R2 hoặc B2. Chưa dùng Litestream cho đến khi đo được RAM của nó trên VPS.
+5. **Kiểm tra Binance từ IP Vultr SG** trước khi dùng lâu dài: *Đề xuất:* tạo instance tính theo giờ, chạy smoke test bước 1, rồi mới giữ máy.
+6. **Thời điểm ngừng Render/Vercel:** *Đề xuất:* sau 48 giờ chạy ổn trên VPS. Không đổi gì khi chưa có OK của anh.
+7. **Rate limit OmniRoute:** *Đề xuất:* nâng giới hạn cho riêng key của copilot nếu probe model chậm. Giữ mặc định cho các key khác.
 
 ---
 
 ## Nguồn tham khảo
-(Truy cập tháng 10/2026)
+(Kiểm tra ngày 28/10/2026)
 
-**Repo**
-- `DEPLOY.md`, `render.yaml`, `deploy/DEPLOY.md`, `deploy/docker-compose.yml`, `deploy/cloudrun/deploy.sh`
-- `apps/copilot/{DEPLOY.md, Dockerfile, pyproject.toml, config/omniroute.env.example}`
-- `apps/copilot/src/cryptosignal_copilot/{app.py, config.py, db/engine.py, db/models.py, rate_limit.py, symbol_tick.py, klines.py}`
-- `apps/web/{next.config.ts, package.json, app/page.tsx, app/layout.tsx, app/v1/copilot/[...path]/route.ts, lib/server/copilot-proxy.ts, lib/copilot-api.ts, .env.example, Dockerfile}`
-- `.github/workflows/web.yml`
-- `docs/OMNIROUTE_CONFIG.md`, `docs/MODEL_SELECTION_SPEC.md`
+**Dữ liệu đo nội bộ (trên box)**
+- `/workspace/vps/REPORT_vultr_1gb.md`
+- `/workspace/vps/omniroute.service`
+- `/workspace/vps/omniroute-slim-mac.sh`
+- `/workspace/vps/run/bench.out`
+- `/workspace/omb/{A,B,C384,C512,D,E,F,H,I,J,L,M}.out`
+- Phiên đo 26/10 (Next standalone, Caddy, build Next, OmniRoute qua CLI)
 
-**OmniRoute**
-- README, `docs/guides/SETUP_GUIDE.md`, `DOCKER_GUIDE.md`, `skills/cli-serve/SKILL.md`, `.env.example`: https://github.com/diegosouzapw/OmniRoute ; https://omniroute.online
-- SELF_HOST_GUIDE (bản trên jsdelivr).
-- VM deployment guide: chỉ có snippet từ kết quả tìm kiếm; link trực tiếp trả 404.
-- `omniroute serve --help` và `.env.example` của bản npm 3.8.52 (đọc trên box).
+**Repo (tại `97369f58`)**
+- `apps/copilot/pyproject.toml`
+- `apps/copilot/src/cryptosignal_copilot/{app.py, model_factory.py, symbol_tick.py, config.py, rate_limit.py, db/engine.py, model_probe.py}`
+- `apps/web/{next.config.ts, app/v1/copilot/[...path]/route.ts, lib/copilot-api.ts, lib/binance.ts}`
+- `render.yaml`, `deploy/cloudrun/deploy.sh`, `docs/AUTO_ANALYSIS_SPEC.md`
 
-**Next.js, Caddy, Cloudflare, Litestream, SQLite, Binance**
-- Next.js Static Exports: https://nextjs.org/docs/app/guides/static-exports
-- Caddy `reverse_proxy` (flush SSE, `flush_interval`): https://caddyserver.com/docs/caddyfile/directives/reverse_proxy
-- Cloudflare connection limits (Proxy Read Timeout 125 s): https://developers.cloudflare.com/fundamentals/reference/connection-limits/
-- Litestream: https://litestream.io ; releases: https://github.com/benbjohnson/litestream/releases (v0.5.17, 31/8/2026)
-- SQLite WAL: https://www.sqlite.org/wal.html ; `VACUUM INTO`: https://www.sqlite.org/lang_vacuum.html
-- Binance market-data-only: https://github.com/binance/binance-spot-api-docs/blob/master/faqs/market_data_only.md
-- systemd `journald.conf`: https://www.freedesktop.org/software/systemd/man/latest/journald.conf.html
+**Vultr**
+- Danh sách gói (public API, không cần auth): https://api.vultr.com/v2/plans
+- Image OS: https://api.vultr.com/v2/os
+- Bảng giá: https://www.vultr.com/pricing/
 
-**Giá VPS**
-- DigitalOcean Droplets: https://www.digitalocean.com/pricing/droplets
-- Vultr: https://www.vultr.com/pricing/
-- Hetzner Cloud: https://www.hetzner.com/cloud
-- BizFly Cloud VPS: https://bizflycloud.vn/cloud-vps
+**Debian, Node, OmniRoute**
+- Debian releases (13 "trixie", 13.7 ngày 12/9/2026): https://www.debian.org/releases/
+- Phiên bản gói trixie (nginx 1.26.3, python3 3.13.5, nodejs 20.19.2, rust-zram-generator 1.2.1, zram-tools 0.3.7): https://sources.debian.org
+- Node.js releases (v22.23.4 LTS "Jod"): https://nodejs.org/dist/index.json
+- OmniRoute npm (3.8.52): https://registry.npmjs.org/omniroute/latest
+- OmniRoute repo: https://github.com/cheaper-inference/OmniRoute (trước là `diegosouzapw/OmniRoute`)
+  - Issue #17283, #17284 và PR #17282: https://github.com/cheaper-inference/OmniRoute/issues/17283
+
+**Cloudflare**
+- Origin CA (có ở gói Free, không nhắc hết hạn, Full strict): https://developers.cloudflare.com/ssl/origin-configuration/origin-ca/
+- Connection limits (Proxy Read Timeout 125 s): https://developers.cloudflare.com/fundamentals/reference/connection-limits/
+
+**Binance**
+- Market data only: https://github.com/binance/binance-spot-api-docs/blob/master/faqs/market_data_only.md
 
 **Chưa xác minh**
-- Giá Hetzner tại Singapore.
-- RSS của OmniRoute khi có tải thật, và RSS của `cloudflared`, nginx, Postgres.
-- Độ trễ SG/VN.
-- Cách `rate_limit.py` chọn hop trong `X-Forwarded-For`.
-- Phạm vi của drain loop trong `app.py`.
+- Truy cập Binance từ IP Vultr SG.
+- Mọi số đo trên VPS thật. Các số hiện tại đo trên box, với LLM giả lập.
+- RAM của OS (ước tính theo REPORT).
+- Tên gói nhị phân zram trên Debian 13.
+- `Type=notify` của `server-ws.mjs`.
+- RAM của Litestream.
+- Phạm vi drain loop.

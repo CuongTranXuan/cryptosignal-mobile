@@ -1,0 +1,46 @@
+# /etc/systemd/system/omniroute.service
+# VI DU cho VPS 1 GB (Vultr vc2-1c-1gb), Node 22 LTS, `npm i -g omniroute@3.8.52`.
+# Nguon: /workspace/vps/omniroute.service (ban nhap 27/10) + gioi han bo nho theo REPORT_vultr_1gb.md.
+# Khac ban nhap goc: MemoryHigh/MemoryMax 450M/560M (goc 850M/1G), them OOMScoreAdjust=300,
+# RuntimeMaxSec=1d, Nice=5; OMNIROUTE_RSS_PRESSURE_MB=520 (goc 800, cao hon MemoryMax). Xem
+# docs/VPS_DEPLOY_PLAN.md muc 4. KHONG chua secret: gia tri bi mat nam trong EnvironmentFile (chmod 600).
+[Unit]
+Description=OmniRoute headless LLM gateway (slim)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# Chua kiem chung sd_notify tren VPS; neu unit khong len "active", doi sang Type=simple va bo WatchdogSec.
+Type=notify
+NotifyAccess=all
+WatchdogSec=180
+TimeoutStartSec=300
+User=omniroute
+Group=omniroute
+# Duong dan = $(npm root -g)/omniroute/dist; kiem tra lai sau khi cai.
+WorkingDirectory=/usr/lib/node_modules/omniroute/dist
+# File nay chi chua cac bien bi mat, vi du ten bien (khong ghi gia tri o day):
+#   STORAGE_ENCRYPTION_KEY, JWT_SECRET, API_KEY_SECRET, INITIAL_PASSWORD, OMNIROUTE_WS_BRIDGE_SECRET
+EnvironmentFile=-/var/lib/omniroute/.env
+Environment=NODE_ENV=production DATA_DIR=/var/lib/omniroute
+Environment=HOSTNAME=127.0.0.1 OMNIROUTE_SERVER_HOST=127.0.0.1 PORT=20128 OMNIROUTE_PORT=20128 API_PORT=20128 DASHBOARD_PORT=20128
+Environment=OMNIROUTE_HEADLESS=1 OMNIROUTE_DISABLE_BACKGROUND_SERVICES=true REQUIRE_API_KEY=true
+Environment=OMNIROUTE_MEMORY_MB=512 OMNIROUTE_RSS_PRESSURE_MB=520 OMNIROUTE_PRESSURE_SELF_RESTART=true MALLOC_ARENA_MAX=2
+Environment=APP_LOG_TO_FILE=false APP_LOG_LEVEL=warn CALL_LOG_RETENTION_DAYS=3 CALL_LOG_MAX_ENTRIES=2000 CALL_LOGS_TABLE_MAX_ROWS=20000 MAX_PENDING_REQUEST_AGE_MS=600000 DB_BACKUP_MAX_FILES=5
+ExecStart=/usr/bin/node --dns-result-order=ipv4first --max-old-space-size=512 --max-semi-space-size=2 server-ws.mjs
+Restart=always
+RestartSec=5
+# Khoi dong lai hang ngay de chan ro ri pending-request (OmniRoute issue #17283, PR #17282 chua merge).
+RuntimeMaxSec=1d
+MemoryHigh=450M
+MemoryMax=560M
+OOMScoreAdjust=300
+Nice=5
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/omniroute
+
+[Install]
+WantedBy=multi-user.target
