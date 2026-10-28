@@ -10,6 +10,7 @@
 |---|---|
 | Health | `GET /v1/copilot/health` (alias `GET /health`, same body and codes) |
 | Migrations | `cd apps/copilot && alembic upgrade head` |
+| VPS (systemd + nginx, the production target) | [VPS](#vps-1-gb-systemd--nginx) below; plan in `docs/VPS_DEPLOY_PLAN.md` |
 | Compose (web + copilot) | `deploy/DEPLOY.md` |
 | Cloud Run | `deploy/cloudrun/deploy.sh` |
 | Secrets | `LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL`, `DATABASE_URL` via Secret Manager / host env |
@@ -36,15 +37,16 @@ Copilot normalizes `/models` ids (`models/gemini-2.5-flash` → `gemini-2.5-flas
 
 | Variable | Required | Default | Purpose |
 |---|---|---|---|
-| `LLM_API_STYLE` | yes* | — | `openai` or `anthropic` |
+| `LLM_API_STYLE` | yes* | — | `openai` or `anthropic` (`anthropic` needs the `[anthropic]` extra; its SDK is imported only then) |
 | `LLM_BASE_URL` | yes* | — | OpenAI-compatible base URL |
 | `LLM_API_KEY` | yes* | — | Provider API key |
 | `LLM_MODEL` | yes* | — | Default model id; always injected into `/models` fallback |
 | `LLM_TIMEOUT_S` | no | `60` | HTTP timeout for provider calls |
 | `LLM_PROVIDER` | no | auto | `gemini` or `generic`; auto-detect from `LLM_BASE_URL` host |
-| `DATABASE_URL` | no | sqlite under `COPILOT_DATA_DIR` or `/tmp` | SQLAlchemy URL (`sqlite:///`, `postgresql+psycopg://`, `sqlite+libsql://`) |
+| `DATABASE_URL` | no | sqlite under `COPILOT_DATA_DIR`, else `/tmp` (dev only) | SQLAlchemy URL (`sqlite:///`, `postgresql+psycopg://`, `sqlite+libsql://`). SQLite connections use WAL, `synchronous=NORMAL`, `busy_timeout=5000` |
 | `COPILOT_SESSIONS_DB` | no | — | If `DATABASE_URL` unset, derive `sqlite:///` from this path |
 | `COPILOT_DATA_DIR` | no | — | Default sqlite file: `{dir}/sessions.sqlite3` |
+| `COPILOT_ENV` | no | — | `production` turns dev fallbacks into startup errors: no `/tmp` database (needs `DATABASE_URL`, `COPILOT_SESSIONS_DB` or `COPILOT_DATA_DIR`), no CORS by default, `CORS_ORIGINS=*` refused |
 | `COPILOT_RUN_DB_MIGRATIONS` | no | `false` | Run `alembic upgrade head` on process start |
 | `COPILOT_MODEL_PROVIDERS` | no | empty | CSV `owned_by` / id prefix filter; empty = all providers |
 | `COPILOT_MODEL_VISIBILITY_ALLOWLIST` | no | empty | CSV model ids after collapse; empty = no allowlist. Entries **bypass the media filter** when gateways mislabel chat models as `type=image`. |
@@ -72,8 +74,11 @@ Copilot normalizes `/models` ids (`models/gemini-2.5-flash` → `gemini-2.5-flas
 | `COPILOT_DEFAULT_CANDLE_COUNT` | no | `100` | Default session/analyze window |
 | `COPILOT_DEFAULT_MODEL_CONTEXT` | no | `32000` | Catalog fallback when provider omits limits |
 | `COPILOT_DEFAULT_MODEL_MAX_OUTPUT` | no | `4096` | Max-output fallback when provider omits limits |
-| `CORS_ORIGINS` / `COPILOT_CORS_ORIGINS` | prod** | localhost dev | Browser origins when calling API directly |
-| `RATE_LIMIT_PER_MINUTE` | no | `10` | `POST /analyze` per IP |
+| `CORS_ORIGINS` / `COPILOT_CORS_ORIGINS` | no** | dev: `localhost`/`127.0.0.1` on `:3100` and `:3000`; production: none | Browser origins allowed to call the API cross-origin (comma list). Behind nginx the UI is same-origin, so production needs none; list only the real domain if anything calls cross-origin |
+| `RATE_LIMIT_PER_MINUTE` | no | `10` | `POST /analyze` per client IP |
+| `COPILOT_TRUSTED_PROXIES` | no | none | Comma IPs/CIDRs of reverse proxies (VPS: `127.0.0.1`). `X-Forwarded-For` is used for the rate-limit key only when the TCP peer is one of them; the client is the rightmost hop that is not a trusted proxy |
+| `AUTOSCAN_ENABLED` | no | `false` | Start the in-process auto-analysis scheduler in the FastAPI lifespan (lifecycle only so far; the tick does nothing) |
+| `AUTOSCAN_EVERY` | no | `1h` | Scheduler period: `1h` or `2h` |
 | `PORT` | no | `8000` | Uvicorn bind (Docker / Cloud Run) |
 
 \*Required for successful analyze and 200 health; missing → 503 on health/models.  
@@ -97,7 +102,26 @@ If the upstream `/models` call fails (connection refused, DNS, timeout, 5xx, aut
 2. **Legacy sqlite (`copilot_sessions` with JSON `payload` only):** point `DATABASE_URL` or `COPILOT_SESSIONS_DB` at the existing file; migration `20251014_0001` adds `reasoning_effort` if missing. If the schema already matches, `alembic stamp 20251014_0001` then `alembic upgrade head`.
 3. **Postgres / Turso:** use `postgresql+psycopg://…` or `sqlite+libsql://…` (install optional `[libsql]` extra). Same Alembic revision.
 4. **Chart history (`20261026_0003`):** adds `chart_states` (one JSON doc per session/symbol/interval, docs/CHART_HISTORY_SPEC.md). Additive; no backfill. Session deletes remove their charts in the same transaction, so SQLite needs no `PRAGMA foreign_keys`.
-5. **Logging:** in-process upgrades (`COPILOT_RUN_DB_MIGRATIONS=true`) no longer run alembic's `fileConfig`, so uvicorn/app loggers and request tracebacks stay enabled.
+5. **SQLite pragmas:** every connection sets `journal_mode=WAL` (persistent in the file; adds `-wal`/`-shm` files next to it, back them up together or use `.backup`), `synchronous=NORMAL` and `busy_timeout=5000`.
+6. **Logging:** in-process upgrades (`COPILOT_RUN_DB_MIGRATIONS=true`) no longer run alembic's `fileConfig`, so uvicorn/app loggers and request tracebacks stay enabled.
+
+### VPS (1 GB, systemd + nginx)
+
+Production runs on one VPS: nginx serves the static web export and proxies `/v1/copilot/` to one uvicorn worker on loopback; copilot talks to OmniRoute on `127.0.0.1:20128`.
+
+```bash
+# copilot (no extras: OpenAI client only)
+cd apps/copilot && uv sync --frozen --no-editable && .venv/bin/python -m compileall -q src
+COPILOT_ENV=production COPILOT_DATA_DIR=/var/lib/cryptosignal COPILOT_TRUSTED_PROXIES=127.0.0.1 \
+  .venv/bin/uvicorn cryptosignal_copilot.app:app --host 127.0.0.1 --port 8787 --workers 1 --no-access-log
+
+# web: build on the Mac/CI (the build needs ~1 GB RAM), then rsync out/ to the VPS
+cd apps/web && pnpm build:export   # NEXT_STATIC_EXPORT=1; out/ has no Node proxy route
+```
+
+- Bind copilot to `127.0.0.1` only; never expose its port or OmniRoute's.
+- nginx: `proxy_buffering off` for `/v1/copilot/` (SSE; the app also sends `X-Accel-Buffering: no`), and set `X-Forwarded-For` to the real client (`$proxy_add_x_forwarded_for`, or `CF-Connecting-IP` behind Cloudflare).
+- Measured on the Mac (Python 3.14, mocked LLM, 200 4h candles, `footprint`): idle 187 → 130 MB, peak during analyze 196 → 139 MB after the move to `pydantic-ai-slim[openai]` and the lazy anthropic import. Prod `site-packages` 164 → 84 MB.
 
 ### Docker
 
