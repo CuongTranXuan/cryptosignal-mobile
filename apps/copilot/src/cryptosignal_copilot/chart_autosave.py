@@ -28,8 +28,11 @@ logger = logging.getLogger(__name__)
 
 
 class AnalyzeRecorder:
-    def __init__(self, request: AnalyzeRequest, meta: dict[str, Any] | None) -> None:
+    def __init__(
+        self, request: AnalyzeRequest, meta: dict[str, Any] | None, *, owner: str | None = None
+    ) -> None:
         self._request = request
+        self._owner = owner
         self._meta: dict[str, Any] = dict(meta or {})
         self._shapes: list[dict[str, Any]] | None = None
         self._markers: list[dict[str, Any]] = []
@@ -67,6 +70,7 @@ class AnalyzeRecorder:
                 analysis=self._analysis,
                 summary_text="".join(self._text).strip() or None,
                 model=self._meta.get("model"),
+                owner=self._owner,
             )
         except SessionNotFoundError:
             return {**self._meta, "chart_state_error": "session_not_found"}

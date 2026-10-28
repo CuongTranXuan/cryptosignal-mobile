@@ -27,9 +27,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from cryptosignal_copilot.db.engine import get_engine
-from cryptosignal_copilot.db.models import ChartStateRow, CopilotSessionRow
+from cryptosignal_copilot.db.models import ChartStateRow
 from cryptosignal_copilot.schema import INTERVALS, AgentMarker, SessionShape
-from cryptosignal_copilot.sessions_store import SessionNotFoundError
+from cryptosignal_copilot.sessions_store import owned_session_row
 
 logger = logging.getLogger(__name__)
 
@@ -223,9 +223,8 @@ class ChartStateStore:
         return round(float(self._clock()), 3)
 
     @staticmethod
-    def _require_session(session: Session, session_id: str) -> None:
-        if session.get(CopilotSessionRow, session_id) is None:
-            raise SessionNotFoundError(session_id)
+    def _require_session(session: Session, session_id: str, owner: str | None) -> None:
+        owned_session_row(session, session_id, owner)
 
     @staticmethod
     def _row(session: Session, session_id: str, symbol: str, interval: str) -> ChartStateRow | None:
@@ -237,9 +236,9 @@ class ChartStateStore:
             )
         ).scalar_one_or_none()
 
-    def list_charts(self, session_id: str) -> list[dict[str, Any]]:
+    def list_charts(self, session_id: str, *, owner: str | None = None) -> list[dict[str, Any]]:
         with self._lock, self._session_factory() as session:
-            self._require_session(session, session_id)
+            self._require_session(session, session_id, owner)
             rows = session.execute(
                 select(ChartStateRow)
                 .where(ChartStateRow.session_id == session_id)
@@ -247,17 +246,21 @@ class ChartStateStore:
             ).scalars()
             return [_index_entry(row) for row in rows]
 
-    def get_chart(self, session_id: str, symbol: str, interval: str) -> dict[str, Any]:
+    def get_chart(
+        self, session_id: str, symbol: str, interval: str, *, owner: str | None = None
+    ) -> dict[str, Any]:
         with self._lock, self._session_factory() as session:
-            self._require_session(session, session_id)
+            self._require_session(session, session_id, owner)
             row = self._row(session, session_id, symbol, interval)
             if row is None:
                 raise ChartStateNotFoundError()
             return _doc(row)
 
-    def delete_chart(self, session_id: str, symbol: str, interval: str) -> None:
+    def delete_chart(
+        self, session_id: str, symbol: str, interval: str, *, owner: str | None = None
+    ) -> None:
         with self._lock, self._session_factory() as session:
-            self._require_session(session, session_id)
+            self._require_session(session, session_id, owner)
             row = self._row(session, session_id, symbol, interval)
             if row is None:
                 raise ChartStateNotFoundError()
@@ -265,7 +268,13 @@ class ChartStateStore:
             session.commit()
 
     def put_chart(
-        self, session_id: str, symbol: str, interval: str, body: ChartStatePut
+        self,
+        session_id: str,
+        symbol: str,
+        interval: str,
+        body: ChartStatePut,
+        *,
+        owner: str | None = None,
     ) -> dict[str, Any]:
         provided = body.model_fields_set
         fields: dict[str, Any] = {"shapes": [s.model_dump(mode="json") for s in body.shapes]}
@@ -279,7 +288,7 @@ class ChartStateStore:
                 value = value.to_wire()
             fields[key] = value
         with self._lock, self._session_factory() as session:
-            self._require_session(session, session_id)
+            self._require_session(session, session_id, owner)
             row = self._row(session, session_id, symbol, interval)
             if row is None:
                 if body.revision is not None:
@@ -306,12 +315,13 @@ class ChartStateStore:
         analysis: dict[str, Any] | None,
         summary_text: str | None,
         model: str | None,
+        owner: str | None = None,
     ) -> dict[str, Any]:
         """One transaction: keep pinned shapes and the view, replace the rest, bump revision."""
         analyzed_at = self._now()
         for _attempt in range(3):
             with self._lock, self._session_factory() as session:
-                self._require_session(session, session_id)
+                self._require_session(session, session_id, owner)
                 row = self._row(session, session_id, symbol, interval)
                 current = json.loads(row.doc) if row is not None else _empty_body()
                 merged_shapes, merged_markers = merge_analysis_shapes(

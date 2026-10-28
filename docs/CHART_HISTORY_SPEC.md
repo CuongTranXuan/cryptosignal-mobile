@@ -39,6 +39,31 @@ type ChartStateDoc = {
 **Pinned** = `origin == "user" || kept || edited`. There is no `pinned_ids` list and no
 separate `user_shapes` array.
 
+## Ownership (device cookie)
+
+Every session-scoped route is scoped to the calling device: session create, list, get,
+patch and delete, `POST /analyze` with a `session_id`, and all chart routes.
+
+- Auth is a cookie only, never a header: `csm_device=<device_id>.<hmac>`, `HttpOnly`,
+  `SameSite=Lax`, `Path=/`, `Max-Age` 400 days, `Secure` in production. The HMAC key is
+  `COPILOT_DEVICE_SECRET`.
+- The backend sets it on the response to any `/v1/copilot/*` request that arrives without
+  a valid cookie (a missing or forged cookie = a new device). Clients only need to keep
+  cookies: a same-origin `fetch` does; a cross-origin one needs `credentials: "include"`.
+  A proxy in front (the Next route) must forward `Cookie` and `Set-Cookie`.
+- Another device's session, or any session hit without the cookie, is the usual
+  `404 {"error": "session not found"}` (analyze autosave: `chart_state_error:
+  "session_not_found"`). Never 401/403, so existence does not leak.
+- `GET /sessions` lists only the caller's sessions. `MAX_SESSIONS` (50) eviction is per
+  device, so one device never evicts another's sessions.
+- Analyze coalescing ("superseded") is per device too.
+- Legacy sessions created before ownership (`owner_id` NULL) are not listed; the first
+  device that opens one by id adopts it, and from then on it is that device's.
+- Dev only: `COPILOT_DEVICE_COOKIE_OPTIONAL=1` serves cookie-less requests unscoped (every
+  session, as before ownership), for a proxy that does not forward cookies yet.
+
+Storage: `copilot_sessions.owner_id` (nullable, indexed), alembic `20261028_0004`.
+
 ## Endpoints
 
 All under `/v1/copilot/sessions/{sid}`. An unknown session is

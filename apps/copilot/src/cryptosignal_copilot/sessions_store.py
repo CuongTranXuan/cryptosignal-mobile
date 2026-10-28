@@ -67,6 +67,30 @@ class SessionNotFoundError(Exception):
         super().__init__(session_id)
 
 
+def owned_session_row(session: Session, session_id: str, owner: str | None) -> CopilotSessionRow:
+    """The session row if `owner` may use it, else SessionNotFoundError (never 403).
+
+    `owner=None` is an unscoped caller (COPILOT_DEVICE_COOKIE_OPTIONAL): any session.
+    A legacy row without an owner is adopted by the first device that touches it.
+    """
+    row = session.get(CopilotSessionRow, session_id)
+    if row is None:
+        raise SessionNotFoundError(session_id)
+    if owner is None or row.owner_id == owner:
+        return row
+    if row.owner_id is None:
+        row.owner_id = owner
+        session.commit()
+        return row
+    raise SessionNotFoundError(session_id)
+
+
+def _owner_filter(owner: str | None):
+    if owner is None:
+        return CopilotSessionRow.owner_id.is_(None)
+    return CopilotSessionRow.owner_id == owner
+
+
 class SessionsStore:
     def __init__(
         self,
@@ -92,13 +116,15 @@ class SessionsStore:
     def _session(self) -> Session:
         return self._session_factory()
 
-    def list_sessions(self) -> list[SessionSummary]:
+    def list_sessions(self, *, owner: str | None = None) -> list[SessionSummary]:
+        """The caller's sessions; unscoped (owner=None) lists every session."""
+        query = select(CopilotSessionRow)
+        if owner is not None:
+            query = query.where(CopilotSessionRow.owner_id == owner)
         with self._lock:
             with self._session() as session:
                 rows = session.execute(
-                    select(CopilotSessionRow)
-                    .order_by(CopilotSessionRow.updated_at.desc())
-                    .limit(MAX_SESSIONS)
+                    query.order_by(CopilotSessionRow.updated_at.desc()).limit(MAX_SESSIONS)
                 ).scalars()
                 row_list = list(rows)
         out: list[SessionSummary] = []
@@ -121,12 +147,10 @@ class SessionsStore:
             )
         return out
 
-    def get_session(self, session_id: str) -> CopilotSession:
+    def get_session(self, session_id: str, *, owner: str | None = None) -> CopilotSession:
         with self._lock:
             with self._session() as session:
-                row = session.get(CopilotSessionRow, session_id)
-        if row is None:
-            raise SessionNotFoundError(session_id)
+                row = owned_session_row(session, session_id, owner)
         return _session_from_row(row)
 
     def create_session(
@@ -138,8 +162,9 @@ class SessionsStore:
         messages: list[SessionMessage] | None = None,
         reasoning_effort: str | None = None,
         intent: AnalyzeIntent | None = None,
+        owner: str | None = None,
     ) -> CopilotSession:
-        self._evict_if_needed()
+        self._evict_if_needed(owner)
         now = int(time.time())
         record = CopilotSession(
             id=str(uuid.uuid4()),
@@ -152,11 +177,13 @@ class SessionsStore:
             chart=chart,
             messages=(messages or [])[:MAX_MESSAGES_PER_SESSION],
         )
-        self._upsert(record)
+        self._upsert(record, owner_id=owner)
         return record
 
-    def update_session(self, session_id: str, **updates: Any) -> CopilotSession:
-        record = self.get_session(session_id)
+    def update_session(
+        self, session_id: str, *, owner: str | None = None, **updates: Any
+    ) -> CopilotSession:
+        record = self.get_session(session_id, owner=owner)
         allowed = {"title", "model_id", "chart", "messages", "reasoning_effort", "intent"}
         for key, value in updates.items():
             if key not in allowed:
@@ -174,26 +201,33 @@ class SessionsStore:
         self._upsert(record)
         return record
 
-    def delete_session(self, session_id: str) -> None:
+    def delete_session(self, session_id: str, *, owner: str | None = None) -> None:
         with self._lock:
             with self._session() as session:
-                row = session.get(CopilotSessionRow, session_id)
-                if row is None:
-                    raise SessionNotFoundError(session_id)
+                row = owned_session_row(session, session_id, owner)
                 # Cascade explicitly: SQLite does not enforce the FK unless PRAGMA'd on.
                 session.execute(delete(ChartStateRow).where(ChartStateRow.session_id == session_id))
                 session.delete(row)
                 session.commit()
 
-    def _evict_if_needed(self) -> None:
+    def _evict_if_needed(self, owner: str | None) -> None:
+        """MAX_SESSIONS per device, so one device can never evict another's sessions."""
         with self._lock:
             with self._session() as session:
-                count = session.scalar(select(func.count()).select_from(CopilotSessionRow)) or 0
+                count = (
+                    session.scalar(
+                        select(func.count())
+                        .select_from(CopilotSessionRow)
+                        .where(_owner_filter(owner))
+                    )
+                    or 0
+                )
                 if count < MAX_SESSIONS:
                     return
                 to_remove = count - MAX_SESSIONS + 1
                 oldest = session.execute(
                     select(CopilotSessionRow.id)
+                    .where(_owner_filter(owner))
                     .order_by(CopilotSessionRow.updated_at.asc())
                     .limit(to_remove)
                 ).scalars()
@@ -203,9 +237,11 @@ class SessionsStore:
                     session.execute(delete(CopilotSessionRow).where(CopilotSessionRow.id.in_(ids)))
                 session.commit()
 
-    def _upsert(self, record: CopilotSession) -> None:
+    def _upsert(self, record: CopilotSession, **owner_id: str | None) -> None:
+        """`owner_id=` only on create: an update leaves the stored owner alone."""
         payload = record.model_dump(mode="json", by_alias=True)
         row = CopilotSessionRow(
+            **owner_id,
             id=record.id,
             title=record.title,
             created_at=float(record.created_at),

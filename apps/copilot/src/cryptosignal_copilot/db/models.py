@@ -32,6 +32,8 @@ class CopilotSessionRow(Base):
     payload: Mapped[str] = mapped_column(Text, nullable=False)
     reasoning_effort: Mapped[str | None] = mapped_column(String, nullable=True)
     intent_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Device that created the session (device.py); NULL = legacy, adopted on first touch.
+    owner_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
 
 
 class ChartStateRow(Base):

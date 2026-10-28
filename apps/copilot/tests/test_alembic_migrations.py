@@ -50,3 +50,18 @@ def test_alembic_head_creates_chart_states_and_downgrades(tmp_path):
     assert "chart_states" not in inspect(create_engine(url)).get_table_names()
     command.upgrade(ini, "head")  # idempotent re-upgrade
     assert "chart_states" in inspect(create_engine(url)).get_table_names()
+
+
+def test_alembic_0004_adds_session_owner_and_downgrades(tmp_path):
+    url = sqlite_url_for_path(tmp_path / "owner.sqlite3")
+    ini = alembic_config(url)
+    command.upgrade(ini, "head")
+    inspector = inspect(create_engine(url))
+    assert "owner_id" in {c["name"] for c in inspector.get_columns("copilot_sessions")}
+    assert "ix_copilot_sessions_owner_id" in {
+        i["name"] for i in inspector.get_indexes("copilot_sessions")
+    }
+    command.downgrade(ini, "20261026_0003")
+    cols = {c["name"] for c in inspect(create_engine(url)).get_columns("copilot_sessions")}
+    assert "owner_id" not in cols
+    command.upgrade(ini, "head")

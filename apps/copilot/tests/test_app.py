@@ -137,6 +137,8 @@ async def test_analyze_coalesce_single_run_per_latest(llm_env, test_app):
     app = test_app(runner)
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        # Coalescing is per device: take the device cookie before the concurrent posts.
+        await client.get("/v1/copilot/sessions")
         first = asyncio.create_task(
             client.post("/v1/copilot/analyze", json={**ANALYZE, "prompt": "first"})
         )
@@ -155,6 +157,41 @@ async def test_analyze_coalesce_single_run_per_latest(llm_env, test_app):
     superseded = [r for r in results if "superseded" in r.text]
     assert len(superseded) == 2
     assert any("event: text" in r.text and "third" in r.text for r in results)
+
+
+@pytest.mark.asyncio
+async def test_analyze_coalescing_is_per_device(llm_env, test_app):
+    class SlowRunner:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+            self.started = asyncio.Event()
+
+        async def run(self, plan: AnalyzePlan):
+            self.calls.append(plan.request.prompt)
+            self.started.set()
+            await asyncio.sleep(0.1)
+            yield "text", {"delta": plan.request.prompt}
+            yield "done", {}
+
+    runner = SlowRunner()
+    app = test_app(runner)
+    transport = ASGITransport(app=app)
+    async with (
+        AsyncClient(transport=transport, base_url="http://test") as alice,
+        AsyncClient(transport=transport, base_url="http://test") as bob,
+    ):
+        await alice.get("/v1/copilot/sessions")
+        await bob.get("/v1/copilot/sessions")
+        first = asyncio.create_task(
+            alice.post("/v1/copilot/analyze", json={**ANALYZE, "prompt": "alice"})
+        )
+        await runner.started.wait()
+        second = await bob.post("/v1/copilot/analyze", json={**ANALYZE, "prompt": "bob"})
+        first_res = await first
+
+    assert sorted(runner.calls) == ["alice", "bob"]
+    assert "superseded" not in first_res.text and "alice" in first_res.text
+    assert "superseded" not in second.text and "bob" in second.text
 
 
 def test_filter_preview_shapes_drops_invalid():

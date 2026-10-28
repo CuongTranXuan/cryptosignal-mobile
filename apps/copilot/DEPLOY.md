@@ -77,6 +77,9 @@ Copilot normalizes `/models` ids (`models/gemini-2.5-flash` → `gemini-2.5-flas
 | `CORS_ORIGINS` / `COPILOT_CORS_ORIGINS` | no** | dev: `localhost`/`127.0.0.1` on `:3100` and `:3000`; production: none | Browser origins allowed to call the API cross-origin (comma list). Behind nginx the UI is same-origin, so production needs none; list only the real domain if anything calls cross-origin |
 | `RATE_LIMIT_PER_MINUTE` | no | `10` | `POST /analyze` per client IP |
 | `COPILOT_TRUSTED_PROXIES` | no | none | Comma IPs/CIDRs of reverse proxies (VPS: `127.0.0.1`). `X-Forwarded-For` is used for the rate-limit key only when the TCP peer is one of them; the client is the rightmost hop that is not a trusted proxy |
+| `COPILOT_DEVICE_SECRET` | **prod** | dev: generated in `$TMPDIR` | HMAC key (≥ 32 chars, e.g. `openssl rand -base64 48`) for the `csm_device` ownership cookie. Missing in production = startup error. Rotating it gives every browser a new device (old sessions become unreachable) |
+| `COPILOT_DEVICE_COOKIE_OPTIONAL` | no | off | Dev only (refused in production): requests without the cookie are served unscoped (every session), for a web proxy that does not forward `Cookie` yet |
+| `COPILOT_DEVICE_COOKIE_SECURE` | no | on in production | Adds `Secure` to the cookie |
 | `AUTOSCAN_ENABLED` | no | `false` | Start the in-process auto-analysis scheduler in the FastAPI lifespan (lifecycle only so far; the tick does nothing) |
 | `AUTOSCAN_EVERY` | no | `1h` | Scheduler period: `1h` or `2h` |
 | `PORT` | no | `8000` | Uvicorn bind (Docker / Cloud Run) |
@@ -112,6 +115,7 @@ Production runs on one VPS: nginx serves the static web export and proxies `/v1/
 ```bash
 # copilot (no extras: OpenAI client only)
 cd apps/copilot && uv sync --frozen --no-editable && .venv/bin/python -m compileall -q src
+# + COPILOT_DEVICE_SECRET from the systemd EnvironmentFile (never in the unit or the repo)
 COPILOT_ENV=production COPILOT_DATA_DIR=/var/lib/cryptosignal COPILOT_TRUSTED_PROXIES=127.0.0.1 \
   .venv/bin/uvicorn cryptosignal_copilot.app:app --host 127.0.0.1 --port 8787 --workers 1 --no-access-log
 
@@ -120,6 +124,7 @@ cd apps/web && pnpm build:export   # NEXT_STATIC_EXPORT=1; out/ has no Node prox
 ```
 
 - Bind copilot to `127.0.0.1` only; never expose its port or OmniRoute's.
+- nginx must pass `Cookie` through and `Set-Cookie` back (its defaults do); the `csm_device` cookie is the only auth.
 - nginx: `proxy_buffering off` for `/v1/copilot/` (SSE; the app also sends `X-Accel-Buffering: no`), and set `X-Forwarded-For` to the real client (`$proxy_add_x_forwarded_for`, or `CF-Connecting-IP` behind Cloudflare).
 - Measured on the Mac (Python 3.14, mocked LLM, 200 4h candles, `footprint`): idle 187 → 130 MB, peak during analyze 196 → 139 MB after the move to `pydantic-ai-slim[openai]` and the lazy anthropic import. Prod `site-packages` 164 → 84 MB.
 

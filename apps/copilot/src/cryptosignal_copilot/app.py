@@ -5,6 +5,7 @@ import json
 import os
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
 from functools import partial
 from typing import Any
 
@@ -37,6 +38,12 @@ from cryptosignal_copilot.config import (
     validate_llm_env_on_startup,
 )
 from cryptosignal_copilot.db.migrate import run_db_migrations
+from cryptosignal_copilot.device import (
+    DeviceMiddleware,
+    DeviceSettings,
+    device_settings_from_env,
+    request_owner,
+)
 from cryptosignal_copilot.feedback_store import FeedbackStore, get_feedback_store
 from cryptosignal_copilot.intent_prep import normalize_session_intent, resolve_analyze_intent
 from cryptosignal_copilot.logging_setup import configure_logging
@@ -90,6 +97,15 @@ def cors_settings() -> tuple[list[str], bool]:
     return origins, True
 
 
+@dataclass
+class _Drain:
+    """One device's analyze coalescing: only its latest request runs after the current one."""
+
+    latest: AnalyzeRequest | None = None
+    draining: bool = False
+    done: asyncio.Event = field(default_factory=asyncio.Event)
+
+
 def create_app(
     runner: AgentRunner | None = None,
     *,
@@ -99,11 +115,13 @@ def create_app(
     model_probe: ModelProbeService | None = None,
     chart_store: ChartStateStore | None = None,
     autoscan: AutoScanScheduler | None = None,
+    device: DeviceSettings | None = None,
 ) -> FastAPI:
     use_runner: AgentRunner = runner if runner is not None else PydanticAiRunner()
     catalog = models_catalog if models_catalog is not None else get_models_catalog()
     probe = model_probe if model_probe is not None else ModelProbeService(catalog)
     scheduler = autoscan if autoscan is not None else scheduler_from_env()
+    device_settings = device if device is not None else device_settings_from_env()
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -132,6 +150,8 @@ def create_app(
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    # Added last = outermost: every /v1/copilot response can carry the device cookie.
+    app.add_middleware(DeviceMiddleware, settings=device_settings)
 
     rate_limiter = SlidingWindowRateLimiter()
     store = sessions_store if sessions_store is not None else get_sessions_store()
@@ -142,10 +162,8 @@ def create_app(
     )
 
     state_lock = asyncio.Lock()
-    latest_request: dict[str, AnalyzeRequest | None] = {"value": None}
-    is_draining = {"value": False}
-    drain_done = asyncio.Event()
-    drain_done.set()
+    # Keyed by device ("" = unscoped), so one device never supersedes another's run.
+    drains: dict[str, _Drain] = {}
 
     # `/health` is the bare liveness/readiness alias (same body and codes) for probes and
     # humans hitting the API port directly; every other route lives under /v1/copilot.
@@ -266,12 +284,12 @@ def create_app(
         return {"rows": rows}
 
     @app.get("/v1/copilot/sessions")
-    async def list_sessions():
-        summaries = await asyncio.to_thread(store.list_sessions)
+    async def list_sessions(request: Request):
+        summaries = await asyncio.to_thread(store.list_sessions, owner=request_owner(request.state))
         return {"sessions": [s.model_dump() for s in summaries]}
 
     @app.post("/v1/copilot/sessions")
-    async def create_session(body: CreateSessionRequest):
+    async def create_session(body: CreateSessionRequest, request: Request):
         try:
             intent = normalize_session_intent(body.intent) if body.intent is not None else None
             record = await asyncio.to_thread(
@@ -282,6 +300,7 @@ def create_app(
                 messages=body.messages,
                 reasoning_effort=body.reasoning_effort,
                 intent=intent,
+                owner=request_owner(request.state),
             )
         except AnalyzePrepError as exc:
             return JSONResponse(
@@ -291,20 +310,25 @@ def create_app(
         return record.model_dump(by_alias=True)
 
     @app.get("/v1/copilot/sessions/{session_id}")
-    async def get_session(session_id: str):
+    async def get_session(session_id: str, request: Request):
         try:
-            record = await asyncio.to_thread(store.get_session, session_id)
+            record = await asyncio.to_thread(
+                store.get_session, session_id, owner=request_owner(request.state)
+            )
         except SessionNotFoundError:
             return JSONResponse({"error": "session not found"}, status_code=404)
         return record.model_dump(by_alias=True)
 
     @app.patch("/v1/copilot/sessions/{session_id}")
-    async def patch_session(session_id: str, body: UpdateSessionRequest):
+    async def patch_session(session_id: str, body: UpdateSessionRequest, request: Request):
         try:
             patch = body.model_dump(exclude_unset=True, by_alias=True)
             if "intent" in patch:
                 patch["intent"] = normalize_session_intent(patch["intent"])
-            record = await asyncio.to_thread(store.update_session, session_id, **patch)
+            record = await asyncio.to_thread(
+                partial(store.update_session, session_id, owner=request_owner(request.state)),
+                **patch,
+            )
         except AnalyzePrepError as exc:
             return JSONResponse(
                 exc.payload(),
@@ -315,9 +339,11 @@ def create_app(
         return record.model_dump(by_alias=True)
 
     @app.delete("/v1/copilot/sessions/{session_id}")
-    async def delete_session(session_id: str):
+    async def delete_session(session_id: str, request: Request):
         try:
-            await asyncio.to_thread(store.delete_session, session_id)
+            await asyncio.to_thread(
+                store.delete_session, session_id, owner=request_owner(request.state)
+            )
         except SessionNotFoundError:
             return JSONResponse({"error": "session not found"}, status_code=404)
         return {"ok": True}
@@ -362,20 +388,28 @@ def create_app(
             return _too_large(exc)
 
     @app.get("/v1/copilot/sessions/{session_id}/charts")
-    async def list_charts(session_id: str):
+    async def list_charts(session_id: str, request: Request):
         try:
-            entries = await asyncio.to_thread(charts.list_charts, session_id)
+            entries = await asyncio.to_thread(
+                charts.list_charts, session_id, owner=request_owner(request.state)
+            )
         except SessionNotFoundError:
             return _session_missing()
         return {"charts": entries}
 
     @app.get("/v1/copilot/sessions/{session_id}/charts/{symbol}/{interval}")
-    async def get_chart(session_id: str, symbol: str, interval: str):
-        return await _chart_call(symbol, interval, partial(charts.get_chart, session_id))
+    async def get_chart(session_id: str, symbol: str, interval: str, request: Request):
+        owner = request_owner(request.state)
+        return await _chart_call(
+            symbol, interval, partial(charts.get_chart, session_id, owner=owner)
+        )
 
     @app.delete("/v1/copilot/sessions/{session_id}/charts/{symbol}/{interval}")
-    async def delete_chart(session_id: str, symbol: str, interval: str):
-        result = await _chart_call(symbol, interval, partial(charts.delete_chart, session_id))
+    async def delete_chart(session_id: str, symbol: str, interval: str, request: Request):
+        owner = request_owner(request.state)
+        result = await _chart_call(
+            symbol, interval, partial(charts.delete_chart, session_id, owner=owner)
+        )
         return result if isinstance(result, JSONResponse) else {"ok": True}
 
     @app.put("/v1/copilot/sessions/{session_id}/charts/{symbol}/{interval}")
@@ -420,7 +454,10 @@ def create_app(
                 "Hình vẽ không thuộc biểu đồ này",
                 {"ids": stray[:20], "symbol": sym, "interval": ivl},
             )
-        return await _chart_call(sym, ivl, lambda s, i: charts.put_chart(session_id, s, i, body))
+        owner = request_owner(request.state)
+        return await _chart_call(
+            sym, ivl, lambda s, i: charts.put_chart(session_id, s, i, body, owner=owner)
+        )
 
     @app.post("/v1/copilot/analyze")
     async def analyze(request: Request):
@@ -443,13 +480,14 @@ def create_app(
         except ValidationError as exc:
             return JSONResponse({"detail": exc.errors()}, status_code=422)
         prefetch_tick_size(analyze_req.symbol)
+        owner = request_owner(request.state)
 
         try:
             session_intent = None
             if analyze_req.session_id:
                 try:
                     session_record = await asyncio.to_thread(
-                        store.get_session, analyze_req.session_id
+                        store.get_session, analyze_req.session_id, owner=owner
                     )
                 except SessionNotFoundError:
                     return JSONResponse({"error": "session not found"}, status_code=404)
@@ -471,29 +509,37 @@ def create_app(
             )
 
         async def event_stream() -> AsyncIterator[str]:
+            key = owner or ""
             async with state_lock:
-                latest_request["value"] = analyze_req
-                if is_draining["value"]:
+                drain = drains.setdefault(key, _Drain())
+                drain.latest = analyze_req
+                if drain.draining:
                     is_waiter = True
                 else:
-                    is_draining["value"] = True
-                    drain_done.clear()
+                    drain.draining = True
+                    drain.done.clear()
                     is_waiter = False
 
+            def _finish() -> None:
+                drain.latest = None
+                drain.draining = False
+                drain.done.set()
+                if drains.get(key) is drain:
+                    del drains[key]
+
             if is_waiter:
-                await drain_done.wait()
+                await drain.done.wait()
                 yield sse("done", {"note": "superseded"})
                 return
 
             try:
                 while True:
                     async with state_lock:
-                        current = latest_request["value"]
+                        current = drain.latest
                         if current is None:
-                            is_draining["value"] = False
-                            drain_done.set()
+                            _finish()
                             break
-                        latest_request["value"] = None
+                        drain.latest = None
 
                     try:
                         run_plan = await prepare_analyze(
@@ -507,7 +553,9 @@ def create_app(
                     yield sse("meta", run_plan.meta)
                     # With a session, the run is saved as that session's chart history.
                     recorder = (
-                        AnalyzeRecorder(current, run_plan.meta) if current.session_id else None
+                        AnalyzeRecorder(current, run_plan.meta, owner=owner)
+                        if current.session_id
+                        else None
                     )
 
                     queue: asyncio.Queue[tuple[str, str | None, dict | BaseException | None]] = (
@@ -560,9 +608,7 @@ def create_app(
                                 pass
             except Exception:
                 async with state_lock:
-                    latest_request["value"] = None
-                    is_draining["value"] = False
-                    drain_done.set()
+                    _finish()
                 raise
 
         return StreamingResponse(
