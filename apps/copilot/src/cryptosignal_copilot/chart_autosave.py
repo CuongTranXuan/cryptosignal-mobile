@@ -20,6 +20,7 @@ from cryptosignal_copilot.chart_state import (
     ChartStateTooLargeError,
     normalize_key,
 )
+from cryptosignal_copilot.db.errors import DB_UNAVAILABLE_ERRORS
 from cryptosignal_copilot.schema import AgentMarker, AnalyzeRequest
 from cryptosignal_copilot.sessions_store import SessionNotFoundError
 from cryptosignal_copilot.wire_shape import ai_shape_flags
@@ -83,6 +84,9 @@ class AnalyzeRecorder:
             }
         except ChartKeyError as exc:
             return {**self._meta, "chart_state_error": exc.code}
+        except DB_UNAVAILABLE_ERRORS:
+            logger.warning("chart state autosave: database unavailable", exc_info=True)
+            return {**self._meta, "chart_state_error": "db_unavailable"}
         except Exception:
             logger.exception("chart state autosave failed")
             return {**self._meta, "chart_state_error": "chart_state_save_failed"}

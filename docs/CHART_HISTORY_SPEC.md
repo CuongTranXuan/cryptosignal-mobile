@@ -123,6 +123,16 @@ Vietnamese `message`:
 | | `charts` | 50 saved charts per session (a new `(symbol, interval)` beyond it; updates are fine) |
 
 Example bodies: `apps/copilot/tests/fixtures/wire/api_errors.json`.
+
+### Database unavailable
+
+When the database is unreachable or busy past its timeouts, every route that needs it
+(sessions, charts, analyze with a `session_id`) answers
+`503 {code: "db_unavailable", message}` with `Retry-After: 5`. It is retryable: keep the
+local state and try again. `/health` answers the same 503 with `db: "unavailable"` (and
+adds `db: "ok"` to its normal body). Analyze without a `session_id` does not touch the
+database. A failed autosave never fails the analyze: the final `meta` carries
+`chart_state_error: "db_unavailable"` and the stream still ends with `done`.
 Writes are optimistic: `UPDATE … WHERE revision = base`, so two writers never both win.
 
 ### Session delete
@@ -150,7 +160,7 @@ Stream changes (additive):
   event adds `labels: {<id>: <Vietnamese name>}`.
 - A final `meta` event right before `done` carries `chart_state_revision` (the saved
   revision). If the save fails, that `meta` carries `chart_state_error` instead
-  (`session_not_found`, `chart_state_too_large` + `field` + `limit`,
+  (`session_not_found`, `chart_state_too_large` + `field` + `limit`, `db_unavailable`,
   `chart_state_save_failed`).
 - A run that ends with an `error` event saves nothing.
 

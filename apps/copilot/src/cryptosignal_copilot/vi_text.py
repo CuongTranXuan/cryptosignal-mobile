@@ -339,6 +339,7 @@ def localize_guardrail(guard: dict[str, Any], symbol: str) -> dict[str, Any]:
 # --------------------------------------------------------------------------- API errors
 
 ERR_REQUEST_TOO_LARGE = "Yêu cầu quá lớn"
+ERR_DB_UNAVAILABLE = "Cơ sở dữ liệu tạm thời không khả dụng, vui lòng thử lại sau"
 _TOO_LARGE_VI = {
     "shapes": "Biểu đồ có quá nhiều hình vẽ",
     "markers": "Biểu đồ có quá nhiều điểm đánh dấu",

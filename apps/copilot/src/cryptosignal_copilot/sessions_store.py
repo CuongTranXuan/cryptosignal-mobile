@@ -7,7 +7,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from cryptosignal_copilot.config import sqlite_url_for_path
@@ -112,6 +112,11 @@ class SessionsStore:
     @property
     def database_url(self) -> str | None:
         return self._database_url
+
+    def ping(self) -> None:
+        """`SELECT 1`; raises one of DB_UNAVAILABLE_ERRORS when the database is down."""
+        with self._engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
 
     def _session(self) -> Session:
         return self._session_factory()

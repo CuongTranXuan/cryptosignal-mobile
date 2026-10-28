@@ -8,7 +8,7 @@
 
 | Item | Value |
 |---|---|
-| Health | `GET /v1/copilot/health` (alias `GET /health`, same body and codes) |
+| Health | `GET /v1/copilot/health` (alias `GET /health`, same body and codes); checks the DB too: `db: "ok"`, or `503 db_unavailable` with `db: "unavailable"` |
 | Migrations | `cd apps/copilot && alembic upgrade head` |
 | VPS (systemd + nginx, the production target) | [VPS](#vps-1-gb-systemd--nginx) below; plan in `docs/VPS_DEPLOY_PLAN.md` |
 | Compose (web + copilot) | `deploy/DEPLOY.md` |
@@ -81,6 +81,8 @@ Copilot normalizes `/models` ids (`models/gemini-2.5-flash` → `gemini-2.5-flas
 | `COPILOT_DEVICE_COOKIE_OPTIONAL` | no | off | Dev only (refused in production): requests without the cookie are served unscoped (every session), for a web proxy that does not forward `Cookie` yet |
 | `COPILOT_DEVICE_COOKIE_SECURE` | no | on in production | Adds `Secure` to the cookie |
 | `COPILOT_MAX_BODY_BYTES` | no | `1572864` | Raw body cap for `/v1/copilot` POST/PUT/PATCH (413 `request_too_large`); keep nginx `client_max_body_size` at or above it (e.g. `2m`) |
+| `COPILOT_DB_CONNECT_TIMEOUT_S` | no | `3` | Postgres connect timeout; an unreachable DB becomes a fast 503 `db_unavailable` (pool wait is 5 s, SQLite `busy_timeout` 5 s) |
+| `COPILOT_DB_STARTUP_RETRIES` | no | `5` | Startup migration attempts while the DB is unreachable (backoff 1, 2, 4, 8 s). After the last one the app starts anyway and answers 503 `db_unavailable`; restart it once the DB is back if the schema was never created |
 | `AUTOSCAN_ENABLED` | no | `false` | Start the in-process auto-analysis scheduler in the FastAPI lifespan (lifecycle only so far; the tick does nothing) |
 | `AUTOSCAN_EVERY` | no | `1h` | Scheduler period: `1h` or `2h` |
 | `PORT` | no | `8000` | Uvicorn bind (Docker / Cloud Run) |

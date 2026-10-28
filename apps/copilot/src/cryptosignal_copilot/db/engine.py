@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from sqlalchemy import create_engine, event
@@ -20,13 +21,17 @@ def get_engine(database_url: str | None = None) -> Engine:
 
 
 def _create(url: str) -> Engine:
-    engine = create_engine(url, pool_pre_ping=True, connect_args=_sqlite_connect_args(url))
+    engine = create_engine(
+        url, pool_pre_ping=True, pool_timeout=DB_POOL_TIMEOUT_S, connect_args=connect_args_for(url)
+    )
     if url.startswith("sqlite:"):
         event.listen(engine, "connect", _sqlite_pragmas)
     return engine
 
 
 SQLITE_BUSY_TIMEOUT_MS = 5000
+DB_POOL_TIMEOUT_S = 5
+DEFAULT_CONNECT_TIMEOUT_S = 3
 
 
 def _sqlite_pragmas(dbapi_conn: Any, _record: Any) -> None:
@@ -48,7 +53,12 @@ def reset_engine_for_tests() -> None:
     _engine = None
 
 
-def _sqlite_connect_args(url: str) -> dict[str, object]:
+def connect_args_for(url: str) -> dict[str, object]:
+    """SQLite: shared across threads. Postgres: fail fast when the server is unreachable
+    (`COPILOT_DB_CONNECT_TIMEOUT_S`, default 3) instead of hanging a request."""
     if url.startswith("sqlite:"):
         return {"check_same_thread": False}
+    if url.startswith("postgresql"):
+        raw = os.environ.get("COPILOT_DB_CONNECT_TIMEOUT_S", "").strip()
+        return {"connect_timeout": int(raw) if raw else DEFAULT_CONNECT_TIMEOUT_S}
     return {}

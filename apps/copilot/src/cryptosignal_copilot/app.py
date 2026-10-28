@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
@@ -38,7 +39,8 @@ from cryptosignal_copilot.config import (
     load_llm_config,
     validate_llm_env_on_startup,
 )
-from cryptosignal_copilot.db.migrate import run_db_migrations
+from cryptosignal_copilot.db.errors import DB_RETRY_AFTER_S, DB_UNAVAILABLE_ERRORS
+from cryptosignal_copilot.db.migrate import run_db_migrations_with_retry
 from cryptosignal_copilot.device import (
     DeviceMiddleware,
     DeviceSettings,
@@ -67,11 +69,21 @@ from cryptosignal_copilot.sessions_store import (
     get_sessions_store,
 )
 from cryptosignal_copilot.symbol_tick import get_tick_cache, prefetch_tick_size
-from cryptosignal_copilot.vi_text import chart_too_large_vi
+from cryptosignal_copilot.vi_text import ERR_DB_UNAVAILABLE, chart_too_large_vi
+
+logger = logging.getLogger(__name__)
 
 
 def sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+
+def db_unavailable_response(**extra: object) -> JSONResponse:
+    return JSONResponse(
+        {**error_payload("db_unavailable", ERR_DB_UNAVAILABLE), **extra},
+        status_code=503,
+        headers={"Retry-After": str(DB_RETRY_AFTER_S)},
+    )
 
 
 DEV_CORS_ORIGINS = (
@@ -143,6 +155,13 @@ def create_app(
             await scheduler.stop()
 
     app = FastAPI(lifespan=lifespan)
+
+    async def _db_unavailable(_request: Request, exc: Exception) -> JSONResponse:
+        logger.warning("db unavailable: %s", exc)
+        return db_unavailable_response()
+
+    for exc_type in DB_UNAVAILABLE_ERRORS:
+        app.add_exception_handler(exc_type, _db_unavailable)
     app.state.autoscan = scheduler
     # Innermost of the three, so its 413 still gets CORS headers and the device cookie.
     app.add_middleware(BodyLimitMiddleware, max_bytes=max_body_bytes_from_env())
@@ -178,7 +197,11 @@ def create_app(
             cfg = load_llm_config()
         except LlmConfigError:
             return JSONResponse({"error": "LLM config missing"}, status_code=503)
-        return health_payload(cfg)
+        try:
+            await asyncio.to_thread(store.ping)
+        except DB_UNAVAILABLE_ERRORS:
+            return db_unavailable_response(db="unavailable")
+        return {**health_payload(cfg), "db": "ok"}
 
     def _probe_applies(style: str) -> bool:
         return style == "openai" and probe.settings.enabled
@@ -631,5 +654,5 @@ def create_app(
 
 configure_logging()
 validate_llm_env_on_startup()
-run_db_migrations()
+run_db_migrations_with_retry()
 app = create_app()

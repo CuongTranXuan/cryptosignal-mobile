@@ -16,5 +16,12 @@
       "field": "body_bytes",
       "limit": 100000
     }
+  },
+  "db_unavailable": {
+    "status": 503,
+    "body": {
+      "code": "db_unavailable",
+      "message": "Cơ sở dữ liệu tạm thời không khả dụng, vui lòng thử lại sau"
+    }
   }
 }
