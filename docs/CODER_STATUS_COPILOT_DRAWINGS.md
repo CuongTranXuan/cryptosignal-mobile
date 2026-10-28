@@ -26,7 +26,6 @@ Coder owns backend in `apps/copilot` only: drawing gate, agent prompts, schema c
 - OmniRoute may content-block on heavy all-Vietnamese user prompts; mixed VI+EN prompt worked in smoke.
 - Prefer zero shapes over fake short rails — do not waive per-rail ≥8.
 - Zone alone without converging rails is not a triangle.
-- Render/Vercel deploy out of scope for this doc if still blocked elsewhere.
 
 ## Definition of done (coder)
 - Gate + prompts + coerce landed on PR #5

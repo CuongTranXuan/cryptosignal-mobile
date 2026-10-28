@@ -51,7 +51,7 @@ Open `http://127.0.0.1:3000` — not `preview/terminal.html`.
 
 Web alone can show the live chart. Copilot actions fail visibly until `apps/copilot` is up with a valid LLM env.
 
-**Production (Vercel):** see [`DEPLOY.md`](DEPLOY.md).
+**Production (single VPS):** see [`docs/VPS_DEPLOY_PLAN.md`](docs/VPS_DEPLOY_PLAN.md) and [`apps/copilot/DEPLOY.md`](apps/copilot/DEPLOY.md).
 
 ## Environment
 

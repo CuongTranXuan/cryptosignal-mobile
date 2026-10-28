@@ -36,7 +36,7 @@ docker compose up -d --build
 
 ### Cloud Run / single copilot image
 
-See `deploy/cloudrun/deploy.sh` and `apps/copilot/DEPLOY.md` for copilot-only hosting when the UI is on Vercel or another host (then set `NEXT_PUBLIC_COPILOT_URL` on the web host instead of `COPILOT_UPSTREAM_URL`).
+See `deploy/cloudrun/deploy.sh` and `apps/copilot/DEPLOY.md` for copilot-only hosting when the UI is on another host (then set `NEXT_PUBLIC_COPILOT_URL` on the web host instead of `COPILOT_UPSTREAM_URL`).
 
 ### Build smoke (CI or laptop)
 
