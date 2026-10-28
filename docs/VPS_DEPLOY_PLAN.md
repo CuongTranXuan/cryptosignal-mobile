@@ -1,12 +1,13 @@
 # VPS_DEPLOY_PLAN: một VPS 1 GB tự host (không Docker), OmniRoute slim là provider model duy nhất
 
-> **Trạng thái:** bản 2, cập nhật 28/10/2026 (ICT, UTC+7). Thay thế bản nháp 26/10/2026 (commit `94686397`).
+> **Trạng thái:** bản 2.1, cập nhật 28/10/2026 (ICT, UTC+7). Thay thế bản nháp 26/10/2026 (commit `94686397`) và bản 2 (commit `dfd6b15a`).
 > **Quyết định chính (anh đã duyệt 28/10):**
 > - VPS: **Vultr `vc2-1c-1gb` tại Singapore (`sgp`)**, giá $5/tháng.
 > - OS: Debian 13 hoặc Ubuntu 24.04 đã cắt gọn.
 > - Thành phần: nginx phục vụ bản build tĩnh, uvicorn (copilot) và OmniRoute chạy chế độ slim.
 >
-> Bản này vẫn thay thế kế hoạch Cloud Run + Turso đang tạm dừng (`deploy/cloudrun/deploy.sh`, `apps/copilot/DEPLOY.md`). Bản này không đổi region Render (`render.yaml`).
+> Bản này vẫn thay thế kế hoạch Cloud Run + Turso đang tạm dừng (`deploy/cloudrun/deploy.sh`, `apps/copilot/DEPLOY.md`).
+> **Render và Vercel bị loại bỏ hoàn toàn theo quyết định ngày 28/10/2026, có hiệu lực ngay, không chạy song song.** VPS là đích triển khai duy nhất. Việc dọn `render.yaml`, `DEPLOY.md` và các file liên quan là một thay đổi code riêng cho coder (mục 9, #14). Bản kế hoạch này không sửa các file đó.
 >
 > **Ký hiệu số liệu:**
 > - **[đo thực tế: nơi đo]**: số tự đo, có ghi nơi đo.
@@ -35,6 +36,8 @@
 | `exchangeInfo` | Tải toàn bộ ~17,8 MB đồng bộ, +114 MB đỉnh | **Đã được coder sửa:** tải async theo từng symbol (`exchangeInfo?symbol=X`) và cache ra đĩa (`symbol_tick.py` tại `97369f58`) | Đỉnh +114 MB không còn áp dụng. |
 | Cổng uvicorn | 8000 | **8787** | Theo REPORT |
 | Phương án 2 GB | Là khuyến nghị chính | **Bỏ**, không giữ làm dự phòng | REPORT không đề cập gói 2 GB. Phương án nâng cấp mà REPORT nêu là `vhp-1c-1gb` ($6, CPU nhanh hơn, vẫn 1 GB). |
+| Render / Vercel | Giữ làm nơi chạy hiện tại, ngừng sau khi VPS ổn định | **Loại bỏ ngay** (quyết định 28/10), không chạy song song | Anh chốt 28/10 |
+| Kiểm tra Binance | Thử trên instance tính theo giờ trước khi mua | **Smoke check lần boot đầu** ngay trên VPS đã mua (mục 11, bước 2) | Anh chốt 28/10 |
 | Litestream | Đề xuất chạy liên tục | **Chuyển thành câu hỏi mở.** Mặc định dùng `sqlite3 .backup` theo timer (không có process thường trú) | RAM của Litestream chưa được đo. Trên 1 GB, mỗi MB đều phải tính. |
 
 ---
@@ -253,6 +256,7 @@ File mẫu: **`docs/deploy/omniroute.service`** (chỉ dùng tên biến placeho
 | 11 | `rate_limit.py` | Chọn IP theo cấu hình proxy tin cậy. Qua Cloudflare + nginx thì lấy `$remote_addr` đã được nginx khôi phục | Chưa làm |
 | 12 | `deploy/vps/` (mới) | nginx conf, các unit systemd, `zram-generator.conf`, `sysctl.d`, `journald.conf.d`, `deploy.sh` (không secret) | Chưa làm. Ví dụ `omniroute.service` hiện ở `docs/deploy/`. |
 | 13 | `.github/workflows/` | Job build `out/` và artifact; deploy chỉ chạy thủ công | Chưa làm |
+| 14 | `render.yaml`, `DEPLOY.md` (phần Vercel/Render), `apps/copilot/DEPLOY.md`, `apps/web/Dockerfile`, `apps/copilot/Dockerfile`, `deploy/docker-compose.yml`, `deploy/cloudrun/` | **Đề xuất cho coder, chờ anh duyệt:** xóa `render.yaml` và hướng dẫn Render/Vercel; quyết định giữ hay xóa Dockerfile/compose/Cloud Run (không còn là đích triển khai) | Đề xuất. Bản kế hoạch này không sửa các file trên |
 
 ---
 
@@ -268,40 +272,64 @@ File mẫu: **`docs/deploy/omniroute.service`** (chỉ dùng tên biến placeho
 - Backup tự động của Vultr: +20% [nguồn: REPORT; vultr.com/pricing].
 - Image trên Vultr: `Debian 13 x64 (trixie)` (os id 2625) và `Ubuntu 24.04 LTS x64` (os id 2284) [nguồn: `api.vultr.com/v2/os`, 28/10/2026].
 - **Debian 13 "trixie"** là bản stable hiện hành: ra mắt 9/8/2025, bản cập nhật mới nhất là **13.7 ngày 12/9/2026** [nguồn: debian.org/releases]. Đi kèm nginx 1.26.3 và Python 3.13.5 [nguồn: sources.debian.org], khớp với Python 3.13 dùng khi đo.
-- **Binance:** khả năng truy cập `data-api.binance.vision` từ IP Vultr Singapore **[chưa xác minh]**. Tạo instance tính theo giờ và chạy `curl https://data-api.binance.vision/api/v3/ping` trước khi dùng lâu dài. Tránh region Mỹ (Render Oregon từng gặp 451).
+- **Binance:** khả năng truy cập `data-api.binance.vision` từ IP Vultr Singapore **[chưa xác minh]**. Anh sẽ kiểm tra trực tiếp trên VPS sau khi mua, bằng smoke check ở mục 11, bước 2. Tránh region Mỹ (từng gặp HTTP 451 khi chạy ở Oregon).
+- **Thanh toán và hoàn tiền của Vultr:**
+  - Tính tiền theo giờ, tối thiểu 1 giờ, trần 672 giờ/tháng cho Cloud Compute [nguồn: docs.vultr.com, "How Am I Billed for My Servers?"] ⇒ ~$0,0074/giờ cho gói $5 [ước tính: 5/672].
+  - Máy chỉ tắt (stop) vẫn bị tính tiền; phải **destroy** mới dừng tính tiền [nguồn: docs.vultr.com].
+  - **Vultr không hoàn tiền**; credit không hoàn lại [nguồn: docs.vultr.com, "What Is Vultr's Refund Policy?"]. Vì vậy không có "khung hoàn tiền". Nếu máy không đạt, destroy ngay thì chỉ mất tiền vài giờ chạy [ước tính: dưới $0,05].
 
 ---
 
 ## 11. Các bước dựng máy
 
-1. **Tạo server:** Vultr `vc2-1c-1gb`, `sgp`, Debian 13 (hoặc Ubuntu 24.04), thêm SSH key. Firewall chỉ mở 22/80/443. **Kiểm tra ngay:** `curl -sI https://data-api.binance.vision/api/v3/ping` phải trả 200, và agentrouter phải truy cập được. Không đạt thì xóa máy, thử IP hoặc vị trí khác.
-2. **Hardening và cắt gọn:**
+1. **Tạo server:** Vultr `vc2-1c-1gb`, `sgp`, Debian 13 (hoặc Ubuntu 24.04), thêm SSH key. Firewall chỉ mở 22/80/443.
+2. **Smoke check lần boot đầu** (chạy ngay sau khi SSH được, **trước khi cài app**; chỉ đọc, không đổi gì trên máy):
+
+   | Kiểm tra | Lệnh | Đạt | Không đạt |
+   |---|---|---|---|
+   | DNS | `getent hosts data-api.binance.vision api.binance.com agentrouter.org` | Cả ba tên đều ra IPv4 | Thiếu tên nào: kiểm tra `/etc/resolv.conf`, `resolvectl status` |
+   | HTTPS ra ngoài | `curl -sS -o /dev/null -w '%{http_code} %{time_total}\n' https://www.debian.org/` | `200` (hoặc `3xx`), dưới 3 s [ước tính] | Lỗi TLS hoặc timeout: kiểm tra firewall outbound, đồng hồ |
+   | Binance data-api (server dùng) | `curl -sS -w '\n%{http_code}\n' https://data-api.binance.vision/api/v3/ping` và `curl -sS -o /dev/null -w '%{http_code}\n' 'https://data-api.binance.vision/api/v3/klines?symbol=BTCUSDT&interval=1h&limit=2'` | `{}` và `200`; klines `200` | `451` hoặc `403`: **bị chặn theo vị trí**, xem xử lý bên dưới. Timeout: lỗi mạng |
+   | Binance api.binance.com | `curl -sS -w '\n%{http_code}\n' https://api.binance.com/api/v3/ping` | `200` | `451`: chỉ ghi nhận. Server không dùng host này (`klines.py`, `symbol_tick.py` dùng data-api); trình duyệt người dùng gọi từ máy của họ |
+   | Upstream của OmniRoute (agentrouter) | `curl -sS -o /dev/null -w '%{http_code} %{time_total}\n' https://agentrouter.org/v1/models` | `401` (chưa có key, nghĩa là tới được server) [đo thực tế: box, 28/10] | Timeout, `000` hoặc `403` từ trang chặn: tuyến mạng tới agentrouter có vấn đề |
+   | Đồng bộ thời gian | `timedatectl show -p NTPSynchronized --value` và `date -u` | `yes`; lệch so với `curl -sI https://www.google.com \| grep -i '^date'` dưới 2 s [ước tính] | Bật `systemd-timesyncd`; đồng hồ sai làm sai mốc đóng nến |
+   | RAM | `free -m` | Cột `available` ≥ 850 MB trên máy trắng [ước tính] | Thấp hơn: kiểm tra dịch vụ thừa (`systemctl list-units --type=service --state=running`) |
+   | Đĩa | `df -h /` | Còn ≥ 18 GB trống [ước tính: 25 GB trừ OS] | Ít hơn: kiểm tra image |
+   | zram/swap | `swapon --show; zramctl` | Máy trắng thường **chưa có** zram, ghi nhận để bước 4 cấu hình | Nếu đã có swap/zram do image tạo sẵn: ghi lại, tránh tạo trùng |
+   | IPv4 công khai | `curl -s https://api.ipify.org` | Ra một địa chỉ IPv4 | Không có IPv4: sai gói (gói `-v6`) |
+
+   **Nếu Binance không đạt:**
+   - Chỉ `api.binance.com` trả 451, còn data-api trả 200: **đạt**, tiếp tục. Server đã dùng `data-api.binance.vision` làm nguồn chính.
+   - `data-api.binance.vision` trả 451/403 hoặc timeout: không cài app. **Destroy máy ngay** (Vultr không hoàn tiền, nhưng tính theo giờ nên chỉ mất vài cent [nguồn: docs.vultr.com; ước tính]). Tạo lại ở vị trí châu Á khác của Vultr (ví dụ Tokyo `nrt` hoặc Seoul `icn`, cả hai đều có `vc2-1c-1gb` [nguồn: `api.vultr.com/v2/plans`, 28/10]; cần anh OK). Lặp lại bước 2.
+   - agentrouter không tới được: tương tự, đổi vị trí. Nếu mọi vị trí đều lỗi thì vấn đề nằm ở phía agentrouter, không phải VPS.
+   - Lưu kết quả vào `~/smoke-firstboot.txt` (không chứa secret) để so sánh về sau.
+3. **Hardening và cắt gọn:**
    - User `deploy`, chỉ đăng nhập bằng key.
    - `PermitRootLogin no`, `PasswordAuthentication no`.
    - Gỡ các gói thừa ở mục 5, tắt cloud-init sau lần boot đầu, giữ `unattended-upgrades`.
    - Bật `systemd-timesyncd` (đồng hồ chuẩn cần cho mốc đóng nến).
-3. **zram, swap, sysctl, journald** theo mục 5. Kiểm tra bằng `swapon --show` và `zramctl`.
-4. **Node 22 LTS và OmniRoute slim:**
+4. **zram, swap, sysctl, journald** theo mục 5. Kiểm tra bằng `swapon --show` và `zramctl`.
+5. **Node 22 LTS và OmniRoute slim:**
    - Cài từ tarball chính thức, `npm i -g omniroute@3.8.52`.
    - Tạo user `omniroute` và thư mục `/var/lib/omniroute`.
    - Tạo `.env` với quyền `0600`, chỉ chứa các biến bí mật ở mục 7.
    - Cài `docs/deploy/omniroute.service`. Cấu hình provider agentrouter qua SSH tunnel và bật API key.
-5. **Copilot:**
+6. **Copilot:**
    - Cài `uv`, copy artifact, `uv sync --no-dev`, `python -m compileall`.
    - Tạo `/etc/cryptosignal/copilot.env` (`0600`) và unit `cryptosignal-copilot.service` (mục 4, mục 8).
    - Migration tự chạy khi khởi động.
-6. **nginx:**
+7. **nginx:**
    - Cài nginx 1.26 từ repo Debian và đặt chứng chỉ Origin CA.
    - Cấu hình theo mục 6.
    - rsync `out/` từ Mac hoặc CI, trỏ symlink `current`.
-7. **systemd:** `systemctl enable --now omniroute cryptosignal-copilot nginx cryptosignal-backup.timer`.
-8. **Smoke test:**
-   - `curl` tới Binance ping.
+8. **systemd:** `systemctl enable --now omniroute cryptosignal-copilot nginx cryptosignal-backup.timer`.
+9. **Smoke test ứng dụng:**
+   - Chạy lại các dòng Binance và agentrouter của bước 2.
    - `curl -H "Authorization: Bearer <key>" 127.0.0.1:20128/v1/models` (gõ key tay, không lưu vào lịch sử shell).
    - `curl https://<tên miền>/v1/copilot/health`.
    - Chạy **một lượt phân tích thật** trên web.
    - Kiểm tra `free -m`, `systemd-cgtop`, `journalctl -k | grep -i oom`.
-9. **Theo dõi 48 giờ** [cấu hình]: RSS của OmniRoute (rò rỉ #17283), số lần restart, swap và zram, độ trễ. Chỉ sau đó mới bàn chuyện ngừng Render/Vercel, và phải có OK của anh.
+10. **Theo dõi 48 giờ đầu** [cấu hình]: RSS của OmniRoute (rò rỉ #17283), số lần restart, swap và zram, độ trễ. Đây chỉ là theo dõi sức khỏe; Render/Vercel đã bị loại bỏ từ 28/10 nên không có giai đoạn chạy song song.
 
 **Cập nhật sau này:** rsync `releases/<sha>`, đổi symlink, `systemctl restart cryptosignal-copilot`. Web chỉ cần đổi symlink. Lỗi thì đổi symlink về bản cũ.
 
@@ -324,23 +352,21 @@ File mẫu: **`docs/deploy/omniroute.service`** (chỉ dùng tên biến placeho
 | 502 từ nginx | `systemctl status cryptosignal-copilot`, `journalctl -u cryptosignal-copilot -n 100` | Restart; kiểm tra OOM |
 | OmniRoute restart liên tục | `journalctl -u omniroute`, `systemctl show omniroute -p MemoryCurrent` | Nâng `MemoryHigh` lên 480M; kiểm tra rò rỉ #17283; cân nhắc `vhp-1c-1gb` hoặc nâng RAM (cần OK của anh) |
 | Chậm, swap cao | `zramctl`, `vmstat 1` | Giảm `CALL_LOG_MAX_ENTRIES`; tạm tắt scheduler |
-| Binance 451/403 | `curl` ping | Đổi IP hoặc vị trí (cần OK của anh) |
+| Binance 451/403 | Các lệnh Binance ở mục 11, bước 2 | Nếu chỉ `api.binance.com` lỗi: bỏ qua (server dùng data-api). Nếu data-api lỗi: đổi vị trí trong Vultr (cần OK của anh) |
 | "database is locked" | Transaction nào giữ lâu | Kiểm tra WAL và `busy_timeout` |
 | Cloudflare 526 | Chứng chỉ Origin CA hết hạn hoặc sai | Cấp lại chứng chỉ, kiểm tra chế độ Full (strict) |
 
 ---
 
 ## 13. Câu hỏi mở
-1. **O1:** các mục §10 của bản 26/10 (thay đổi #7 đến #13 ở trên) có thực sự đã được duyệt không? REPORT ghi "plus items in section 10" dưới tiêu đề approved.
-2. **O2:** Debian 13 hay Ubuntu 24.04 cắt gọn?
-3. **O3:** giá trị cuối cùng cho `MemoryHigh`/`MemoryMax` của OmniRoute (450M/560M theo REPORT hay 850M/1G theo bản nháp unit) và `OMNIROUTE_RSS_PRESSURE_MB` (800 hay 520)?
-4. **O4:** backup offsite để ở đâu (R2, B2, ...)? Có cần Litestream không (RAM chưa đo)?
-5. **O5:** tên miền và tài khoản Cloudflare nào? Bật proxy cho bản ghi nào?
-6. **O6:** khi nào ngừng Render/Vercel?
-7. **O7:** có commit `apps/copilot/uv.lock` không?
-8. **O8:** có nâng rate limit mặc định của OmniRoute (60 req/phút, 350 ms) để probe model nhanh hơn không?
-
----
+(Đánh số khớp với phần Quyết định bên dưới.)
+1. Các mục §10 của bản 26/10 (thay đổi #7 đến #13 ở trên) có thực sự đã được duyệt không? REPORT ghi "plus items in section 10" dưới tiêu đề approved.
+2. Debian 13 hay Ubuntu 24.04 cắt gọn?
+3. Giá trị cuối cùng cho `MemoryHigh`/`MemoryMax` của OmniRoute (450M/560M theo REPORT hay 850M/1G theo bản nháp unit) và `OMNIROUTE_RSS_PRESSURE_MB` (800 hay 520)?
+4. Backup offsite để ở đâu (R2, B2, ...)? Có cần Litestream không (RAM chưa đo)?
+7. Có nâng rate limit mặc định của OmniRoute (60 req/phút, 350 ms) để probe model nhanh hơn không?
+8. Tên miền và tài khoản Cloudflare nào? Có commit `apps/copilot/uv.lock` không?
+9. (mới) Coder có dọn `render.yaml`, Dockerfile và tài liệu Render/Vercel không (thay đổi #14)?
 
 ## Quyết định cần anh chốt
 
@@ -353,16 +379,16 @@ File mẫu: **`docs/deploy/omniroute.service`** (chỉ dùng tên biến placeho
 - ✅ **Thay đổi code #1 đến #6** (mục 9).
 - ✅ **zram bắt buộc**, cộng swapfile 1 GB và sysctl ở mục 5.
 
-**Còn mở:**
-1. **OS:** *Đề xuất:* **Debian 13** (stable, bản 13.7; dư hơn Ubuntu ~50 MB RAM [ước tính]; Python 3.13 khớp với số đo).
-2. **Giới hạn bộ nhớ OmniRoute:** *Đề xuất:* `MemoryHigh=450M`, `MemoryMax=560M`, `OOMScoreAdjust=300`, `RuntimeMaxSec=1d` (theo REPORT), và **`OMNIROUTE_RSS_PRESSURE_MB=520`** (dưới `MemoryMax`). Nếu thấy chậm thì nâng `MemoryHigh` lên 480M.
-3. **Xác nhận các mục §10 cũ** (#7 đến #13): *Đề xuất:* duyệt hết. Ưu tiên **#10 (drain loop)**, vì scheduler nay chạy chung process, và **#11 (IP qua Cloudflare)**.
-4. **Backup:** *Đề xuất:* timer `sqlite3 .backup` hằng ngày cộng `rclone crypt` lên R2 hoặc B2. Chưa dùng Litestream cho đến khi đo được RAM của nó trên VPS.
-5. **Kiểm tra Binance từ IP Vultr SG** trước khi dùng lâu dài: *Đề xuất:* tạo instance tính theo giờ, chạy smoke test bước 1, rồi mới giữ máy.
-6. **Thời điểm ngừng Render/Vercel:** *Đề xuất:* sau 48 giờ chạy ổn trên VPS. Không đổi gì khi chưa có OK của anh.
-7. **Rate limit OmniRoute:** *Đề xuất:* nâng giới hạn cho riêng key của copilot nếu probe model chậm. Giữ mặc định cho các key khác.
+- ✅ **(5) Kiểm tra Binance** (đã chốt 28/10): không thử trên instance tính theo giờ. Anh kiểm tra trực tiếp trên VPS sau khi mua, bằng smoke check lần boot đầu (mục 11, bước 2).
+- ✅ **(6) Render và Vercel** (đã chốt 28/10): loại bỏ hoàn toàn, có hiệu lực ngay, không chạy song song 48 giờ. VPS là đích triển khai duy nhất. Dọn file là thay đổi #14 (đề xuất cho coder).
 
----
+**Còn mở:**
+1. **Xác nhận các mục §10 cũ** (#7 đến #13): *đề xuất, chờ chốt:* duyệt hết. Ưu tiên **#10 (drain loop)**, vì scheduler nay chạy chung process, và **#11 (IP qua Cloudflare)**.
+2. **OS:** *đề xuất, chờ chốt:* **Debian 13** (stable, bản 13.7; dư hơn Ubuntu ~50 MB RAM [ước tính]; Python 3.13 khớp với số đo).
+3. **Giới hạn bộ nhớ OmniRoute:** *đề xuất, chờ chốt:* `MemoryHigh=450M`, `MemoryMax=560M`, `OOMScoreAdjust=300`, `RuntimeMaxSec=1d` (theo REPORT), và **`OMNIROUTE_RSS_PRESSURE_MB=520`** (dưới `MemoryMax`). Nếu thấy chậm thì nâng `MemoryHigh` lên 480M.
+4. **Backup:** *đề xuất, chờ chốt:* timer `sqlite3 .backup` hằng ngày cộng `rclone crypt` lên R2 hoặc B2. Chưa dùng Litestream cho đến khi đo được RAM của nó trên VPS.
+7. **Rate limit OmniRoute:** *đề xuất, chờ chốt:* nâng giới hạn cho riêng key của copilot nếu probe model chậm. Giữ mặc định cho các key khác.
+8. **Tên miền, Cloudflare, `uv.lock`:** *đề xuất, chờ chốt:* một zone Cloudflare cho tên miền chính, bật proxy cho bản ghi web; commit `apps/copilot/uv.lock` để cài đặt tái lập được.
 
 ## Nguồn tham khảo
 (Kiểm tra ngày 28/10/2026)
@@ -379,7 +405,7 @@ File mẫu: **`docs/deploy/omniroute.service`** (chỉ dùng tên biến placeho
 - `apps/copilot/pyproject.toml`
 - `apps/copilot/src/cryptosignal_copilot/{app.py, model_factory.py, symbol_tick.py, config.py, rate_limit.py, db/engine.py, model_probe.py}`
 - `apps/web/{next.config.ts, app/v1/copilot/[...path]/route.ts, lib/copilot-api.ts, lib/binance.ts}`
-- `render.yaml`, `deploy/cloudrun/deploy.sh`, `docs/AUTO_ANALYSIS_SPEC.md`
+- `render.yaml` (đích cũ, đã loại bỏ 28/10), `deploy/cloudrun/deploy.sh`, `docs/AUTO_ANALYSIS_SPEC.md`
 
 **Vultr**
 - Danh sách gói (public API, không cần auth): https://api.vultr.com/v2/plans
@@ -397,6 +423,13 @@ File mẫu: **`docs/deploy/omniroute.service`** (chỉ dùng tên biến placeho
 **Cloudflare**
 - Origin CA (có ở gói Free, không nhắc hết hạn, Full strict): https://developers.cloudflare.com/ssl/origin-configuration/origin-ca/
 - Connection limits (Proxy Read Timeout 125 s): https://developers.cloudflare.com/fundamentals/reference/connection-limits/
+
+**Vultr thanh toán**
+- Billing theo giờ (tối thiểu 1 giờ, trần 672 giờ/tháng; destroy mới dừng tính tiền): https://docs.vultr.com/support/platform/billing/how-am-i-billed-for-my-servers
+- Không hoàn tiền: https://docs.vultr.com/support/platform/billing/what-is-vultrs-refund-policy
+
+**agentrouter**
+- Tài liệu: https://agentrouter.org/docs/index.html ; `GET https://agentrouter.org/v1/models` trả 401 khi không có key [đo thực tế: box, 28/10]
 
 **Binance**
 - Market data only: https://github.com/binance/binance-spot-api-docs/blob/master/faqs/market_data_only.md
