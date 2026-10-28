@@ -92,7 +92,7 @@ export const COPILOT_ERROR_CREDITS_EXHAUSTED = "Copilot lỗi: hết hạn mức
 export const COPILOT_ERROR_RATE_LIMITED = "Copilot lỗi: nhà cung cấp giới hạn tần suất";
 export const COPILOT_ERROR_INVALID_MODEL = "Copilot lỗi: mô hình không hợp lệ hoặc không khả dụng";
 export const COPILOT_ERROR_INVALID_REASONING =
-  "Copilot lỗi: mức lý luận không được hỗ trợ cho mô hình này";
+  "Copilot lỗi: mô hình này không hỗ trợ mức lý luận — đã bỏ chọn mức lý luận, hãy gửi lại.";
 export const COPILOT_ERROR_CANDLE_COUNT =
   "Copilot lỗi: số nến vượt giới hạn an toàn của mô hình đã chọn";
 export const COPILOT_ERROR_CONTEXT_LENGTH = "Copilot lỗi: cửa sổ ngữ cảnh quá dài cho mô hình này";
@@ -267,6 +267,17 @@ export const CHART_HISTORY_SESSION_MISSING =
   "Phiên này không còn trên máy chủ — hình vẽ của lần phân tích này chưa được lưu.";
 export const COPILOT_ERROR_UPSTREAM_UNREACHABLE =
   "Không kết nối được máy chủ mô hình AI — vui lòng thử lại sau.";
+export const CHART_HISTORY_FORBIDDEN =
+  "Không có quyền lưu biểu đồ của phiên này (thiếu hoặc sai mã thiết bị) — hình vẽ vẫn giữ trên thiết bị.";
+export const CHART_HISTORY_INVALID =
+  "Máy chủ từ chối dữ liệu biểu đồ (không hợp lệ) — hình vẽ vẫn giữ trên thiết bị.";
+export const CHART_HISTORY_UNSAVED = "chưa lưu";
+export const CHART_HISTORY_UNSAVED_RETRYING_TITLE =
+  "Chưa lưu lên máy chủ — đang tự thử lại; hình vẽ vẫn giữ trên thiết bị.";
+export const CHART_HISTORY_UNSAVED_FAILED_TITLE =
+  "Chưa lưu lên máy chủ — hình vẽ vẫn giữ trên thiết bị; sửa hình để thử lưu lại.";
+export const CHART_HISTORY_KEPT_PREVIOUS_INVALID =
+  "Không vẽ được hình mới nào (hình từ mô hình không hợp lệ) — giữ các hình trước.";
 export const CHART_HISTORY_DOT_TITLE = "Khung này có hình vẽ đã lưu trong phiên";
 
 export function chartHistoryTooLarge(limit: string): string {

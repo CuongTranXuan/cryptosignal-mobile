@@ -3,7 +3,7 @@
 import { labelForRegime } from "../lib/copilot-chart-ai";
 import { formatInvalidationLine } from "../lib/guardrail-format";
 import { shapeDisplayName } from "../lib/shape-labels";
-import { evidenceItemRaw, evidenceItemText, preferEvidenceItems } from "../lib/vi-evidence";
+import { evidenceItemRaw, evidenceListItemText, preferEvidenceItems } from "../lib/vi-evidence";
 import { getCopilotFeedbackClient } from "../lib/copilot-feedback-host";
 import { shapeFeedbackSnapshot } from "../lib/copilot-shape-snapshot";
 import {
@@ -50,7 +50,7 @@ function GuardrailDetails({ shape }: { shape: PatternShape }) {
         {against.length > 0 ? (
           <ul className="mt-0.5 list-disc pl-4 text-[#eaecef]">
             {against.map((item, index) => (
-              <li key={`${index}:${evidenceItemRaw(item)}`}>{evidenceItemText(item, shapeSymbol)}</li>
+              <li key={`${index}:${evidenceItemRaw(item)}`}>{evidenceListItemText(item, shapeSymbol)}</li>
             ))}
           </ul>
         ) : (

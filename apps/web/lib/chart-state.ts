@@ -7,6 +7,7 @@
  *   DELETE same path
  */
 import { z } from "zod";
+import { copilotAuthHeaders } from "./copilot-auth";
 import { CopilotApiError, resolveCopilotBaseUrl, type ApiErrorBody } from "./copilot-api";
 import { coerceAgentMarker, coerceAgentShape } from "./normalize-agent-shape";
 import {
@@ -181,10 +182,19 @@ export function shapeForChartState(shape: PatternShape): PatternShape {
 }
 
 export function createChartStateApi(
-  opts: { fetchImpl?: typeof fetch; baseUrl?: string; forceMock?: boolean } = {},
+  opts: {
+    fetchImpl?: typeof fetch;
+    baseUrl?: string;
+    forceMock?: boolean;
+    /** Extra headers per request (device token); defaults to `copilotAuthHeaders`. */
+    authHeaders?: () => Record<string, string>;
+  } = {},
 ): ChartStateApi {
   if (opts.forceMock) return createMockChartStateApi();
-  const fetchImpl = opts.fetchImpl ?? fetch;
+  const rawFetch = opts.fetchImpl ?? fetch;
+  const authHeaders = opts.authHeaders ?? copilotAuthHeaders;
+  const fetchImpl = (url: string, init: RequestInit = {}) =>
+    rawFetch(url, { ...init, headers: { ...authHeaders(), ...(init.headers as Record<string, string>) } });
   const baseUrl = resolveCopilotBaseUrl(opts.baseUrl);
   return {
     listCharts: async (sessionId) =>

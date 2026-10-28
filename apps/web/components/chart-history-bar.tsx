@@ -1,11 +1,15 @@
 "use client";
 
 import { chartKey } from "../lib/chart-state";
+import { cleanSummaryText } from "../lib/summary-text";
 import { intervalOrder, switchChart, useChartHistoryStore } from "../lib/chart-history";
 import {
   CHART_HISTORY_LABEL,
   CHART_HISTORY_LOADING,
   CHART_HISTORY_SUMMARY_PREFIX,
+  CHART_HISTORY_UNSAVED,
+  CHART_HISTORY_UNSAVED_FAILED_TITLE,
+  CHART_HISTORY_UNSAVED_RETRYING_TITLE,
   COPILOT_NOTICE_DISMISS,
   chartHistoryChipLabel,
 } from "../lib/copilot-strings";
@@ -22,13 +26,15 @@ export function ChartHistoryBar() {
   const docs = useChartHistoryStore((s) => s.docs);
   const loadingKey = useChartHistoryStore((s) => s.loadingKey);
   const notice = useChartHistoryStore((s) => s.notice);
+  const unsavedAll = useChartHistoryStore((s) => s.unsaved);
   const dismissNotice = useChartHistoryStore((s) => s.dismissNotice);
 
   if (!supported || !sessionId) return null;
 
   const key = chartKey(sessionId, symbol, interval);
   const loading = loadingKey === key;
-  const summary = loading ? null : (docs[key]?.summary_text ?? null);
+  const summary = loading ? null : cleanSummaryText(docs[key]?.summary_text);
+  const unsaved = unsavedAll[key] ?? null;
   const entries = index
     .filter((e) => e.analyzed_at != null || e.shape_count > 0)
     .sort((a, b) => {
@@ -75,6 +81,19 @@ export function ChartHistoryBar() {
       {loading && (
         <span data-testid="chart-history-loading" className="flex-none animate-pulse text-[#848e9c]">
           {CHART_HISTORY_LOADING}
+        </span>
+      )}
+      {unsaved && (
+        <span
+          data-testid="chart-history-unsaved"
+          data-state={unsaved}
+          title={unsaved === "retrying" ? CHART_HISTORY_UNSAVED_RETRYING_TITLE : CHART_HISTORY_UNSAVED_FAILED_TITLE}
+          className="flex flex-none items-center gap-1 rounded border border-[#f0b90b]/50 px-1.5 py-0.5 text-[#f0b90b]"
+        >
+          <span
+            className={`inline-block h-1.5 w-1.5 rounded-full bg-[#f0b90b] ${unsaved === "retrying" ? "animate-pulse" : ""}`}
+          />
+          {CHART_HISTORY_UNSAVED}
         </span>
       )}
       {summary && (

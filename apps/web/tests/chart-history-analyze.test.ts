@@ -11,7 +11,9 @@ import { createMockChartStateApi, type ChartStateApi } from "../lib/chart-state"
 import { createCopilotApi, resetCopilotApiMockSessionsForTests } from "../lib/copilot-api";
 import { clearCopilotModelsCache, loadCopilotModels } from "../lib/copilot-models-cache";
 import {
+  CHART_HISTORY_KEPT_PREVIOUS_INVALID,
   CHART_HISTORY_N25_KEPT_PREVIOUS,
+  COPILOT_ERROR_INVALID_REASONING,
   CHART_HISTORY_SERVER_SAVE_FAILED,
   CHART_HISTORY_SESSION_MISSING,
 } from "../lib/copilot-strings";
@@ -195,6 +197,62 @@ describe("analyze with chart history", () => {
     expect(text).not.toMatch(/Lớp phủ sẵn sàng/);
     // The server saved the dropped shape; the client re-saves what it shows, on top of rev 2.
     expect(puts).toEqual([{ revision: 2, ids: ["drw_a", "drw_b"] }]);
+  });
+
+  it("(2) every new shape failing schema validation keeps the previous shapes (no wipe)", async () => {
+    await analyze([shape("drw_a"), shape("drw_b")]);
+    const broken = [
+      { ...shape("drw_bad1"), kind: "spiral", points: [] },
+      { ...shape("drw_bad2"), points: [{ time: "soon", price: "high" }] },
+    ] as unknown as PatternShape[];
+    await analyze(broken);
+    expect(ids()).toEqual(["drw_a", "drw_b"]);
+    const text = lastAgentText();
+    expect(text).toContain(CHART_HISTORY_KEPT_PREVIOUS_INVALID);
+    expect(text).not.toMatch(/Lớp phủ sẵn sàng/);
+    // The client saves what it shows on top of the server's revision.
+    expect(puts.at(-1)).toEqual({ revision: 2, ids: ["drw_a", "drw_b"] });
+  });
+
+  it("(2) a run that sends zero shapes still clears unpinned AI shapes (an empty result is valid)", async () => {
+    await analyze([shape("drw_a")]);
+    await analyze([]);
+    expect(ids()).toEqual([]);
+  });
+
+  it("(5) a new AI shape reusing a pinned id loses: the pinned (kept/edited/user) shape wins", async () => {
+    await analyze([shape("drw_a"), shape("drw_b")]);
+    useShapeStore.getState().keep("drw_a");
+    const pinnedPoints = useShapeStore.getState().shapes.find((s) => s.id === "drw_a")!.points;
+    await analyze([shape("drw_a", candles[1]!.time, candles[2]!.time), shape("drw_c")]);
+    const after = useShapeStore.getState().shapes;
+    expect(after.map((s) => s.id)).toEqual(["drw_a", "drw_c"]);
+    const a = after.find((s) => s.id === "drw_a")!;
+    expect(a.kept).toBe(true);
+    expect(a.points).toEqual(pinnedPoints);
+  });
+
+  it("(8) models with reasoning_efforts [] never send an explicit effort", async () => {
+    useCopilotSessionStore.setState({ modelId: "combo/fast", reasoningEffort: "low" });
+    const body = await analyze([shape("drw_a")]);
+    expect(body.model).toBe("combo/fast");
+    expect(body).not.toHaveProperty("reasoning_effort");
+  });
+
+  it("(8) a 400 invalid_reasoning_effort shows the Vietnamese notice and drops the stored effort", async () => {
+    useCopilotSessionStore.setState({ reasoningEffort: "high" });
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ code: "invalid_reasoning_effort", message: "reasoning_effort not supported" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+    const client = createCopilotClient({ fetchImpl: fetchImpl as unknown as typeof fetch, getClosedTimes: () => closed });
+    await client.analyze("phân tích");
+    expect(useAiStore.getState().lastError).toBe(COPILOT_ERROR_INVALID_REASONING);
+    expect(COPILOT_ERROR_INVALID_REASONING).toMatch(/không hỗ trợ mức lý luận/);
+    expect(useCopilotSessionStore.getState().reasoningEffort).toBeNull();
   });
 
   it("a run with drawable shapes still replaces unpinned shapes (no N25 note)", async () => {

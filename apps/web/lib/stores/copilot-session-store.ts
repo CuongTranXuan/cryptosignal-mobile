@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { CopilotApiClient } from "../copilot-api";
+import { cleanSummaryText } from "../summary-text";
 import { loadActiveSessionId, saveActiveSessionId } from "../copilot-active-session-cache";
 import { DEFAULT_CANDLE_COUNT, clampCandleCountForModel } from "../copilot-model-limits";
 import { resolveCatalogDefaultId, resolveSessionModelId } from "../copilot-model-defaults";
@@ -90,7 +91,8 @@ function sessionToAiMessages(
   return messages.map((m) => ({
     id: m.id,
     role: m.role === "user" ? "user" : "agent",
-    content: m.role === "user" ? m.content : translateServerText(m.content),
+    // Progress lines ("Đang phân tích…") belong to the live stream, not the restored reply.
+    content: m.role === "user" ? m.content : translateServerText(cleanSummaryText(m.content) ?? m.content),
     modelId: m.model_id ?? undefined,
     modelLabel: agentMessageModelLabel(models, m.model_id, apiDefault),
     shapes: m.shapes as PatternShape[],

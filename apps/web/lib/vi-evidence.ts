@@ -116,6 +116,19 @@ export function evidenceItemText(item: EvidenceItem, symbol = "BTCUSDT"): string
   return translateBackendText(item.text ?? "", symbol);
 }
 
+/** First letter upper-cased (Vietnamese-aware); text starting with a digit/symbol is unchanged. */
+export function capitalizeFirst(text: string): string {
+  const trimmed = text.trimStart();
+  const first = Array.from(trimmed)[0];
+  if (!first || !/\p{Ll}/u.test(first)) return trimmed;
+  return first.toLocaleUpperCase("vi") + trimmed.slice(first.length);
+}
+
+/** Evidence text for a list row / bullet: translated and capitalized. */
+export function evidenceListItemText(item: EvidenceItem, symbol = "BTCUSDT"): string {
+  return capitalizeFirst(evidenceItemText(item, symbol));
+}
+
 /** Coded items when the backend sent them, else the legacy string array. */
 export function preferEvidenceItems(
   items: readonly EvidenceItem[] | undefined,

@@ -5,7 +5,9 @@
  * - switchChart / activateChartSession: flush the pending save for the chart we leave, clear
  *   overlays at once (no stale drawings), GET the target doc and paint it (404 → clean chart).
  * - User edits (shape-store user-edit listener) and view changes → debounced PUT with the base
- *   revision; 409 → merge (server AI shapes + local pins/user shapes) and retry once; 413 → notice.
+ *   revision; 409 → merge (server AI shapes + local pins/user shapes) and retry once.
+ * - 5xx / network → "chưa lưu" + background retry with backoff (2 s, 4 s … 60 s) until saved.
+ *   401/403/413/422 → Vietnamese notice + "chưa lưu", no retry. Local edits always stay.
  * - Analyze saves server-side; the client only records `chart_state_revision` (no PUT back).
  */
 import { create } from "zustand";
@@ -14,6 +16,8 @@ import { CopilotApiError } from "./copilot-api";
 import type { CopilotSessionV1 } from "./copilot-schema";
 import {
   CHART_HISTORY_CONFLICT,
+  CHART_HISTORY_FORBIDDEN,
+  CHART_HISTORY_INVALID,
   CHART_HISTORY_SAVE_FAILED,
   chartHistoryTooLarge,
   CHART_HISTORY_SERVER_SAVE_FAILED,
@@ -43,6 +47,11 @@ import {
 } from "./stores/shape-store";
 
 export const CHART_SAVE_DEBOUNCE_MS = 1000;
+export const CHART_SAVE_RETRY_BASE_MS = 2000;
+export const CHART_SAVE_RETRY_MAX_MS = 60_000;
+
+/** Why a chart is not saved: "retrying" (5xx/network, backoff running) or "failed" (no retry). */
+export type ChartUnsavedState = "retrying" | "failed";
 
 export type ChartDocMeta = {
   revision: number | null;
@@ -62,6 +71,8 @@ type ChartHistoryState = {
   docs: Record<string, ChartDocMeta>;
   loadingKey: string | null;
   notice: string | null;
+  /** Charts whose local state is not on the server yet. */
+  unsaved: Record<string, ChartUnsavedState>;
   dismissNotice: () => void;
 };
 
@@ -72,6 +83,7 @@ export const useChartHistoryStore = create<ChartHistoryState>((set) => ({
   docs: {},
   loadingKey: null,
   notice: null,
+  unsaved: {},
   dismissNotice: () => set({ notice: null }),
 }));
 
@@ -89,6 +101,8 @@ let pendingSaveKey: string | null = null;
 let saveChain: Promise<void> = Promise.resolve();
 /** Key of an analyze run in flight: its server-side save would make our base revision stale. */
 let analyzeRunKey: string | null = null;
+/** Local state not saved yet, per chart key (snapshot for retries / repaint after a switch). */
+const unsavedSnaps = new Map<string, { snap: Snapshot; attempt: number; timer: ReturnType<typeof setTimeout> | null }>();
 
 export function configureChartHistory(opts: {
   api: ChartStateApi | null;
@@ -113,6 +127,8 @@ export function resetChartHistoryForTests(): void {
   loadToken = 0;
   saveChain = Promise.resolve();
   analyzeRunKey = null;
+  for (const entry of unsavedSnaps.values()) if (entry.timer) clearTimeout(entry.timer);
+  unsavedSnaps.clear();
   api = null;
   setShapeUserEditListener(null);
   useChartHistoryStore.setState({
@@ -122,6 +138,7 @@ export function resetChartHistoryForTests(): void {
     docs: {},
     loadingKey: null,
     notice: null,
+    unsaved: {},
   });
 }
 
@@ -239,7 +256,91 @@ function setNotice(notice: string | null): void {
 function onSaved(key: string, doc: ChartStateDoc): void {
   setDocMeta(key, metaFromDoc(doc));
   upsertIndexEntry(key, doc);
+  clearUnsaved(key);
   if (useChartHistoryStore.getState().notice) setNotice(null);
+}
+
+function setUnsavedState(key: string, state: ChartUnsavedState | null): void {
+  const { [key]: _prev, ...rest } = useChartHistoryStore.getState().unsaved;
+  useChartHistoryStore.setState({ unsaved: state ? { ...rest, [key]: state } : rest });
+}
+
+function clearUnsaved(key: string): void {
+  const entry = unsavedSnaps.get(key);
+  if (entry?.timer) clearTimeout(entry.timer);
+  unsavedSnaps.delete(key);
+  if (useChartHistoryStore.getState().unsaved[key]) setUnsavedState(key, null);
+}
+
+/** Backoff delay before retry number `attempt` (0-based): 2 s, 4 s, 8 s … capped at 60 s. */
+export function chartSaveRetryDelay(attempt: number): number {
+  return Math.min(CHART_SAVE_RETRY_BASE_MS * 2 ** attempt, CHART_SAVE_RETRY_MAX_MS);
+}
+
+/** Keep `snap` as the unsaved local state of `key`; `retry` starts/continues the backoff. */
+function markUnsaved(key: string, snap: Snapshot, retry: boolean): void {
+  const entry = unsavedSnaps.get(key) ?? { snap, attempt: 0, timer: null };
+  entry.snap = snap;
+  unsavedSnaps.set(key, entry);
+  if (!retry) {
+    if (entry.timer) clearTimeout(entry.timer);
+    entry.timer = null;
+    entry.attempt = 0;
+    setUnsavedState(key, "failed");
+    return;
+  }
+  setUnsavedState(key, "retrying");
+  if (entry.timer) return; // a retry is already scheduled; it will send the newest snapshot
+  const delay = chartSaveRetryDelay(entry.attempt);
+  entry.attempt += 1;
+  entry.timer = setTimeout(() => {
+    entry.timer = null;
+    if (unsavedSnaps.get(key) !== entry) return;
+    if (analyzeRunKey === key) {
+      // The run saves server-side; retry after it with the newest local state.
+      markUnsaved(key, entry.snap, true);
+      return;
+    }
+    void enqueueSave(key, currentChartKey() === key ? localSnapshot() : entry.snap);
+  }, delay);
+}
+
+type SaveFailure = "retry" | "forbidden" | "too_large" | "invalid" | "session_gone" | "other";
+
+/** 5xx / network → retry; auth, size and validation errors never fix themselves → no retry. */
+export function classifyChartSaveError(err: unknown): SaveFailure {
+  if (!(err instanceof CopilotApiError)) return "retry"; // fetch rejected: offline / network
+  const { status } = err;
+  if (status >= 500 || status === 408 || status === 429) return "retry";
+  if (status === 401 || status === 403) return "forbidden";
+  if (status === 413) return "too_large";
+  if (status === 422 || status === 400) return "invalid";
+  if (status === 404 && !isChartStateNotFound(err)) return "session_gone";
+  return "other";
+}
+
+/** Shared failure path of a save attempt: notice (if any) and the "chưa lưu" state. */
+function failSave(key: string, snap: Snapshot, err: unknown, otherNotice: string): void {
+  switch (classifyChartSaveError(err)) {
+    case "retry":
+      markUnsaved(key, snap, true);
+      return;
+    case "forbidden":
+      setNotice(CHART_HISTORY_FORBIDDEN);
+      break;
+    case "too_large":
+      setNotice(chartHistoryTooLarge(chartTooLargeLimit(err) ?? ""));
+      break;
+    case "invalid":
+      setNotice(CHART_HISTORY_INVALID);
+      break;
+    case "session_gone":
+      return; // unknown session / no chart routes: nothing to save into
+    case "other":
+      setNotice(otherNotice);
+      break;
+  }
+  markUnsaved(key, snap, false);
 }
 
 function paintShapesAndMarkers(shapes: PatternShape[], markers: AgentMarker[]): void {
@@ -265,41 +366,29 @@ async function doSave(key: string, snap: Snapshot): Promise<void> {
   } catch (err) {
     const current = chartConflictCurrent(err);
     if (current) {
-      const merged = mergeChartConflict(current, snap.shapes, snap.markers, meta?.savedShapeIds ?? []);
-      const serverMeta = metaFromDoc(current);
+      const merged = { ...snap, ...mergeChartConflict(current, snap.shapes, snap.markers, meta?.savedShapeIds ?? []) };
       try {
-        const saved = await api.putChart(
-          sessionId,
-          symbol,
-          interval,
-          putBody({ ...snap, ...merged }, serverMeta, current.revision),
-        );
+        const saved = await api.putChart(sessionId, symbol, interval, putBody(merged, metaFromDoc(current), current.revision));
         onSaved(key, saved);
         if (currentChartKey() === key) {
           paintShapesAndMarkers(saved.shapes, saved.markers);
           paintAnalysis(saved.analysis ?? null);
         }
-      } catch {
-        setNotice(CHART_HISTORY_CONFLICT);
+      } catch (retryErr) {
+        failSave(key, merged, retryErr, CHART_HISTORY_CONFLICT);
       }
-      return;
-    }
-    const limit = chartTooLargeLimit(err);
-    if (limit != null) {
-      setNotice(chartHistoryTooLarge(limit));
       return;
     }
     if (isChartStateNotFound(err) && meta?.revision != null) {
       // Doc was cleared elsewhere: create it again from the local state.
       try {
         onSaved(key, await api.putChart(sessionId, symbol, interval, putBody(snap, meta, null)));
-      } catch {
-        setNotice(CHART_HISTORY_SAVE_FAILED);
+      } catch (createErr) {
+        failSave(key, snap, createErr, CHART_HISTORY_SAVE_FAILED);
       }
       return;
     }
-    if (err instanceof CopilotApiError && err.status === 404) return; // unknown session / no route
-    setNotice(CHART_HISTORY_SAVE_FAILED);
+    failSave(key, snap, err, CHART_HISTORY_SAVE_FAILED);
   }
 }
 
@@ -402,6 +491,12 @@ function paintDoc(key: string, doc: ChartStateDoc | null): void {
   }
 }
 
+/** A chart with a failing save keeps showing its local edits after a switch back. */
+function paintUnsavedLocal(key: string): void {
+  const entry = unsavedSnaps.get(key);
+  if (entry) paintShapesAndMarkers(entry.snap.shapes, entry.snap.markers);
+}
+
 type Legacy = { shapes: PatternShape[]; markers: AgentMarker[] };
 
 function legacyForKey(legacy: Legacy | undefined, symbol: string, interval: Interval): Legacy | null {
@@ -426,10 +521,21 @@ async function loadChart(key: string, legacy?: Legacy): Promise<void> {
   try {
     const doc = await api.getChart(sessionId, symbol, interval);
     if (token !== loadToken) return;
-    queuePaint(key, () => paintDoc(key, doc));
+    queuePaint(key, () => {
+      paintDoc(key, doc);
+      paintUnsavedLocal(key);
+    });
   } catch (err) {
     if (token !== loadToken) return;
     const own = legacyForKey(legacy, symbol, interval);
+    if (unsavedSnaps.has(key)) {
+      // Not on the server yet (save failing): the local edits are the truth.
+      queuePaint(key, () => {
+        paintDoc(key, null);
+        paintUnsavedLocal(key);
+      });
+      return;
+    }
     if (isChartStateNotFound(err)) {
       if (own) {
         // Session saved before chart history existed: keep its drawings and create the doc.

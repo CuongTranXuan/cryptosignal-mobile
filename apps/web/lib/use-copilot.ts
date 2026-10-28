@@ -39,6 +39,8 @@ import {
   copilotSkippedShapes,
   COPILOT_SCROLLED_TO_OVERLAYS,
   COPILOT_SERVER_PICKED_SHAPES,
+  CHART_HISTORY_KEPT_PREVIOUS_INVALID,
+  COPILOT_ERROR_INVALID_REASONING,
   CHART_HISTORY_N25_KEPT_PREVIOUS,
   copilotUnhealthyModelError,
 } from "./copilot-strings";
@@ -114,6 +116,14 @@ async function readHttpErrorBody(res: Response): Promise<ApiErrorBody> {
 /** Maps an analyze HTTP error; an unhealthy-model 4xx also triggers a models refresh + auto-switch. */
 async function handleAnalyzeHttpError(res: Response): Promise<string> {
   const body = await readHttpErrorBody(res);
+  if (res.status === 400 && (body.code ?? body.error) === "invalid_reasoning_effort") {
+    // The model takes no reasoning effort (e.g. `reasoning_efforts: []`): drop the stored
+    // effort and refresh the catalog so the control hides and the next run omits it.
+    const session = useCopilotSessionStore.getState();
+    session.setReasoningEffort(null);
+    void session.handleUnhealthyModel();
+    return COPILOT_ERROR_INVALID_REASONING;
+  }
   const unhealthy = unhealthyModelFromError(res.status, body);
   if (!unhealthy) return mapCopilotHttpError(res.status, body);
   void useCopilotSessionStore.getState().handleUnhealthyModel();
@@ -507,16 +517,22 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
         );
         droppedIds.push(...outOfWindow);
         const hadPrevious = useShapeStore.getState().committed().length > 0;
-        if (zodValid.length > 0 && valid.length === 0 && outOfWindow.length > 0 && hadPrevious) {
-          // N25: nothing new is drawable yet (candles not closed) — keep the previous overlays.
+        // The run sent shapes but none survived (schema or closed-candle filter): wiping the
+        // chart would leave the user with nothing — keep the previous overlays (N25).
+        const nothingDrawable = list.length > 0 && valid.length === 0 && hadPrevious;
+        let added: PatternShape[] = [];
+        if (nothingDrawable) {
           streamKeptPreviousShapes = true;
-          appendAgentChatLine(CHART_HISTORY_N25_KEPT_PREVIOUS);
+          appendAgentChatLine(
+            outOfWindow.length > 0 ? CHART_HISTORY_N25_KEPT_PREVIOUS : CHART_HISTORY_KEPT_PREVIOUS_INVALID,
+          );
         } else {
-          useShapeStore.getState().replaceAgentShapes(valid);
+          // Pinned shapes (user/kept/edited) win over a new AI shape with the same id.
+          added = useShapeStore.getState().replaceAgentShapes(valid);
         }
         useMarkerStore.getState().pruneOrphans(shapeIdsOnChart());
-        if (valid.length > 0) {
-          const lines = valid.map((s) =>
+        if (added.length > 0) {
+          const lines = added.map((s) =>
             copilotShapeSummaryLine(
               shapeDisplayName(s),
               s.kind,
@@ -524,8 +540,8 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
               s.points.length,
             ),
           );
-          pendingDrewShapesNotice = { count: valid.length, lines };
-          const times = valid.flatMap((s) => s.points.map((pt) => pt.time));
+          pendingDrewShapesNotice = { count: added.length, lines };
+          const times = added.flatMap((s) => s.points.map((pt) => pt.time));
           const visible = deps.getCoordApi?.()?.getVisibleTimeRange?.() ?? null;
           if (!timesInsideVisibleRange(times, visible)) {
             deps.getCoordApi?.()?.revealTimes(times);
