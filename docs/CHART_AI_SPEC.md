@@ -1483,3 +1483,75 @@ Tip = Mac-local `feat/copilot-actionable-drawings` `b07eee5c` (not pushed; fetch
 **Readiness:**
 - (a) **Internal alpha: ready.**
 - (b) **General user testing: ready on the code side, pending one gate.** All the C.14/C.15 blockers (N24, N25, i18n, N10, legacy keys) are closed. The gate is a real-model e2e with deepseek-v4-flash (latency, leaks, Zod) once OmniRoute is up. The leftovers above are cosmetic.
+
+### C.18 Re-check at `97369f58` (box, 2026-10-28; scripted model, stub backends and a live web↔stub integration; Mac 681617df online, OmniRoute :20128 down, so the real-model e2e was skipped)
+
+**Tip.** Mac-local `feat/copilot-actionable-drawings` `97369f58` (not pushed), fetched via `git bundle b07eee5c..HEAD`. The Mac working tree was clean at 09:42 +07, so there is no uncommitted work.
+
+12 commits since `b07eee5c`:
+- `6c9cde30`, `44969a10` (30m), `04da1c0e`, `d0f388e1` (SSE labels).
+- `a79adda5` + `8f6656a1` + `908a9b27` (chart history API and auto-save).
+- `19a8264d` (C.17 doc).
+- `975e5a06` (web chart history), `7adece01` (S/R names), `7568c41f` (web phase-2 wire and i18n), `97369f58` (reasoning efforts).
+
+**Chart history QA** (backend = the stub's FakeRunner app on a box SQLite DB; web = `lib/chart-history.ts` + `createChartStateApi` + `createCopilotClient` against the live stub over HTTP)
+
+| Area | Result |
+|---|---|
+| Timeframe switch | BTC 1h (7 shapes incl. kept / edited / user) → 4h (0) → add user shape on 4h → ETH 1h → BTC 1h: **identical 7 restored**; BTC 4h restores only its own `user-4h` |
+| Isolation | Session A BTC 1h / BTC 4h / ETH 1h and session B BTC 1h each return only their own shapes; a lowercase path maps to the same doc |
+| Reload (fresh stores, same session) | Same 7 shapes; flags `kept` / `edited` / `origin:user` intact; the edited points are preserved |
+| Re-run analyze | Unpinned AI replaced, pinned kept, 0 duplicates; server doc == local |
+| Delete | Deleting the kept and user shapes then reloading: gone. A deleted AI shape comes back as plain AI on the next run when the detector re-finds it (expected) |
+| All shapes dropped client-side (shapes event shifted out of the window) | Local keeps the previous set; chat note "Không vẽ được hình mới nào (nến chưa đóng) — giữ các hình trước."; the client PUTs local over the server's auto-save, so **server == local and a reload shows the previous set** |
+| Concurrency | 20 parallel PUTs on one base: 1×200 + 19×409, final rev 2. Analyze racing a PUT: both land (auto-save re-merges). A second "tab" PUT (delete one AI shape + add a user shape) racing a local edit: the 409 merge keeps the other tab's user shape, honours its delete, keeps the local edit, local == server, no notice |
+| Key / validation | Shape or marker for another symbol/interval → 422 `chart_key_mismatch`; SQL/unicode/41-char symbol → 422 `invalid_symbol`; `2h` → 422; `..%2F` → 404; extra top-level or shape field → 422; non-JSON → 422; unknown session → 404 on every route and on analyze (before streaming); session delete cascades |
+| Injection | `<script>` / `onerror` / `'); DROP TABLE` stored verbatim as data. SQLAlchemy is parameterised and tables stay intact; React text rendering does the escaping |
+| Limits | 201 shapes / 301 markers / 70 KB analysis → 413 with `limit`. **Not limited:** points per shape (100k accepted), string sizes (5 MB `name`, 20 MB `summary_text`, 1 MB `model`), total body (**144 MB PUT accepted in 28 s, GET 128 MB in 12.8 s**), number of charts per session (**311 arbitrary symbols accepted**; the index parses every doc and took 2.6 s). DB file grew to 174 MB |
+| Odd values | `NaN`/`Infinity` prices are accepted and served back as `null`; the web parser tolerates them. `view.from > to` accepted. Duplicate shape IDs in a PUT are stored; the web de-dupes on paint |
+| Ownership / auth | **None.** `GET /v1/copilot/sessions` lists every session; anyone with a session id (or the list) can read, overwrite, delete or auto-save any chart. The VPS plan exposes `/v1/copilot/*` through Caddy with no app auth |
+| Zod on history payloads | Doc after analyze + pins, 409 `current`, index (incl. the 311-entry one), 409 and 413 bodies, NaN / XSS / view / dup / preview docs: **all parse** with `chart-state.ts` |
+| DB unavailable | At boot (Postgres refused): the app does not start (fail fast, no retry). At runtime (SQLite exclusive lock): every DB route, including analyze with `session_id`, returns **500 plain-text "Internal Server Error" after ~5 s**; `/health` stays 200; it recovers when the lock is released. The web shows `CHART_HISTORY_SAVE_FAILED` and keeps the local state, but only retries on the next edit |
+| e2e-chart-history.py (web :3300 on localhost → stub :8765) | **16/16 PASS** |
+
+**Other claims**
+- **S/R names: fixed.** Wire names are "S/R 0.00000376" (PEPE 4h), "S/R 0.10442" (DOGE 1d), "S/R 87,307.83" / "S/R resistance (flipped) 64,696.42" (BTC), "S/R resistance (flipped) 2,395.28" (ETH); `test_sr_name_tick_format.py` 5/5, including a PEPE flipped zone.
+- **SSE `labels`: fixed.** All 904 classic + 375 smc shapes have a Vietnamese label (H&S → "Đường viền cổ vai đầu vai", IH&S → "… ngược", Fib pocket → "Vùng Fibonacci …", flipped S/R → "Vùng kháng cự (đổi vai) N").
+  - The web fallback table (no server label, e.g. restored docs) leaves 0 of the 66 distinct names in English.
+- **Banner: fixed.** All 9 backend `upstream_error` codes map to Vietnamese; the English detail is shown only as secondary text.
+- **All-dropped note: fixed** (above).
+  - Residual: a run whose shapes all fail *Zod* (rather than the closed-window filter) still replaces the previous set with nothing.
+- **Leftover English** across 740 runs: 0 user-facing strings; only coded `params.role` remains.
+
+**Regression set (before = `b07eee5c`)**
+
+| Check | Result |
+|---|---|
+| Injection battery 495 | 0 model text (only the disclaimer hit); legacy keys 1 call; hostile kinds 6 calls → fallback |
+| Invariance 72 × 4 | 72/72 |
+| Zod: SSE shapes 2666, harness 286, markers 2666, analysis 740, regime 1110 | all pass |
+| N10 (228) | 0 rejection-as-flip |
+| Broken / triangles / HTF | 212/4202 (S/R only) / 463 inside / no lookahead, unchanged |
+| Web tsc / vitest (Node 22) | 0 / **261 of 261** |
+| copilot ruff / format / pytest | clean / 130 / **383 pass**, 1 skip |
+| e2e-chart-ai-proxy.sh | 5/5 script steps + the 2 pnpm/pip steps run by hand → 7/7 |
+| e2e-chart-history.py | 16/16 |
+
+**OmniRoute:** down. Nothing listens on :20128 on the Mac, and the Mac backend `/models` reports `upstream_reachable:false` (`connect_error`) at 09:42 +07. The real-model e2e was not run.
+
+**Remaining (priority)**
+1. **Auth / ownership** before any public deploy: at least a shared secret or per-user token at Caddy or the app. Do not list all sessions to anonymous callers.
+2. **Body / doc size limits**: request body cap (e.g. 1–2 MB at Caddy and the app), per-shape points cap, string length caps, total doc bytes cap, and a per-session chart cap. Also stop the index parsing whole docs (store `shape_count` / `has_analysis` columns).
+3. DB outage: JSON 503 `db_unavailable` instead of plain 500, a DB check in `/health` (or `/ready`), boot retry/backoff, and analyze not failing when only the chart save is impossible.
+4. Reject or normalise non-finite numbers and `view.from > to`; dedupe shape IDs server-side.
+5. Web: retry a failed save in the background (not only on the next edit).
+6. All-shapes-fail-Zod run wipes the previous set (rare).
+7. Real OmniRoute e2e.
+8. Push after the user approves; earlier open items #13, #21, #24, #27.
+
+**Readiness:**
+- (a) **Internal alpha: ready**, on a trusted network or behind access control.
+- (b) **General user testing: not yet.**
+  - Chart AI itself is ready pending the real-model e2e.
+  - Chart history has no auth or ownership and no body/size caps, so on the planned public VPS any visitor could enumerate, read, overwrite or fill other users' sessions.
+  - Fix items 1–2 (and ideally 3) first.
