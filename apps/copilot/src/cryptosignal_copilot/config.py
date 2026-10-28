@@ -133,10 +133,24 @@ def load_default_candle_count() -> int:
     return max(1, value)
 
 
+class DatabaseConfigError(RuntimeError):
+    pass
+
+
+def is_production() -> bool:
+    """`COPILOT_ENV=production` (or `prod`): dev conveniences turn into startup errors."""
+    return os.environ.get("COPILOT_ENV", "").strip().lower() in {"production", "prod"}
+
+
 def default_sessions_sqlite_path() -> Path:
     data_dir = os.environ.get("COPILOT_DATA_DIR", "").strip()
     if data_dir:
         return Path(data_dir).expanduser() / "sessions.sqlite3"
+    if is_production():
+        # /tmp is wiped on reboot: never let production silently keep its sessions there.
+        raise DatabaseConfigError(
+            "COPILOT_ENV=production needs DATABASE_URL or COPILOT_DATA_DIR (no /tmp fallback)"
+        )
     return Path(os.environ.get("TMPDIR", "/tmp")) / "cryptosignal-copilot-sessions.sqlite3"
 
 
