@@ -80,6 +80,7 @@ Copilot normalizes `/models` ids (`models/gemini-2.5-flash` → `gemini-2.5-flas
 | `COPILOT_DEVICE_SECRET` | **prod** | dev: generated in `$TMPDIR` | HMAC key (≥ 32 chars, e.g. `openssl rand -base64 48`) for the `csm_device` ownership cookie. Missing in production = startup error. Rotating it gives every browser a new device (old sessions become unreachable) |
 | `COPILOT_DEVICE_COOKIE_OPTIONAL` | no | off | Dev only (refused in production): requests without the cookie are served unscoped (every session), for a web proxy that does not forward `Cookie` yet |
 | `COPILOT_DEVICE_COOKIE_SECURE` | no | on in production | Adds `Secure` to the cookie |
+| `COPILOT_ADMIN_TOKEN` | no | unset (full export disabled) | Operator token for the full `GET /v1/copilot/feedback/export` (every device, plus legacy rows without an owner), sent as `Authorization: Bearer <token>`. Compared in constant time and never logged. In production it must be ≥ 32 chars (e.g. `openssl rand -base64 48`) or the app refuses to start. Without the header, export returns only the caller's own feedback (by `csm_device` cookie; none → 401 `device_required`) |
 | `COPILOT_MAX_BODY_BYTES` | no | `1572864` | Raw body cap for `/v1/copilot` POST/PUT/PATCH (413 `request_too_large`); keep nginx `client_max_body_size` at or above it (e.g. `2m`) |
 | `COPILOT_DB_CONNECT_TIMEOUT_S` | no | `3` | Postgres connect timeout; an unreachable DB becomes a fast 503 `db_unavailable` (pool wait is 5 s, SQLite `busy_timeout` 5 s) |
 | `COPILOT_DB_STARTUP_RETRIES` | no | `5` | Startup migration attempts while the DB is unreachable (backoff 1, 2, 4, 8 s). After the last one the app starts anyway and answers 503 `db_unavailable`; restart it once the DB is back if the schema was never created |
@@ -118,7 +119,8 @@ Production runs on one VPS: nginx serves the static web export and proxies `/v1/
 ```bash
 # copilot (no extras: OpenAI client only)
 cd apps/copilot && uv sync --frozen --no-editable && .venv/bin/python -m compileall -q src
-# + COPILOT_DEVICE_SECRET from the systemd EnvironmentFile (never in the unit or the repo)
+# + COPILOT_DEVICE_SECRET (and optional COPILOT_ADMIN_TOKEN) from the systemd EnvironmentFile
+#   (never in the unit or the repo)
 COPILOT_ENV=production COPILOT_DATA_DIR=/var/lib/cryptosignal COPILOT_TRUSTED_PROXIES=127.0.0.1 \
   .venv/bin/uvicorn cryptosignal_copilot.app:app --host 127.0.0.1 --port 8787 --workers 1 --no-access-log
 

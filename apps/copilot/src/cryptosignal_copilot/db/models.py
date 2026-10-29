@@ -20,6 +20,8 @@ class CopilotFeedbackRow(Base):
     after_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     client_ts: Mapped[float | None] = mapped_column(Float, nullable=True)
     created_at: Mapped[float] = mapped_column(Float, nullable=False)
+    # Device that sent it (device.py); NULL = legacy, visible to the admin export only.
+    owner_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
 
 
 class CopilotSessionRow(Base):

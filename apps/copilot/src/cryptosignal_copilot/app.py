@@ -15,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import ValidationError
 
+from cryptosignal_copilot.admin import admin_token_from_env, check_admin
 from cryptosignal_copilot.agent import AgentRunner, PydanticAiRunner
 from cryptosignal_copilot.analyze_prep import AnalyzePrepError, prepare_analyze
 from cryptosignal_copilot.autoscan.scheduler import AutoScanScheduler, scheduler_from_env
@@ -49,6 +50,7 @@ from cryptosignal_copilot.device import (
     DeviceSettings,
     device_settings_from_env,
     request_owner,
+    verified_device,
 )
 from cryptosignal_copilot.feedback_store import FeedbackStore, get_feedback_store
 from cryptosignal_copilot.intent_prep import normalize_session_intent, resolve_analyze_intent
@@ -73,7 +75,9 @@ from cryptosignal_copilot.sessions_store import (
 )
 from cryptosignal_copilot.symbol_tick import get_tick_cache, prefetch_tick_size
 from cryptosignal_copilot.vi_text import (
+    ADMIN_DENIED_VI,
     ERR_DB_UNAVAILABLE,
+    ERR_DEVICE_REQUIRED,
     ERR_DUPLICATE_SHAPE_ID,
     ERR_INVALID_NUMBER,
     ERR_INVALID_VIEW_RANGE,
@@ -145,6 +149,7 @@ def create_app(
     probe = model_probe if model_probe is not None else ModelProbeService(catalog)
     scheduler = autoscan if autoscan is not None else scheduler_from_env()
     device_settings = device if device is not None else device_settings_from_env()
+    admin_token = admin_token_from_env()
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -304,9 +309,11 @@ def create_app(
         return list_styles_payload()
 
     @app.post("/v1/copilot/feedback")
-    async def post_feedback(body: FeedbackAction):
+    async def post_feedback(body: FeedbackAction, request: Request):
         try:
-            row_id = await asyncio.to_thread(feedback.create, body)
+            row_id = await asyncio.to_thread(
+                feedback.create, body, owner=request_owner(request.state)
+            )
         except Exception as exc:
             return JSONResponse(
                 error_payload("feedback_failed", "Không lưu được phản hồi", str(exc)),
@@ -315,9 +322,20 @@ def create_app(
         return JSONResponse({"id": row_id}, status_code=201)
 
     @app.get("/v1/copilot/feedback/export")
-    async def export_feedback(limit: int = Query(default=5000, ge=1, le=20000)):
-        rows = await asyncio.to_thread(feedback.export_rows, limit)
-        return {"rows": rows}
+    async def export_feedback(request: Request, limit: int = Query(default=5000, ge=1, le=20000)):
+        """The caller's own feedback by device cookie; every row with the admin token."""
+        authorization = request.headers.get("authorization")
+        if authorization is not None:
+            denied = check_admin(authorization, admin_token)
+            if denied is not None:
+                return JSONResponse(error_payload(denied, ADMIN_DENIED_VI[denied]), status_code=403)
+            return {"rows": await asyncio.to_thread(feedback.export_rows, limit)}
+        owner = verified_device(request.state)
+        if owner is None:
+            return JSONResponse(
+                error_payload("device_required", ERR_DEVICE_REQUIRED), status_code=401
+            )
+        return {"rows": await asyncio.to_thread(feedback.export_rows, limit, owner=owner)}
 
     @app.get("/v1/copilot/sessions")
     async def list_sessions(request: Request):

@@ -100,3 +100,15 @@ def test_alembic_0005_backfills_chart_index_columns(tmp_path):
     command.downgrade(ini, "20261028_0004")
     cols = {c["name"] for c in inspect(create_engine(url)).get_columns("chart_states")}
     assert "shape_count" not in cols
+
+
+def test_alembic_0006_adds_feedback_owner_and_downgrades(tmp_path):
+    url = sqlite_url_for_path(tmp_path / "fb-owner.sqlite3")
+    ini = alembic_config(url)
+    command.upgrade(ini, "head")
+    cols = {c["name"] for c in inspect(create_engine(url)).get_columns("copilot_feedback")}
+    assert "owner_id" in cols
+    command.downgrade(ini, "20261028_0005")
+    cols = {c["name"] for c in inspect(create_engine(url)).get_columns("copilot_feedback")}
+    assert "owner_id" not in cols
+    command.upgrade(ini, "head")

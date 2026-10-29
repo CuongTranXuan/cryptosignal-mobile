@@ -24,7 +24,7 @@ class FeedbackStore:
     def _session(self) -> Session:
         return self._session_factory()
 
-    def create(self, body: FeedbackAction) -> str:
+    def create(self, body: FeedbackAction, *, owner: str | None = None) -> str:
         row_id = str(uuid.uuid4())
         now = time.time()
         row = CopilotFeedbackRow(
@@ -37,18 +37,21 @@ class FeedbackStore:
             after_json=json.dumps(body.after) if body.after is not None else None,
             client_ts=body.client_ts,
             created_at=now,
+            owner_id=owner,
         )
         with self._session() as session:
             session.add(row)
             session.commit()
         return row_id
 
-    def export_rows(self, limit: int = 5000) -> list[dict[str, Any]]:
+    def export_rows(self, limit: int = 5000, *, owner: str | None = None) -> list[dict[str, Any]]:
+        """`owner`'s rows; `owner=None` is the admin export (every row, legacy included)."""
+        query = select(CopilotFeedbackRow)
+        if owner is not None:
+            query = query.where(CopilotFeedbackRow.owner_id == owner)
         with self._session() as session:
             rows = session.execute(
-                select(CopilotFeedbackRow)
-                .order_by(CopilotFeedbackRow.created_at.desc())
-                .limit(limit)
+                query.order_by(CopilotFeedbackRow.created_at.desc()).limit(limit)
             ).scalars()
             out: list[dict[str, Any]] = []
             for row in rows:

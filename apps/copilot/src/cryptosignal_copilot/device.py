@@ -143,6 +143,13 @@ def request_owner(request_state: object) -> str | None:
     return getattr(request_state, "device_id", None)
 
 
+def verified_device(request_state: object) -> str | None:
+    """The device id only when the request itself sent a valid cookie (not a fresh one)."""
+    if not getattr(request_state, "device_verified", False):
+        return None
+    return request_owner(request_state)
+
+
 class DeviceMiddleware:
     """Resolves the device for `/v1/copilot/*` and issues the cookie when it is missing."""
 
@@ -155,13 +162,15 @@ class DeviceMiddleware:
             await self.app(scope, receive, send)
             return
         device_id = verify_token(self.settings.secret, _cookie_from_headers(scope))
+        state = scope.setdefault("state", {})
+        state["device_verified"] = device_id is not None
         new_cookie: bytes | None = None
         if device_id is None:
             issued_id, value = issue_token(self.settings.secret)
             new_cookie = set_cookie_header(value, secure=self.settings.secure)
             # Optional mode: serve this request unscoped; the cookie scopes the next one.
             device_id = None if self.settings.cookie_optional else issued_id
-        scope.setdefault("state", {})["device_id"] = device_id
+        state["device_id"] = device_id
 
         async def send_with_cookie(message: Message) -> None:
             if new_cookie is not None and message["type"] == "http.response.start":

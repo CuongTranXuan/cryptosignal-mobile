@@ -29,11 +29,15 @@ Optional `session_id`: when set without request `intent`, session `intent` is us
 
 ### POST `/v1/copilot/feedback`
 
-Body: `{ session_id, message_id?, drawing_id, action: keep|reject|edit|delete, before?, after?, client_ts? }` → **201** `{ id }`.
+Body: `{ session_id, message_id?, drawing_id, action: keep|reject|edit|delete, before?, after?, client_ts? }` → **201** `{ id }`. The row records the caller's device (`csm_device` cookie, see CHART_HISTORY_SPEC.md "Ownership").
 
 ### GET `/v1/copilot/feedback/export`
 
-`{ "rows": [ ... ] }` for eval.
+`{ "rows": [ ... ] }` for eval (`?limit=`, default 5000, max 20000).
+
+- Default: only the caller's own feedback, by the `csm_device` cookie. Without a valid cookie: **401** `{code: "device_required", message}`.
+- Full export (every device, plus legacy rows from before ownership, which have no owner and only appear here): `Authorization: Bearer <COPILOT_ADMIN_TOKEN>`. A wrong token or a non-Bearer `Authorization` → **403** `admin_forbidden`; no token configured → **403** `admin_export_disabled`. Any `Authorization` header selects the admin path, even with a valid cookie.
+- Messages are Vietnamese; example bodies in `apps/copilot/tests/fixtures/wire/api_errors.json`.
 
 ### LLM output (internal)
 
