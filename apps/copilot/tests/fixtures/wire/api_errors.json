@@ -83,5 +83,12 @@
       "code": "admin_export_disabled",
       "message": "Xuất toàn bộ phản hồi đang tắt (chưa cấu hình mã quản trị)"
     }
+  },
+  "session_not_found": {
+    "status": 404,
+    "body": {
+      "error": "session not found",
+      "code": "session_not_found"
+    }
   }
 }

@@ -3,6 +3,9 @@ cookie scopes sessions, chart history and analyze to the device that created the
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import create_engine, update
@@ -16,6 +19,7 @@ from tests.test_chart_state import chart_app as _chart_app_fixture
 chart_app = _chart_app_fixture
 
 SECRET = "s" * 40
+ERRORS_FIXTURE = Path(__file__).parent / "fixtures" / "wire" / "api_errors.json"
 
 
 @pytest.fixture(autouse=True)
@@ -116,7 +120,12 @@ async def test_sessions_are_scoped_to_the_device(chart_app):
             await bob.post("/v1/copilot/analyze", json={**ANALYZE_BASE, "session_id": sid}),
         ]
         assert [r.status_code for r in foreign] == [404] * len(foreign)
-        assert all(r.json() == {"error": "session not found"} for r in foreign)
+        assert all(
+            r.json() == {"error": "session not found", "code": "session_not_found"} for r in foreign
+        )
+
+        fixture = json.loads(ERRORS_FIXTURE.read_text())
+        assert fixture["session_not_found"] == {"status": 404, "body": foreign[0].json()}
 
         # Untouched for the owner.
         assert (await alice.get(base)).json()["title"] == SESSION["title"]

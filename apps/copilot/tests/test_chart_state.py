@@ -267,7 +267,7 @@ async def test_unknown_session_is_404_everywhere(chart_app):
             await client.delete(_url(sid)),
         ):
             assert res.status_code == 404
-            assert res.json() == {"error": "session not found"}
+            assert res.json() == {"error": "session not found", "code": "session_not_found"}
 
 
 @pytest.mark.asyncio

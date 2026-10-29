@@ -91,6 +91,13 @@ def sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
+def session_not_found_response() -> JSONResponse:
+    """Unknown or another device's session; `error` stays for older clients."""
+    return JSONResponse(
+        {"error": "session not found", "code": "session_not_found"}, status_code=404
+    )
+
+
 def db_unavailable_response(**extra: object) -> JSONResponse:
     return JSONResponse(
         {**error_payload("db_unavailable", ERR_DB_UNAVAILABLE), **extra},
@@ -370,7 +377,7 @@ def create_app(
                 store.get_session, session_id, owner=request_owner(request.state)
             )
         except SessionNotFoundError:
-            return JSONResponse({"error": "session not found"}, status_code=404)
+            return session_not_found_response()
         return record.model_dump(by_alias=True)
 
     @app.patch("/v1/copilot/sessions/{session_id}")
@@ -389,7 +396,7 @@ def create_app(
                 status_code=exc.status_code,
             )
         except SessionNotFoundError:
-            return JSONResponse({"error": "session not found"}, status_code=404)
+            return session_not_found_response()
         return record.model_dump(by_alias=True)
 
     @app.delete("/v1/copilot/sessions/{session_id}")
@@ -399,13 +406,10 @@ def create_app(
                 store.delete_session, session_id, owner=request_owner(request.state)
             )
         except SessionNotFoundError:
-            return JSONResponse({"error": "session not found"}, status_code=404)
+            return session_not_found_response()
         return {"ok": True}
 
     # ------------------------------------------------------------ chart history
-
-    def _session_missing() -> JSONResponse:
-        return JSONResponse({"error": "session not found"}, status_code=404)
 
     def _chart_missing() -> JSONResponse:
         return JSONResponse(
@@ -432,7 +436,7 @@ def create_app(
         try:
             return await asyncio.to_thread(fn, sym, ivl)
         except SessionNotFoundError:
-            return _session_missing()
+            return session_not_found_response()
         except ChartStateNotFoundError:
             return _chart_missing()
         except RevisionConflictError as exc:
@@ -448,7 +452,7 @@ def create_app(
                 charts.list_charts, session_id, owner=request_owner(request.state)
             )
         except SessionNotFoundError:
-            return _session_missing()
+            return session_not_found_response()
         return {"charts": entries}
 
     @app.get("/v1/copilot/sessions/{session_id}/charts/{symbol}/{interval}")
@@ -552,7 +556,7 @@ def create_app(
                         store.get_session, analyze_req.session_id, owner=owner
                     )
                 except SessionNotFoundError:
-                    return JSONResponse({"error": "session not found"}, status_code=404)
+                    return session_not_found_response()
                 session_intent = session_record.intent
             merged_intent = resolve_analyze_intent(analyze_req.intent, session_intent)
             analyze_req = analyze_req.model_copy(update={"intent": merged_intent}, deep=True)
