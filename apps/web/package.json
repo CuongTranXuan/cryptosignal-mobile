@@ -1,12 +1,24 @@
 {
   "name": "@cryptosignal/web",
   "private": true,
+  "packageManager": "pnpm@10.15.0",
+  "engines": {
+    "node": ">=22"
+  },
   "type": "module",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:export": "NEXT_STATIC_EXPORT=1 next build",
     "start": "next start",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:wire-contract": "cd ../copilot && pytest -q tests/test_wire_schema.py::test_wire_shapes_pass_web_zod_when_node_available",
+    "capture:chart-ai": "node scripts/capture-chart-ai-targets.mjs"
   },
   "dependencies": {
     "@tailwindcss/postcss": "^4.3.3",
@@ -24,7 +36,10 @@
     "@types/node": "^26.5.1",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^4.3.4",
     "jsdom": "^30.0.1",
+    "playwright": "^1.64.1",
+    "tsx": "^4.23.15",
     "typescript": "^5.9.2",
     "vitest": "^2.1.9"
   }

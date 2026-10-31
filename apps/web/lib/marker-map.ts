@@ -10,19 +10,15 @@ export type SeriesMarkerLike = {
   text?: string;
 };
 
-function colorForSide(side: AgentMarker["side"]): string {
-  switch (side) {
-    case "buy":
-      return CHART_THEME.green;
-    case "sell":
-      return CHART_THEME.red;
-    case "neutral":
-      return CHART_THEME.gold;
-    default: {
-      const _exhaustive: never = side;
-      return _exhaustive;
-    }
-  }
+/** C.13: server anchors only — muted neutral circles, no buy/sell semantics. */
+const NEUTRAL_MARKER_COLOR = CHART_THEME.muted;
+
+/** Anchors linked to a drawing render only when that shape is on the chart. */
+export function filterRenderableAnchorMarkers(
+  markers: AgentMarker[],
+  shapeIdsOnChart: ReadonlySet<string>,
+): AgentMarker[] {
+  return markers.filter((marker) => !marker.drawing_id || shapeIdsOnChart.has(marker.drawing_id));
 }
 
 export function mapAgentMarkersToSeriesMarkers(markers: AgentMarker[]): SeriesMarkerLike[] {
@@ -32,7 +28,7 @@ export function mapAgentMarkersToSeriesMarkers(markers: AgentMarker[]): SeriesMa
       time: marker.time,
       position: marker.position,
       shape: marker.shape,
-      color: colorForSide(marker.side),
+      color: NEUTRAL_MARKER_COLOR,
     };
     if (marker.label) mapped.text = marker.label;
     return mapped;

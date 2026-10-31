@@ -1,0 +1,22 @@
+{
+  "charts": [
+    {
+      "symbol": "BTCUSDT",
+      "interval": "30m",
+      "updated_at": 1790100004.0,
+      "revision": 1,
+      "analyzed_at": null,
+      "shape_count": 1,
+      "has_analysis": false
+    },
+    {
+      "symbol": "BTCUSDT",
+      "interval": "4h",
+      "updated_at": 1790100003.0,
+      "revision": 2,
+      "analyzed_at": 1790100002.0,
+      "shape_count": 4,
+      "has_analysis": true
+    }
+  ]
+}

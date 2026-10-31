@@ -251,6 +251,8 @@ export function selectAnalysisCandles(
     tightPadBars?: number;
     fallbackRecentBars?: number;
     minBars?: number;
+    /** When set (and the user did not name an expanded range), analyze the last N closed candles. */
+    candleCount?: number;
   } = {},
 ): AnalysisWindow {
   if (closedCandles.length === 0) {
@@ -275,7 +277,16 @@ export function selectAnalysisCandles(
     });
   }
 
-  const tight = prompt ? promptRequestsVisibleWindow(prompt) : false;
+  const candleCount = opts.candleCount;
+  const visibleIntent = prompt ? promptRequestsVisibleWindow(prompt) : false;
+  if (candleCount != null && candleCount > 0 && !visibleIntent) {
+    const n = Math.min(Math.floor(candleCount), closedCandles.length);
+    if (n >= minBars) {
+      return windowFromCandles(closedCandles.slice(-n), "recent");
+    }
+  }
+
+  const tight = visibleIntent;
   const bars = tight ? tightPadBars : padBars;
   const padSec = bars * barSec;
 
@@ -302,7 +313,7 @@ export function annotatePromptWithWindow(prompt: string, window: AnalysisWindow)
   if (window.mode === "prompt") {
     focus =
       "The user named another analysis/draw range — use this candle set for that range " +
-      "(viewport is only the default when they did not). Draw point.time values inside this set";
+      "(viewport is only the default when they did not). Anchor point.time values in this set; forward rays may extend one endpoint beyond lastClosed on the bar grid";
   } else if (window.mode === "viewport") {
     focus = promptRequestsVisibleWindow(prompt)
       ? "Focus strictly on this visible chart window"
@@ -317,11 +328,16 @@ export function annotatePromptWithWindow(prompt: string, window: AnalysisWindow)
     focus = "Primary analysis window is the provided closed-candle set";
   }
 
+  const projectionHint =
+    "Anchors must use closed-candle times from this set. At most one forward endpoint per shape may project " +
+    "to lastClosed + k×barSeconds (k capped by interval: 1m≤30, 30m≤27, 15m/1h≤24, 4h≤18, 1d≤12, max 48). " +
+    "Horizontal levels: trendline with equal price on both points. Fib pocket: zone with priceLow/priceHigh.";
+
   const drawHint =
     window.mode === "prompt" || detectExpandedRangeIntent(prompt)?.kind === "all"
-      ? `All PatternShape point.time values MUST fall inside this candle set. ` +
+      ? `Prefer point.time inside this candle set for anchors. ${projectionHint} ` +
         `Draw on the user-named range; do not restrict to the chart viewport.`
-      : `All PatternShape point.time values MUST fall inside this candle set. ` +
+      : `Prefer point.time inside this candle set for anchors. ${projectionHint} ` +
         `Prefer patterns in the most recent / visible portion unless the user named another range.`;
 
   return (

@@ -5,8 +5,16 @@ import { Group, Panel, Separator } from "react-resizable-panels";
 import type { ChartCoordinateApi } from "../lib/chart-api";
 import { useAiStore } from "../lib/stores/ai-store";
 import { useBinanceMarket } from "../lib/use-binance-market";
+import { configureChartHistory } from "../lib/chart-history";
+import { createChartStateApi } from "../lib/chart-state";
+import { createCopilotApi } from "../lib/copilot-api";
+import { createCopilotFeedbackClient } from "../lib/copilot-feedback";
+import { setCopilotFeedbackClient } from "../lib/copilot-feedback-host";
+import { useCopilotSessionStore } from "../lib/stores/copilot-session-store";
 import { createCopilotClient, type CopilotClient } from "../lib/use-copilot";
 import { ChartCanvas } from "./chart-canvas";
+import { ChartHistoryBar } from "./chart-history-bar";
+import { CopilotModelBanner } from "./copilot/copilot-model-bar";
 import { CopilotPanel } from "./copilot-panel";
 import { PatternsTable } from "./patterns-table";
 import { TopBar } from "./top-bar";
@@ -22,6 +30,14 @@ export function TerminalShell() {
   const closedTimesRef = useRef(closedTimes);
   closedTimesRef.current = closedTimes;
 
+  const copilotApi = useMemo(
+    () =>
+      createCopilotApi({
+        forceMock: process.env.NEXT_PUBLIC_COPILOT_MOCK === "1",
+      }),
+    [],
+  );
+
   const client = useMemo(() => {
     const c = createCopilotClient({
       getClosedTimes: () => closedTimesRef.current,
@@ -30,6 +46,40 @@ export function TerminalShell() {
     clientRef.current = c;
     return c;
   }, []);
+
+  useEffect(() => {
+    configureChartHistory({
+      api: createChartStateApi({ forceMock: process.env.NEXT_PUBLIC_COPILOT_MOCK === "1" }),
+      getView: () => {
+        const range = coordApiRef.current?.getVisibleTimeRange() ?? null;
+        return range ? { from: Math.round(range.from), to: Math.round(range.to) } : null;
+      },
+      applyView: (view) => coordApiRef.current?.setVisibleTimeRange?.(view),
+      waitForCandles: true,
+    });
+    useCopilotSessionStore.getState().setApi(copilotApi);
+    void useCopilotSessionStore.getState().bootstrap();
+  }, [copilotApi]);
+
+  useEffect(() => {
+    const feedback = createCopilotFeedbackClient(copilotApi, {
+      getSessionId: () => useCopilotSessionStore.getState().activeSessionId,
+      getMessageId: () => {
+        const messages = useAiStore.getState().messages;
+        for (let i = messages.length - 1; i >= 0; i--) {
+          const m = messages[i];
+          if (m?.role === "agent") return m.id;
+        }
+        return null;
+      },
+      onError: (message) => useAiStore.getState().appendText(`\n\n(${message})`),
+    });
+    setCopilotFeedbackClient(feedback);
+    return () => {
+      feedback.dispose();
+      setCopilotFeedbackClient(null);
+    };
+  }, [copilotApi]);
 
   useEffect(() => {
     client.watchShapesReset();
@@ -63,7 +113,8 @@ export function TerminalShell() {
 
   return (
     <div className="flex h-screen w-screen flex-col bg-[#0b0e14] text-[#eaecef]">
-      <TopBar />
+      <TopBar api={copilotApi} />
+      <CopilotModelBanner api={copilotApi} />
       <Group
         orientation="horizontal"
         className="min-h-0 flex-1"
@@ -78,6 +129,7 @@ export function TerminalShell() {
       >
         <Panel id="chart" minSize="40%" defaultSize={`${100 - defaultCopilotPct}%`} className="min-w-0">
           <div className="flex h-full min-h-0 flex-col">
+            <ChartHistoryBar />
             <ChartCanvas coordApiRef={coordApiRef} />
             <PatternsTable />
           </div>
@@ -92,7 +144,7 @@ export function TerminalShell() {
           }}
           className="min-w-0"
         >
-          <CopilotPanel client={client} />
+          <CopilotPanel client={client} api={copilotApi} />
         </Panel>
       </Group>
     </div>

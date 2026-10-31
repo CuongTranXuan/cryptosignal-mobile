@@ -71,6 +71,48 @@ describe("overlay-map", () => {
     ]);
   });
 
+  it("maps horizontal trendline (equal price) to a flat segment", () => {
+    const horizontal: PatternShape = {
+      ...shape,
+      id: "fib-level",
+      kind: "trendline",
+      name: "0.618",
+      points: [
+        { time: 10, price: 150 },
+        { time: 40, price: 150 },
+      ],
+    };
+    const pixels = mapShapeToPixels(horizontal, forwardApi);
+    expect(pixels).toEqual([
+      { x: 20, y: 850 },
+      { x: 80, y: 850 },
+    ]);
+  });
+
+  it("mapZoneToRect uses partial time coords when one bound extrapolates", () => {
+    const zone: PatternShape = {
+      ...shape,
+      id: "zone-future",
+      kind: "zone",
+      points: [
+        { time: 10, price: 100 },
+        { time: 50, price: 100 },
+      ],
+      priceLow: 90,
+      priceHigh: 110,
+    };
+    const api = {
+      timeToCoordinate: (t: number) => (t <= 30 ? t * 2 : 60 + (t - 30) * 2),
+      priceToCoordinate: forwardApi.priceToCoordinate,
+    };
+    expect(mapZoneToRect(zone, api, 800)).toEqual({
+      x: 20,
+      y: 890,
+      width: 80,
+      height: 20,
+    });
+  });
+
   it("mapZoneToRect maps priceLow/priceHigh and time bounds", () => {
     const zone: PatternShape = {
       ...shape,

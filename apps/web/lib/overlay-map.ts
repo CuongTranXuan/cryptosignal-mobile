@@ -57,6 +57,8 @@ export function mapZoneToRect(
     const maxT = Math.max(...times);
     const cx1 = api.timeToCoordinate(minT);
     const cx2 = api.timeToCoordinate(maxT);
+    if (cx1 != null) x1 = cx1;
+    if (cx2 != null) x2 = cx2;
     if (cx1 != null && cx2 != null) {
       x1 = Math.min(cx1, cx2);
       x2 = Math.max(cx1, cx2);

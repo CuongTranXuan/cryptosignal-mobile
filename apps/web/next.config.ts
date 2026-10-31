@@ -1,34 +1,21 @@
 import type { NextConfig } from "next";
 
-const COPILOT_UPSTREAM = process.env.COPILOT_UPSTREAM_URL || "http://127.0.0.1:8000";
-
-/** Same-origin rewrite only when the browser is not configured to call copilot directly. */
-function shouldProxyCopilotToUpstream(): boolean {
-  const publicUrl = process.env.NEXT_PUBLIC_COPILOT_URL;
-  if (publicUrl === undefined || publicUrl === null) return true;
-  return publicUrl.trim() === "";
-}
+// NEXT_STATIC_EXPORT=1 builds a static `out/` for the VPS (nginx serves it and proxies
+// /v1/copilot/ to uvicorn). The Node proxy route is named `route.proxy.ts`, so it is
+// only picked up when `proxy.ts` is a page extension, i.e. in the normal build and dev.
+const staticExport = process.env.NEXT_STATIC_EXPORT === "1";
+const basePageExtensions = ["tsx", "ts", "jsx", "js"];
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
-  // Let ngrok (and similar tunnels) load Next dev assets / HMR.
+  output: staticExport ? "export" : "standalone",
+  pageExtensions: staticExport ? basePageExtensions : [...basePageExtensions, "proxy.ts"],
   allowedDevOrigins: [
     "*.ngrok-free.dev",
     "*.ngrok-free.app",
     "*.ngrok.app",
     "*.ngrok.io",
   ],
-  async rewrites() {
-    if (!shouldProxyCopilotToUpstream()) {
-      return [];
-    }
-    return [
-      {
-        source: "/v1/copilot/:path*",
-        destination: `${COPILOT_UPSTREAM.replace(/\/$/, "")}/v1/copilot/:path*`,
-      },
-    ];
-  },
 };
 
 export default nextConfig;

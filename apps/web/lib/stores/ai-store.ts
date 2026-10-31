@@ -1,4 +1,6 @@
 import { create } from "zustand";
+import type { IntentCheck } from "../copilot-schema";
+import type { AgentMarker, PatternShape } from "../pattern-shape";
 
 export type AiMode = "manual" | "auto";
 
@@ -6,6 +8,16 @@ export type AiMessage = {
   id: string;
   role: "user" | "agent";
   content: string;
+  modelId?: string;
+  modelLabel?: string;
+  shapes?: PatternShape[];
+  markers?: AgentMarker[];
+  createdAt?: number;
+  analyzeMeta?: {
+    candle_count_used: number;
+    clamped: boolean;
+    intent_check?: IntentCheck;
+  };
 };
 
 export type CopilotHealth = {
@@ -25,7 +37,7 @@ type AiState = {
   setMode: (mode: AiMode) => void;
   setPanelWidth: (panelWidth: number) => void;
   appendUser: (content: string) => void;
-  startAgent: () => void;
+  startAgent: (meta?: { modelId?: string; modelLabel?: string }) => void;
   appendText: (delta: string) => void;
   fail: (message: string) => void;
   finish: () => void;
@@ -51,15 +63,33 @@ export const useAiStore = create<AiState>((set, get) => ({
 
   appendUser: (content) =>
     set({
-      messages: [...get().messages, { id: nextId("user"), role: "user", content }],
+      messages: [
+        ...get().messages,
+        {
+          id: nextId("user"),
+          role: "user",
+          content,
+          createdAt: Math.floor(Date.now() / 1000),
+        },
+      ],
       lastError: null,
     }),
 
-  startAgent: () =>
+  startAgent: (meta) =>
     set({
       inFlight: true,
       lastError: null,
-      messages: [...get().messages, { id: nextId("agent"), role: "agent", content: "" }],
+      messages: [
+        ...get().messages,
+        {
+          id: nextId("agent"),
+          role: "agent",
+          content: "",
+          modelId: meta?.modelId,
+          modelLabel: meta?.modelLabel,
+          createdAt: Math.floor(Date.now() / 1000),
+        },
+      ],
     }),
 
   appendText: (delta) => {

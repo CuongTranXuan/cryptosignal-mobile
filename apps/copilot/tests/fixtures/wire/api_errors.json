@@ -1,0 +1,94 @@
+{
+  "chart_state_too_large": {
+    "status": 413,
+    "body": {
+      "code": "chart_state_too_large",
+      "message": "Biểu đồ có quá nhiều hình vẽ",
+      "field": "shapes",
+      "limit": 200
+    }
+  },
+  "request_too_large": {
+    "status": 413,
+    "body": {
+      "code": "request_too_large",
+      "message": "Yêu cầu quá lớn",
+      "field": "body_bytes",
+      "limit": 100000
+    }
+  },
+  "db_unavailable": {
+    "status": 503,
+    "body": {
+      "code": "db_unavailable",
+      "message": "Cơ sở dữ liệu tạm thời không khả dụng, vui lòng thử lại sau"
+    }
+  },
+  "invalid_number": {
+    "status": 422,
+    "body": {
+      "code": "invalid_number",
+      "message": "Giá trị số không hợp lệ (NaN hoặc vô cực)",
+      "detail": "NaN"
+    }
+  },
+  "invalid_view_range": {
+    "status": 422,
+    "body": {
+      "code": "invalid_view_range",
+      "message": "Khoảng hiển thị không hợp lệ: from phải nhỏ hơn hoặc bằng to",
+      "detail": {
+        "from": 2,
+        "to": 1
+      }
+    }
+  },
+  "duplicate_shape_id": {
+    "status": 422,
+    "body": {
+      "code": "duplicate_shape_id",
+      "message": "Có hình vẽ bị trùng mã",
+      "detail": {
+        "ids": [
+          "a"
+        ]
+      }
+    }
+  },
+  "invalid_interval": {
+    "status": 422,
+    "body": {
+      "code": "invalid_interval",
+      "message": "Mã hoặc khung thời gian không hợp lệ",
+      "detail": "interval must be one of 1m, 15m, 30m, 1h, 4h, 1d"
+    }
+  },
+  "device_required": {
+    "status": 401,
+    "body": {
+      "code": "device_required",
+      "message": "Cần cookie thiết bị hợp lệ để xuất phản hồi"
+    }
+  },
+  "admin_forbidden": {
+    "status": 403,
+    "body": {
+      "code": "admin_forbidden",
+      "message": "Mã quản trị không đúng"
+    }
+  },
+  "admin_export_disabled": {
+    "status": 403,
+    "body": {
+      "code": "admin_export_disabled",
+      "message": "Xuất toàn bộ phản hồi đang tắt (chưa cấu hình mã quản trị)"
+    }
+  },
+  "session_not_found": {
+    "status": 404,
+    "body": {
+      "error": "session not found",
+      "code": "session_not_found"
+    }
+  }
+}

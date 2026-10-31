@@ -1,0 +1,107 @@
+{
+  "healthy": {
+    "probed_at": "2026-10-26T07:33:20Z",
+    "ttl_s": 600,
+    "provider": "omniroute",
+    "upstream_reachable": true,
+    "upstream_error": null,
+    "skipped_count": 0,
+    "skipped_ids": [],
+    "complete": true,
+    "results": [
+      {
+        "id": "agentrouter/deepseek-v4-flash",
+        "status": "ok",
+        "latency_ms": 400,
+        "http_status": 200,
+        "error_code": null,
+        "message": null
+      },
+      {
+        "id": "cursor/composer-2.5",
+        "status": "ok",
+        "latency_ms": 550,
+        "http_status": 200,
+        "error_code": null,
+        "message": null
+      },
+      {
+        "id": "cursor/auto",
+        "status": "not_found",
+        "latency_ms": 700,
+        "http_status": 404,
+        "error_code": "model_not_found",
+        "message": "model not found"
+      },
+      {
+        "id": "auggie/claude-sonnet-4-5",
+        "status": "provider_unconfigured",
+        "latency_ms": 850,
+        "http_status": 502,
+        "error_code": null,
+        "message": "Auggie CLI not found. Please install/login first."
+      }
+    ],
+    "probe_in_progress": false
+  },
+  "default_fallback": {
+    "probed_at": "2026-10-26T07:33:20Z",
+    "ttl_s": 600,
+    "provider": "omniroute",
+    "upstream_reachable": true,
+    "upstream_error": null,
+    "skipped_count": 0,
+    "skipped_ids": [],
+    "complete": true,
+    "results": [
+      {
+        "id": "agentrouter/deepseek-v4-flash",
+        "status": "auth_error",
+        "latency_ms": 400,
+        "http_status": 401,
+        "error_code": null,
+        "message": "No active credentials for provider agentrouter"
+      },
+      {
+        "id": "cursor/composer-2.5",
+        "status": "ok",
+        "latency_ms": 550,
+        "http_status": 200,
+        "error_code": null,
+        "message": null
+      },
+      {
+        "id": "cursor/auto",
+        "status": "not_found",
+        "latency_ms": 700,
+        "http_status": 404,
+        "error_code": "model_not_found",
+        "message": "model not found"
+      },
+      {
+        "id": "auggie/claude-sonnet-4-5",
+        "status": "provider_unconfigured",
+        "latency_ms": 850,
+        "http_status": 502,
+        "error_code": null,
+        "message": "Auggie CLI not found. Please install/login first."
+      }
+    ],
+    "probe_in_progress": false
+  },
+  "upstream_down": {
+    "probed_at": "2026-10-26T07:33:20Z",
+    "ttl_s": 600,
+    "provider": "omniroute",
+    "upstream_reachable": false,
+    "upstream_error": {
+      "code": "connect_error",
+      "message": "Upstream unreachable (connection failed)"
+    },
+    "skipped_count": 0,
+    "skipped_ids": [],
+    "complete": true,
+    "results": [],
+    "probe_in_progress": false
+  }
+}

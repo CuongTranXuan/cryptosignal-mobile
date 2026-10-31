@@ -1,0 +1,73 @@
+{
+  "probed_at": "2026-10-25T04:42:00Z",
+  "ttl_s": 600,
+  "provider": "omniroute",
+  "upstream_reachable": true,
+  "upstream_error": null,
+  "results": [
+    {
+      "id": "agentrouter/deepseek-v4-flash",
+      "status": "ok",
+      "latency_ms": 412,
+      "http_status": 200,
+      "error_code": null,
+      "message": null
+    },
+    {
+      "id": "agentrouter/glm-4.6",
+      "status": "ok",
+      "latency_ms": 655,
+      "http_status": 200,
+      "error_code": null,
+      "message": null
+    },
+    {
+      "id": "gemini/gemini-2.5-flash",
+      "status": "ok",
+      "latency_ms": 298,
+      "http_status": 200,
+      "error_code": null,
+      "message": null
+    },
+    {
+      "id": "agentrouter/claude-sonnet-4.5",
+      "status": "auth_error",
+      "latency_ms": 180,
+      "http_status": 401,
+      "error_code": "invalid_api_key",
+      "message": "Invalid API key"
+    },
+    {
+      "id": "openrouter/gpt-5",
+      "status": "quota_or_rate_limited",
+      "latency_ms": 240,
+      "http_status": 429,
+      "error_code": "insufficient_quota",
+      "message": "Quota exceeded"
+    },
+    {
+      "id": "agentrouter/kimi-k2",
+      "status": "not_found",
+      "latency_ms": 95,
+      "http_status": 404,
+      "error_code": "model_not_found",
+      "message": "Model not found"
+    },
+    {
+      "id": "agentrouter/qwen3-coder",
+      "status": "timeout",
+      "latency_ms": 15000,
+      "http_status": null,
+      "error_code": null,
+      "message": "Probe timed out after 15s"
+    },
+    {
+      "id": "agentrouter/grok-4",
+      "status": "upstream_error",
+      "latency_ms": 820,
+      "http_status": 502,
+      "error_code": null,
+      "message": "Bad gateway"
+    }
+  ]
+}

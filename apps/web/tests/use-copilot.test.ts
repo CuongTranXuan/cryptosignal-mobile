@@ -10,9 +10,15 @@ import {
   COPILOT_ERROR_CREDITS_EXHAUSTED,
   COPILOT_ERROR_RATE_LIMITED,
   COPILOT_ERROR_UNAUTHORIZED,
+  COPILOT_SERVER_PICKED_SHAPES,
   HEAD_SHOULDERS_PROMPT,
   TRIANGLES_PROMPT,
 } from "../lib/copilot-strings";
+import { createCopilotApi } from "../lib/copilot-api";
+import { clearCopilotModelsCache, loadCopilotModels } from "../lib/copilot-models-cache";
+import { LEGACY_SESSIONS_STORAGE_KEY } from "../lib/copilot-session-migration";
+import { resetCopilotApiMockSessionsForTests } from "../lib/copilot-api";
+import { useCopilotSessionStore } from "../lib/stores/copilot-session-store";
 import { createCopilotClient } from "../lib/use-copilot";
 
 const c0: Candle = {
@@ -89,7 +95,23 @@ function streamResponse(chunks: string[], status = 200): Response {
   });
 }
 
-function resetStores() {
+async function resetStores() {
+  localStorage.clear();
+  resetCopilotApiMockSessionsForTests();
+  localStorage.removeItem(LEGACY_SESSIONS_STORAGE_KEY);
+  const api = createCopilotApi({ forceMock: true });
+  clearCopilotModelsCache();
+  await loadCopilotModels(api);
+  useCopilotSessionStore.getState().setApi(api);
+  await useCopilotSessionStore.getState().bootstrap();
+  useCopilotSessionStore.setState({
+    reasoningEffort: "low",
+    customCandleCount: null,
+    lastAnalyzeMeta: null,
+    lastDetectedRegime: null,
+    streamingIntentCheck: null,
+    lastAnalysisEvent: null,
+  });
   useChartStore.setState({
     symbol: "BTCUSDT",
     interval: "1h",
@@ -111,14 +133,14 @@ function resetStores() {
 }
 
 describe("use-copilot / createCopilotClient", () => {
-  beforeEach(() => {
-    resetStores();
+  beforeEach(async () => {
+    await resetStores();
     vi.restoreAllMocks();
   });
 
   it("pollHealth hits /v1/copilot/health on public base URL", async () => {
     const prev = process.env.NEXT_PUBLIC_COPILOT_URL;
-    process.env.NEXT_PUBLIC_COPILOT_URL = "https://copilot.example.onrender.com";
+    process.env.NEXT_PUBLIC_COPILOT_URL = "https://copilot.example.com";
     try {
       const fetchMock = vi.fn(async () =>
         new Response(JSON.stringify({ ok: true, style: "openai", model: "m", baseHost: "x" }), {
@@ -129,9 +151,8 @@ describe("use-copilot / createCopilotClient", () => {
         fetchImpl: fetchMock as unknown as typeof fetch,
       });
       await client.pollHealth();
-      expect(fetchMock.mock.calls[0]?.[0]).toBe(
-        "https://copilot.example.onrender.com/v1/copilot/health",
-      );
+      const calls = fetchMock.mock.calls as unknown as [string][];
+      expect(calls[0]?.[0]).toBe("https://copilot.example.com/v1/copilot/health");
     } finally {
       if (prev === undefined) delete process.env.NEXT_PUBLIC_COPILOT_URL;
       else process.env.NEXT_PUBLIC_COPILOT_URL = prev;
@@ -140,7 +161,7 @@ describe("use-copilot / createCopilotClient", () => {
 
   it("uses NEXT_PUBLIC_COPILOT_URL when set", async () => {
     const prev = process.env.NEXT_PUBLIC_COPILOT_URL;
-    process.env.NEXT_PUBLIC_COPILOT_URL = "https://copilot.example.onrender.com/";
+    process.env.NEXT_PUBLIC_COPILOT_URL = "https://copilot.example.com/";
     try {
       const fetchMock = vi.fn(async () =>
         streamResponse([sseChunk("done", {})]),
@@ -150,9 +171,8 @@ describe("use-copilot / createCopilotClient", () => {
         getClosedTimes: () => new Set([c0.time, c1.time, c2.time]),
       });
       await client.analyze("hi");
-      expect(fetchMock.mock.calls[0]?.[0]).toBe(
-        "https://copilot.example.onrender.com/v1/copilot/analyze",
-      );
+      const calls = fetchMock.mock.calls as unknown as [string][];
+      expect(calls[0]?.[0]).toBe("https://copilot.example.com/v1/copilot/analyze");
     } finally {
       if (prev === undefined) delete process.env.NEXT_PUBLIC_COPILOT_URL;
       else process.env.NEXT_PUBLIC_COPILOT_URL = prev;
@@ -169,6 +189,128 @@ describe("use-copilot / createCopilotClient", () => {
     expect(AUTO_DRAW_PROMPT).toBe(
       "Tự vẽ: cập nhật mẫu hình cho nến đóng mới nhất. Update patterns for the latest closed candle. Reply and summarize in Vietnamese; output all text in Vietnamese.",
     );
+  });
+
+  it("sends reasoning_effort when session store has a supported effort", async () => {
+    useCopilotSessionStore.setState({ reasoningEffort: "low" });
+    const fetchMock = vi.fn(async () => streamResponse([sseChunk("done", {})]));
+    const client = createCopilotClient({
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      getClosedTimes: () => new Set([c0.time, c1.time, c2.time]),
+    });
+    await client.analyze("hi");
+    const body = JSON.parse(
+      String((fetchMock.mock.calls as unknown as [string, RequestInit][])[0]![1].body),
+    );
+    expect(body.reasoning_effort).toBe("low");
+    expect(body.candle_count).toBe(3);
+  });
+
+  it("shows detected regime from SSE before model text arrives", async () => {
+    const fetchMock = vi.fn(async () =>
+      streamResponse([
+        sseChunk("regime", {
+          ltf: { regime: "trend_down" },
+          htf: {},
+          intent_check: {
+            detected_regime: "trend_down",
+            bias_conflict: true,
+            message: "conflict",
+          },
+        }),
+        sseChunk("text", { delta: "late reply" }),
+        sseChunk("done", {}),
+      ]),
+    );
+    const client = createCopilotClient({
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      getClosedTimes: () => new Set([c0.time, c1.time, c2.time]),
+    });
+    await client.analyze("hi");
+    expect(useCopilotSessionStore.getState().lastDetectedRegime).toBe("trend_down");
+    expect(useCopilotSessionStore.getState().streamingIntentCheck?.bias_conflict).toBe(true);
+    const agent = useAiStore.getState().messages.find((m) => m.role === "agent");
+    expect(agent?.content).not.toContain("Chế độ thị trường");
+  });
+
+  it("stores analysis SSE when filled and ignores empty analysis", async () => {
+    const fetchMock = vi.fn(async () =>
+      streamResponse([
+        sseChunk("analysis", { bias: "neutral", evidence_for: [], evidence_against: [] }),
+        sseChunk("analysis", {
+          bias: "bullish",
+          evidence_for: ["breakout"],
+          confidence: 0.6,
+        }),
+        sseChunk("done", {}),
+      ]),
+    );
+    const client = createCopilotClient({
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      getClosedTimes: () => new Set([c0.time, c1.time, c2.time]),
+    });
+    await client.analyze("hi");
+    expect(useCopilotSessionStore.getState().lastAnalysisEvent?.bias).toBe("bullish");
+    expect(useCopilotSessionStore.getState().lastAnalysisEvent?.evidence_for).toContain("breakout");
+  });
+
+  it("applies SSE meta candle_count_used to session store", async () => {
+    const fetchMock = vi.fn(async () =>
+      streamResponse([
+        sseChunk("meta", {
+          model: "provider-a/model-alpha",
+          candle_count_requested: 300,
+          candle_count_used: 200,
+          clamped: true,
+        }),
+        sseChunk("text", { delta: "ok" }),
+        sseChunk("done", {}),
+      ]),
+    );
+    const client = createCopilotClient({
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      getClosedTimes: () => new Set([c0.time, c1.time, c2.time]),
+    });
+    await client.analyze("hi");
+    expect(useCopilotSessionStore.getState().lastAnalyzeMeta?.candle_count_used).toBe(200);
+    expect(useCopilotSessionStore.getState().candleCount).toBe(200);
+  });
+
+  it("accepts SSE markers with drawing_id guardrail anchors", async () => {
+    const anchor = {
+      id: "anchor-drw_test",
+      symbol: "BTCUSDT",
+      interval: "1h",
+      time: c1.time,
+      side: "neutral",
+      position: "inBar",
+      shape: "circle",
+      label: "Neo",
+      confidence: 0.8,
+      source: "agent",
+      drawing_id: "drw_test",
+      guardrail: {
+        regime: "range",
+        confidence: 0.8,
+        evidence_against: [],
+        invalidation: null,
+      },
+    };
+    const fetchMock = vi.fn(async () =>
+      streamResponse([
+        sseChunk("markers", { markers: [anchor] }),
+        sseChunk("done", {}),
+      ]),
+    );
+    const client = createCopilotClient({
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      getClosedTimes: () => new Set([c0.time, c1.time, c2.time]),
+    });
+    await client.analyze("markers");
+    expect(useMarkerStore.getState().markers).toHaveLength(0);
+    const content = useAiStore.getState().messages.find((m) => m.role === "agent")?.content ?? "";
+    expect(content).not.toContain("điểm neo");
+    expect(content).not.toContain("điểm neo không hợp lệ");
   });
 
   it("streams text+shapes into agent message and setPreview", async () => {
@@ -215,26 +357,39 @@ describe("use-copilot / createCopilotClient", () => {
     expect(useMarkerStore.getState().markers).toEqual([]);
   });
 
-  it("streams markers into the marker store without touching shapes", async () => {
-    const committed = { ...validShape("keep"), status: "committed" as const };
+  it("streams markers into the marker store without touching user shapes", async () => {
+    // N24: earlier unpinned AI shapes are replaced per run; user-drawn shapes stay.
+    const committed = {
+      ...validShape("keep"),
+      source: "human" as const,
+      status: "committed" as const,
+    };
     useShapeStore.setState({ shapes: [committed], selectedId: null });
 
     const marker: AgentMarker = {
-      id: "mrk-1",
+      id: "anchor-drw_test",
       symbol: "BTCUSDT",
       interval: "1h",
       time: c1.time,
-      side: "buy",
-      position: "belowBar",
-      shape: "arrowUp",
+      side: "neutral",
+      position: "inBar",
+      shape: "circle",
+      label: "Neo",
       confidence: 0.7,
       source: "agent",
+      drawing_id: "tri-1",
     };
 
     const fetchMock = vi.fn(async () =>
       streamResponse([
         sseChunk("shapes", { shapes: [validShape("tri-1")] }),
-        sseChunk("markers", { markers: [marker, { ...marker, id: "off", time: 999 }] }),
+        sseChunk("markers", {
+          markers: [
+            marker,
+            { ...marker, id: "off", time: 999 },
+            { ...marker, id: "orphan", drawing_id: "not-on-chart" },
+          ],
+        }),
         sseChunk("done", {}),
       ]),
     );
@@ -250,10 +405,10 @@ describe("use-copilot / createCopilotClient", () => {
     expect(useShapeStore.getState().committed().map((s) => s.id).sort()).toEqual(
       ["keep", "tri-1"].sort(),
     );
-    expect(useMarkerStore.getState().markers.map((m) => m.id)).toEqual(["mrk-1"]);
+    expect(useMarkerStore.getState().markers.map((m) => m.id)).toEqual(["anchor-drw_test"]);
     const agentMsg = useAiStore.getState().messages.find((m) => m.role === "agent");
     expect(agentMsg?.content).toContain("Đã vẽ 1 hình trên biểu đồ");
-    expect(agentMsg?.content).toContain("Đã đặt 1 đánh dấu trên biểu đồ.");
+    expect(agentMsg?.content).toContain("Đã đặt 1 điểm neo.");
     expect(useAiStore.getState().messages.find((m) => m.role === "agent")?.content).toContain("Bỏ qua");
   });
 
@@ -292,7 +447,7 @@ describe("use-copilot / createCopilotClient", () => {
       [429, COPILOT_ERROR_RATE_LIMITED],
       [503, COPILOT_ERROR],
     ] as const) {
-      resetStores();
+      await resetStores();
       const fetchMock = vi.fn(async () => new Response(JSON.stringify({ error: "x" }), { status }));
       const client = createCopilotClient({
         fetchImpl: fetchMock as unknown as typeof fetch,
@@ -519,6 +674,30 @@ describe("use-copilot / createCopilotClient", () => {
     expect(times).toContain(c2.time);
   });
 
+  it("keeps agent trendline with one forward endpoint on the projection grid", async () => {
+    const forwardRay = {
+      ...validShape("forward-ray"),
+      kind: "trendline" as const,
+      points: [
+        { time: c1.time, price: 1 },
+        { time: c2.time + 3600, price: 2 },
+      ],
+    };
+
+    const fetchMock = vi.fn(async () =>
+      streamResponse([sseChunk("shapes", { shapes: [forwardRay] }), sseChunk("done", {})]),
+    );
+
+    const client = createCopilotClient({
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      getClosedTimes: () => new Set([c0.time, c1.time, c2.time]),
+    });
+
+    await client.analyze("project trend");
+
+    expect(useShapeStore.getState().committed().map((s) => s.id)).toEqual(["forward-ray"]);
+  });
+
   it("drops shapes with points outside closed candle times", async () => {
     const outOfWindow = {
       ...validShape("off-window"),
@@ -555,15 +734,17 @@ describe("use-copilot / createCopilotClient", () => {
     useShapeStore.getState().setPreview([validShape("gone")]);
     useMarkerStore.getState().setMarkers([
       {
-        id: "mrk-gone",
+        id: "anchor-gone",
         symbol: "BTCUSDT",
         interval: "1h",
         time: c1.time,
-        side: "buy",
-        position: "belowBar",
-        shape: "arrowUp",
+        side: "neutral",
+        position: "inBar",
+        shape: "circle",
+        label: "Neo",
         confidence: 0.5,
         source: "agent",
+        drawing_id: "drw_gone",
       },
     ]);
     const client = createCopilotClient({
@@ -611,5 +792,169 @@ describe("use-copilot / createCopilotClient", () => {
     expect(
       useAiStore.getState().messages.find((m) => m.role === "agent")?.content,
     ).toContain("Bỏ qua");
+  });
+
+  it("does not append Đã vẽ when shapes are empty and server summary covers no picks", async () => {
+    const fetchMock = vi.fn(async () =>
+      streamResponse([
+        sseChunk("text", { delta: "Đang phân tích…\n\n" }),
+        sseChunk("text", { delta: "Mô hình đã xong. Đang dựng lớp phủ…" }),
+        sseChunk("text", {
+          delta: "\n\nKhông có mô hình hợp lệ trên cửa sổ này.\n",
+        }),
+        sseChunk("shapes", { shapes: [], skipped: [], skipped_count: 0 }),
+        sseChunk("analysis", {
+          bias: "neutral",
+          no_valid_pattern: true,
+          evidence_for: [],
+          evidence_against: [],
+        }),
+        sseChunk("done", {}),
+      ]),
+    );
+    const client = createCopilotClient({
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      getClosedTimes: () => new Set([c0.time, c1.time, c2.time]),
+    });
+    await client.analyze("hi");
+    const content = useAiStore.getState().messages.find((m) => m.role === "agent")?.content ?? "";
+    expect(content).toContain("Không có mô hình hợp lệ");
+    expect(content).not.toMatch(/Đã vẽ\s*0/);
+    expect(content).not.toContain("Đã vẽ 0 hình");
+  });
+
+  it("handles C.11 SSE order: text chunks, regime retry, merged meta, single fallback note", async () => {
+    const fetchMock = vi.fn(async () =>
+      streamResponse([
+        sseChunk("text", { delta: "Đang phân tích…\n\n" }),
+        sseChunk("regime", {
+          regime: "range",
+          intent_check: { detected_regime: "range", bias_conflict: false },
+        }),
+        sseChunk("meta", {
+          model: "provider-a/model-alpha",
+          candle_count_requested: 300,
+          candle_count_used: 200,
+          clamped: true,
+        }),
+        sseChunk("regime", {
+          regime: "trend_up",
+          intent_check: { detected_regime: "trend_up", bias_conflict: false },
+        }),
+        sseChunk("text", { delta: "Mô hình đã xong. " }),
+        sseChunk("text", { delta: "Server summary.\n" }),
+        sseChunk("shapes", { shapes: [validShape("c11")], skipped: [], skipped_count: 0 }),
+        sseChunk("analysis", {
+          bias: "bullish",
+          evidence_for: ["breakout"],
+          evidence_against: [],
+          summary_direction: "bullish",
+        }),
+        sseChunk("text", { delta: "\n\nLớp phủ overlay." }),
+        sseChunk("meta", {
+          model: "provider-a/model-alpha",
+          candle_count_requested: 300,
+          candle_count_used: 200,
+          clamped: true,
+          intent_budget_fallback: true,
+        }),
+        sseChunk("done", {}),
+      ]),
+    );
+    const client = createCopilotClient({
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      getClosedTimes: () => new Set([c0.time, c1.time, c2.time]),
+    });
+    await client.analyze("hi");
+
+    expect(useCopilotSessionStore.getState().lastDetectedRegime).toBe("trend_up");
+    const meta = useCopilotSessionStore.getState().lastAnalyzeMeta;
+    expect(meta?.candle_count_used).toBe(200);
+    expect(meta?.candle_count_requested).toBe(300);
+    expect(meta?.intent_budget_fallback).toBe(true);
+
+    const content = useAiStore.getState().messages.find((m) => m.role === "agent")?.content ?? "";
+    expect(content).toContain("Đang phân tích…");
+    expect(content).toContain("Mô hình đã xong.");
+    expect(content).toContain("Server summary.");
+    expect(content).toContain("Lớp phủ overlay.");
+    const fallbackMatches = content.match(new RegExp(COPILOT_SERVER_PICKED_SHAPES, "g"));
+    expect(fallbackMatches?.length ?? 0).toBe(1);
+  });
+
+  it("clears fallback flags after a fallback run before a normal run", async () => {
+    const fallbackThenNormal = vi
+      .fn()
+      .mockImplementationOnce(async () =>
+        streamResponse([
+          sseChunk("meta", {
+            model: "provider-a/model-alpha",
+            candle_count_requested: 300,
+            candle_count_used: 200,
+            clamped: false,
+            validator_fallback: true,
+          }),
+          sseChunk("text", { delta: "fallback" }),
+          sseChunk("done", {}),
+        ]),
+      )
+      .mockImplementationOnce(async () =>
+        streamResponse([
+          sseChunk("meta", {
+            model: "provider-a/model-alpha",
+            candle_count_requested: 300,
+            candle_count_used: 200,
+            clamped: false,
+          }),
+          sseChunk("text", { delta: "normal" }),
+          sseChunk("done", {}),
+        ]),
+      );
+
+    const client = createCopilotClient({
+      fetchImpl: fallbackThenNormal as unknown as typeof fetch,
+      getClosedTimes: () => new Set([c0.time, c1.time, c2.time]),
+    });
+    await client.analyze("first");
+    await client.analyze("second");
+
+    const messages = useAiStore.getState().messages.filter((m) => m.role === "agent");
+    const second = messages[messages.length - 1]?.content ?? "";
+    expect(second).not.toContain(COPILOT_SERVER_PICKED_SHAPES);
+    expect(useCopilotSessionStore.getState().lastAnalyzeMeta?.validator_fallback).toBeUndefined();
+    expect(useCopilotSessionStore.getState().lastAnalyzeMeta?.intent_budget_fallback).toBeUndefined();
+  });
+
+  it("does not append fallback chat note until done when meta arrives early without flags", async () => {
+    const fetchMock = vi.fn(async () =>
+      streamResponse([
+        sseChunk("meta", {
+          model: "provider-a/model-alpha",
+          candle_count_requested: 300,
+          candle_count_used: 200,
+          clamped: false,
+          intent_budget_fallback: true,
+        }),
+        sseChunk("text", { delta: "partial" }),
+        sseChunk("meta", {
+          model: "provider-a/model-alpha",
+          candle_count_requested: 300,
+          candle_count_used: 200,
+          clamped: false,
+          validator_fallback: true,
+        }),
+        sseChunk("done", {}),
+      ]),
+    );
+    const client = createCopilotClient({
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      getClosedTimes: () => new Set([c0.time, c1.time, c2.time]),
+    });
+    await client.analyze("hi");
+    const content = useAiStore.getState().messages.find((m) => m.role === "agent")?.content ?? "";
+    const fallbackMatches = content.match(new RegExp(COPILOT_SERVER_PICKED_SHAPES, "g"));
+    expect(fallbackMatches?.length ?? 0).toBe(1);
+    expect(useCopilotSessionStore.getState().lastAnalyzeMeta?.validator_fallback).toBe(true);
+    expect(useCopilotSessionStore.getState().lastAnalyzeMeta?.intent_budget_fallback).toBe(true);
   });
 });

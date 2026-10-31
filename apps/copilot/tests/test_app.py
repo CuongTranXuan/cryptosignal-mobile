@@ -3,12 +3,13 @@ import asyncio
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from cryptosignal_copilot.app import create_app
+from cryptosignal_copilot.analyze_prep import AnalyzePlan
 from cryptosignal_copilot.schema import PatternShape, filter_preview_shapes
 
 
 class FakeRunner:
-    async def run(self, request):
+    async def run(self, plan: AnalyzePlan):
+        request = plan.request
         yield "text", {"delta": "hello "}
         yield "text", {"delta": "world"}
         shape = PatternShape(
@@ -39,22 +40,23 @@ ANALYZE = {
 }
 
 
-def _llm_env(monkeypatch):
-    monkeypatch.setenv("LLM_API_STYLE", "openai")
-    monkeypatch.setenv("LLM_BASE_URL", "https://api.deepseek.com")
-    monkeypatch.setenv("LLM_API_KEY", "sk-secret-should-not-appear")
-    monkeypatch.setenv("LLM_MODEL", "deepseek-chat")
-
-
 @pytest.mark.asyncio
-async def test_health_ok(monkeypatch):
-    _llm_env(monkeypatch)
-    app = create_app(runner=FakeRunner())
+async def test_health_ok(llm_env, test_app):
+    app = test_app(FakeRunner())
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         res = await client.get("/v1/copilot/health")
     assert res.status_code == 200
-    assert res.json()["model"] == "deepseek-chat"
-    assert "sk-secret-should-not-appear" not in res.text
+    assert res.json()["model"] == "agentrouter/deepseek-v4-flash"
+
+
+@pytest.mark.asyncio
+async def test_bare_health_alias(llm_env, test_app):
+    app = test_app(FakeRunner())
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        bare = await client.get("/health")
+        prefixed = await client.get("/v1/copilot/health")
+    assert bare.status_code == 200
+    assert bare.json() == prefixed.json()
 
 
 @pytest.mark.asyncio
@@ -63,28 +65,53 @@ async def test_health_missing(monkeypatch):
     monkeypatch.delenv("LLM_API_STYLE", raising=False)
     monkeypatch.delenv("LLM_BASE_URL", raising=False)
     monkeypatch.delenv("LLM_MODEL", raising=False)
+    from cryptosignal_copilot.app import create_app
+
     app = create_app(runner=FakeRunner())
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         res = await client.get("/v1/copilot/health")
+        bare = await client.get("/health")
     assert res.status_code == 503
+    assert bare.status_code == 503
 
 
 @pytest.mark.asyncio
-async def test_analyze_sse(monkeypatch):
-    _llm_env(monkeypatch)
-    app = create_app(runner=FakeRunner())
+async def test_analyze_sse(llm_env, test_app):
+    app = test_app(FakeRunner())
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         res = await client.post("/v1/copilot/analyze", json=ANALYZE)
     assert res.status_code == 200
+    assert "event: meta" in res.text
     assert "event: text" in res.text
     assert "event: shapes" in res.text
     assert "event: done" in res.text
 
 
 @pytest.mark.asyncio
-async def test_analyze_validation_error_422(monkeypatch):
-    _llm_env(monkeypatch)
-    app = create_app(runner=FakeRunner())
+async def test_analyze_invalid_reasoning_effort_400_json(llm_env, test_app):
+    app = test_app(FakeRunner())
+    bad = {**ANALYZE, "reasoning_effort": "not-a-tier"}
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        res = await client.post("/v1/copilot/analyze", json=bad)
+    assert res.status_code == 400
+    body = res.json()
+    assert body["code"] == "invalid_reasoning_effort"
+    assert "event:" not in res.text
+
+
+@pytest.mark.asyncio
+async def test_analyze_cursor_rejects_reasoning_effort(llm_env, test_app, omniroute_catalog_env):
+    app = test_app(FakeRunner())
+    bad = {**ANALYZE, "model": "cursor/auto", "reasoning_effort": "low"}
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        res = await client.post("/v1/copilot/analyze", json=bad)
+    assert res.status_code == 400
+    assert res.json()["code"] == "invalid_reasoning_effort"
+
+
+@pytest.mark.asyncio
+async def test_analyze_validation_error_422(llm_env, test_app):
+    app = test_app(FakeRunner())
     bad = {**ANALYZE, "interval": "not-an-interval"}
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         res = await client.post("/v1/copilot/analyze", json=bad)
@@ -92,26 +119,26 @@ async def test_analyze_validation_error_422(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_analyze_coalesce_single_run_per_latest(monkeypatch):
-    _llm_env(monkeypatch)
-
+async def test_analyze_coalesce_single_run_per_latest(llm_env, test_app):
     class SlowFakeRunner:
         def __init__(self) -> None:
             self.calls: list[str] = []
             self.first_started = asyncio.Event()
 
-        async def run(self, request):
-            self.calls.append(request.prompt)
+        async def run(self, plan: AnalyzePlan):
+            self.calls.append(plan.request.prompt)
             if len(self.calls) == 1:
                 self.first_started.set()
                 await asyncio.sleep(0.15)
-            yield "text", {"delta": request.prompt}
+            yield "text", {"delta": plan.request.prompt}
             yield "done", {}
 
     runner = SlowFakeRunner()
-    app = create_app(runner=runner)
+    app = test_app(runner)
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        # Coalescing is per device: take the device cookie before the concurrent posts.
+        await client.get("/v1/copilot/sessions")
         first = asyncio.create_task(
             client.post("/v1/copilot/analyze", json={**ANALYZE, "prompt": "first"})
         )
@@ -125,12 +152,46 @@ async def test_analyze_coalesce_single_run_per_latest(monkeypatch):
         )
         results = await asyncio.gather(first, second, third)
 
-    # In-flight first runs once; waiters coalesce to a single latest run ("third").
     assert runner.calls == ["first", "third"]
     assert all(r.status_code == 200 for r in results)
     superseded = [r for r in results if "superseded" in r.text]
     assert len(superseded) == 2
     assert any("event: text" in r.text and "third" in r.text for r in results)
+
+
+@pytest.mark.asyncio
+async def test_analyze_coalescing_is_per_device(llm_env, test_app):
+    class SlowRunner:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+            self.started = asyncio.Event()
+
+        async def run(self, plan: AnalyzePlan):
+            self.calls.append(plan.request.prompt)
+            self.started.set()
+            await asyncio.sleep(0.1)
+            yield "text", {"delta": plan.request.prompt}
+            yield "done", {}
+
+    runner = SlowRunner()
+    app = test_app(runner)
+    transport = ASGITransport(app=app)
+    async with (
+        AsyncClient(transport=transport, base_url="http://test") as alice,
+        AsyncClient(transport=transport, base_url="http://test") as bob,
+    ):
+        await alice.get("/v1/copilot/sessions")
+        await bob.get("/v1/copilot/sessions")
+        first = asyncio.create_task(
+            alice.post("/v1/copilot/analyze", json={**ANALYZE, "prompt": "alice"})
+        )
+        await runner.started.wait()
+        second = await bob.post("/v1/copilot/analyze", json={**ANALYZE, "prompt": "bob"})
+        first_res = await first
+
+    assert sorted(runner.calls) == ["alice", "bob"]
+    assert "superseded" not in first_res.text and "alice" in first_res.text
+    assert "superseded" not in second.text and "bob" in second.text
 
 
 def test_filter_preview_shapes_drops_invalid():
@@ -200,10 +261,9 @@ def test_filter_preview_shapes_drops_points_outside_closed_times():
 
 
 @pytest.mark.asyncio
-async def test_analyze_rate_limit_429(monkeypatch):
-    _llm_env(monkeypatch)
+async def test_analyze_rate_limit_429(llm_env, test_app, monkeypatch):
     monkeypatch.setenv("RATE_LIMIT_PER_MINUTE", "2")
-    app = create_app(runner=FakeRunner())
+    app = test_app(FakeRunner())
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         assert (await client.post("/v1/copilot/analyze", json=ANALYZE)).status_code == 200
         assert (await client.post("/v1/copilot/analyze", json=ANALYZE)).status_code == 200
@@ -213,10 +273,9 @@ async def test_analyze_rate_limit_429(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_cors_origins_from_env(monkeypatch):
-    _llm_env(monkeypatch)
+async def test_cors_origins_from_env(llm_env, test_app, monkeypatch):
     monkeypatch.setenv("CORS_ORIGINS", "https://app.example.com")
-    app = create_app(runner=FakeRunner())
+    app = test_app(FakeRunner())
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         res = await client.options(
             "/v1/copilot/health",

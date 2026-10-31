@@ -1,25 +1,72 @@
 import { mergeCandles } from "./binance";
+import { withCopilotCredentials } from "./copilot-fetch";
+import { mapCopilotHttpError, mapCopilotSseErrorPayload } from "./copilot-errors";
+import { rememberShapeLabels, shapeDisplayName } from "./shape-labels";
+import {
+  formatSkippedBreakdown,
+  isAnalysisSseEmpty,
+  parseAnalysisSseEvent,
+  parseSkippedFromPayload,
+} from "./copilot-chart-ai";
+import {
+  AnalyzeMetaEventSchema,
+  RegimeSseEventSchema,
+  type AnalyzeMetaEvent,
+} from "./copilot-schema";
+import { mergeAnalyzeMeta } from "./sse-analyze-meta";
+import { isServerOverlayReadyText, joinStreamTextBlocks } from "./sse-stream-text";
+import { modelIdForAnalyzeRequest, modelLabelForSession } from "./copilot-model-defaults";
+import {
+  findCachedModel,
+  getCachedModelsResponse,
+  getDefaultModelId,
+  getModelsList,
+} from "./copilot-models-cache";
+import {
+  isProbeIncomplete,
+  probeStatusLabel,
+  unhealthyModelFromError,
+} from "./copilot-model-probe";
+import { getModelProbeReport } from "../components/copilot/use-copilot-models";
+import { reasoningEffortForAnalyze } from "./copilot-reasoning";
+import { isSessionGoneBody, resolveCopilotBaseUrl, type ApiErrorBody } from "./copilot-api";
 import {
   AUTO_DRAW_PROMPT,
   COPILOT_ERROR,
-  COPILOT_ERROR_CREDITS_EXHAUSTED,
-  COPILOT_ERROR_RATE_LIMITED,
-  COPILOT_ERROR_UNAUTHORIZED,
   copilotDrewShapes,
   copilotPlacedMarkers,
   copilotShapeSummaryLine,
   copilotSkippedMarkers,
   copilotSkippedShapes,
   COPILOT_SCROLLED_TO_OVERLAYS,
-  mapCopilotSseError,
+  COPILOT_SERVER_PICKED_SHAPES,
+  CHART_HISTORY_KEPT_PREVIOUS_INVALID,
+  COPILOT_ERROR_INVALID_REASONING,
+  COPILOT_SESSION_GONE,
+  CHART_HISTORY_N25_KEPT_PREVIOUS,
+  copilotUnhealthyModelError,
 } from "./copilot-strings";
+import { useCopilotSessionStore } from "./stores/copilot-session-store";
+import {
+  beginAnalyzeRun,
+  endAnalyzeRun,
+  noteChartStateError,
+  noteChartTooLarge,
+  retryChartSaveLater,
+  useChartHistoryStore,
+  recordAnalyzeSaved,
+  saveChartNow,
+} from "./chart-history";
 import { fetchKlines as defaultFetchKlines, type FetchKlines } from "./market-client";
+import { filterRenderableAnchorMarkers } from "./marker-map";
 import { coerceAgentMarker, coerceAgentShape } from "./normalize-agent-shape";
 import {
   AgentMarkerSchema,
   PatternShapeSchema,
+  stripChartHistoryFlags,
   type AgentMarker,
   type Candle,
+  type Interval,
   type PatternShape,
 } from "./pattern-shape";
 import {
@@ -27,8 +74,10 @@ import {
   selectAnalysisCandles,
   timesInsideVisibleRange,
 } from "./analysis-window";
+import { filterShapesWithProjection } from "./shape-projection";
 import { useAiStore } from "./stores/ai-store";
 import { useChartStore } from "./stores/chart-store";
+import { translateServerText } from "./vi-evidence";
 import { useMarkerStore } from "./stores/marker-store";
 import { useShapeStore } from "./stores/shape-store";
 
@@ -41,10 +90,7 @@ export {
 
 export { AUTO_DRAW_PROMPT, HEAD_SHOULDERS_PROMPT, TRIANGLES_PROMPT } from "./copilot-strings";
 
-/** Empty = same-origin (Next rewrite proxies to the local FastAPI copilot). */
-const DEFAULT_BASE = "";
-
-/** Render/Vercel: set NEXT_PUBLIC_COPILOT_URL to HTTPS origin only (no /v1). Paths: /v1/copilot/health, /v1/copilot/analyze. */
+/** Cross-origin backend: set NEXT_PUBLIC_COPILOT_URL to its HTTPS origin only (no /v1). Paths: /v1/copilot/health, /v1/copilot/analyze. */
 
 export type CopilotClientDeps = {
   fetchImpl?: typeof fetch;
@@ -62,23 +108,36 @@ export type CopilotClient = {
   dispose: () => void;
 };
 
-function resolveBaseUrl(explicit?: string): string {
-  if (explicit !== undefined) return explicit.replace(/\/$/, "");
-  const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process
-    ?.env;
-  const fromEnv = env?.NEXT_PUBLIC_COPILOT_URL;
-  // Unset or empty → same-origin (Next dev rewrite or local stack).
-  if (fromEnv === undefined || fromEnv === null || fromEnv.trim() === "") {
-    return DEFAULT_BASE;
+async function readHttpErrorBody(res: Response): Promise<ApiErrorBody> {
+  try {
+    return (await res.json()) as ApiErrorBody;
+  } catch {
+    return {};
   }
-  return fromEnv.replace(/\/$/, "");
 }
 
-function mapHttpError(status: number): string {
-  if (status === 401 || status === 403) return COPILOT_ERROR_UNAUTHORIZED;
-  if (status === 402) return COPILOT_ERROR_CREDITS_EXHAUSTED;
-  if (status === 429) return COPILOT_ERROR_RATE_LIMITED;
-  return COPILOT_ERROR;
+/** Maps an analyze HTTP error; an unhealthy-model 4xx also triggers a models refresh + auto-switch. */
+async function handleAnalyzeHttpError(res: Response): Promise<string> {
+  const body = await readHttpErrorBody(res);
+  if (isSessionGoneBody(res.status, body)) {
+    const session = useCopilotSessionStore.getState();
+    if (session.activeSessionId) void session.handleSessionGone(session.activeSessionId);
+    return COPILOT_SESSION_GONE;
+  }
+  if (res.status === 400 && (body.code ?? body.error) === "invalid_reasoning_effort") {
+    // The model takes no reasoning effort (e.g. `reasoning_efforts: []`): drop the stored
+    // effort and refresh the catalog so the control hides and the next run omits it.
+    const session = useCopilotSessionStore.getState();
+    session.setReasoningEffort(null);
+    void session.handleUnhealthyModel();
+    return COPILOT_ERROR_INVALID_REASONING;
+  }
+  const unhealthy = unhealthyModelFromError(res.status, body);
+  if (!unhealthy) return mapCopilotHttpError(res.status, body);
+  void useCopilotSessionStore.getState().handleUnhealthyModel();
+  return copilotUnhealthyModelError(
+    unhealthy.status ? probeStatusLabel(unhealthy.status) : undefined,
+  );
 }
 
 function closedCandlesFromChart(
@@ -100,19 +159,14 @@ function resolveClosedTimes(
   return new Set(closedCandlesFromChart(candles, undefined).map((c) => c.time));
 }
 
-/** Keep shapes whose every point.time is in the allowed closed candle set. */
+/** Closed-candle times plus one forward agent endpoint on the projection grid (see shape-projection). */
 export function filterShapesToClosedTimes(
   shapes: PatternShape[],
   allowedTimes: Set<number>,
+  closedCandles: Candle[],
+  interval: Interval,
 ): { valid: PatternShape[]; droppedIds: string[] } {
-  const valid: PatternShape[] = [];
-  const droppedIds: string[] = [];
-  for (const shape of shapes) {
-    const ok = shape.points.every((p) => allowedTimes.has(p.time));
-    if (ok) valid.push(shape);
-    else droppedIds.push(shape.id);
-  }
-  return { valid, droppedIds };
+  return filterShapesWithProjection(shapes, allowedTimes, closedCandles, interval);
 }
 
 /** Keep markers whose time is in the allowed closed candle set. */
@@ -127,6 +181,28 @@ export function filterMarkersToClosedTimes(
     else droppedIds.push(marker.id);
   }
   return { valid, droppedIds };
+}
+
+/**
+ * Analyze `existingShapes` follows the backend input model (extra="forbid"): drop
+ * server-added output fields such as `guardrail`, or a second run on the same chart 422s.
+ */
+export function shapeForAnalyzeRequest(shape: PatternShape): PatternShape {
+  const { guardrail: _guardrail, ...wire } = stripChartHistoryFlags(shape);
+  return wire;
+}
+
+function shapeIdsOnChart(): Set<string> {
+  return new Set(useShapeStore.getState().shapes.map((shape) => shape.id));
+}
+
+function applyRenderableStreamMarkers(
+  timeValidMarkers: AgentMarker[],
+): { renderable: AgentMarker[]; renderableCount: number } {
+  const onChart = shapeIdsOnChart();
+  const renderable = filterRenderableAnchorMarkers(timeValidMarkers, onChart);
+  useMarkerStore.getState().mergeRunMarkers(renderable, onChart);
+  return { renderable, renderableCount: renderable.length };
 }
 
 function isSuperseded(data: Record<string, unknown>): boolean {
@@ -150,25 +226,178 @@ function parseSseBlocks(buffer: string): { events: { event: string; data: string
   return { events, rest };
 }
 
+function appendAgentChatLine(delta: string): void {
+  if (!delta) return;
+  const messages = useAiStore.getState().messages.slice();
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (msg?.role === "agent") {
+      messages[i] = {
+        ...msg,
+        content: joinStreamTextBlocks(msg.content, delta),
+      };
+      useAiStore.setState({ messages });
+      return;
+    }
+  }
+}
+
 function noteDroppedShapes(ids: string[]): void {
   if (ids.length === 0) return;
-  useAiStore.getState().appendText(copilotSkippedShapes(ids.length));
+  appendAgentChatLine(copilotSkippedShapes(ids.length));
+}
+
+function appendServerSkippedNote(data: Record<string, unknown>): void {
+  const text = formatSkippedBreakdown(parseSkippedFromPayload(data));
+  if (text) appendAgentChatLine(text);
+}
+
+/** Server-authored stream text; known English/jargon templates are shown in Vietnamese. */
+function appendAgentStreamText(delta: string): void {
+  appendAgentChatLine(translateServerText(delta, useChartStore.getState().symbol));
+}
+
+function appendMetaFallbackNote(meta: AnalyzeMetaEvent): void {
+  if (!meta.validator_fallback && !meta.intent_budget_fallback) return;
+  appendAgentChatLine(COPILOT_SERVER_PICKED_SHAPES);
+}
+
+function patchLastAgentMessageFromMeta(meta: AnalyzeMetaEvent): void {
+  const messages = useAiStore.getState().messages.slice();
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (msg?.role === "agent") {
+      messages[i] = {
+        ...msg,
+        modelId: meta.model,
+        modelLabel: modelLabelForSession(getModelsList(), meta.model, getDefaultModelId()),
+        analyzeMeta: {
+          candle_count_used: meta.candle_count_used,
+          clamped: meta.clamped,
+          intent_check: meta.intent_check,
+        },
+      };
+      useAiStore.setState({ messages });
+      break;
+    }
+  }
 }
 
 function noteDroppedMarkers(ids: string[]): void {
   if (ids.length === 0) return;
-  useAiStore.getState().appendText(copilotSkippedMarkers(ids.length));
+  appendAgentChatLine(copilotSkippedMarkers(ids.length));
 }
 
 export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient {
-  const fetchImpl = deps.fetchImpl ?? fetch;
+  const fetchImpl = withCopilotCredentials(deps.fetchImpl ?? fetch);
   const fetchKlines = deps.fetchKlines ?? defaultFetchKlines;
-  const baseUrl = resolveBaseUrl(deps.baseUrl);
+  const baseUrl = resolveCopilotBaseUrl(deps.baseUrl);
 
   let queuedPrompt: string | null = null;
   let analyzing = false;
   let unsubReset: (() => void) | null = null;
   let lastResetSignal = useChartStore.getState().shapesResetSignal;
+  let streamMergedMeta: AnalyzeMetaEvent | null = null;
+  let streamNotesFinalized = false;
+  let streamSawServerOverlayText = false;
+  let pendingDrewShapesNotice: { count: number; lines: string[] } | null = null;
+  let streamTimeValidMarkers: AgentMarker[] = [];
+  let streamRenderableAnchorCount = 0;
+  /** Chart the run belongs to; overlays arriving after a timeframe/symbol switch are not painted. */
+  let streamChartPair: string | null = null;
+  let streamChartKey: string | null = null;
+  let streamChartStateRevision: number | null = null;
+  let streamChartStateError: string | null = null;
+  let streamChartStateCap: { field: string | null; limit: number | null } = { field: null, limit: null };
+  let streamAnalysisRaw: Record<string, unknown> | null = null;
+  /** N25: every new shape was dropped by the closed-candle filter; previous shapes kept. */
+  let streamKeptPreviousShapes = false;
+
+  const chartPairNow = (): string => {
+    const chart = useChartStore.getState();
+    return `${chart.symbol}|${chart.interval}`;
+  };
+  const streamIsForOtherChart = (): boolean =>
+    streamChartPair != null && streamChartPair !== chartPairNow();
+
+  /** Server saved the doc (`chart_state_revision`): record it; PUT only when N25 kept older shapes. */
+  const finalizeChartHistoryRun = (): void => {
+    endAnalyzeRun();
+    const key = streamChartKey;
+    if (!key) return;
+    if (streamChartStateRevision != null) {
+      recordAnalyzeSaved(key, streamChartStateRevision, streamAnalysisRaw);
+      if (streamKeptPreviousShapes) void saveChartNow(key);
+    } else if (streamChartStateError === "chart_state_too_large") {
+      noteChartTooLarge(streamChartStateCap.field, streamChartStateCap.limit);
+    } else if (streamChartStateError === "session_not_found") {
+      // Gone (or another device's): nothing to save into; the session store moves on.
+      void useCopilotSessionStore.getState().handleSessionGone(key.split("|")[0] ?? "");
+    } else if (streamChartStateError === "db_unavailable") {
+      // The run is drawn but only on this device: "chưa lưu", saved later with the backoff.
+      retryChartSaveLater(key);
+    } else {
+      // Backend did not save this run (older backend or a failed save): save what is shown.
+      const error = streamChartStateError;
+      void saveChartNow(key).then(() => {
+        // After the device save, so its success does not clear the notice; a failed
+        // device save keeps its own (more urgent) notice.
+        if (error && !useChartHistoryStore.getState().notice) noteChartStateError(error);
+      });
+    }
+  };
+
+  const applyStreamMergedMeta = (merged: AnalyzeMetaEvent): void => {
+    streamMergedMeta = merged;
+    useCopilotSessionStore.getState().setLastAnalyzeMeta(merged);
+    patchLastAgentMessageFromMeta(merged);
+  };
+
+  const mergeIntentCheckIntoStreamMeta = (
+    intentCheck: AnalyzeMetaEvent["intent_check"],
+  ): void => {
+    if (!intentCheck) return;
+    const prev = streamMergedMeta ?? useCopilotSessionStore.getState().lastAnalyzeMeta;
+    if (!prev) return;
+    applyStreamMergedMeta(mergeAnalyzeMeta(prev, { ...prev, intent_check: intentCheck }));
+  };
+
+  const flushPendingDrewShapesNotice = (): void => {
+    if (streamSawServerOverlayText || !pendingDrewShapesNotice) return;
+    const { count, lines } = pendingDrewShapesNotice;
+    if (count <= 0 || lines.length === 0) {
+      pendingDrewShapesNotice = null;
+      return;
+    }
+    pendingDrewShapesNotice = null;
+    appendAgentChatLine(copilotDrewShapes(count, lines));
+  };
+
+  const finalizeStreamAnalyzeNotes = (): void => {
+    if (streamNotesFinalized) return;
+    streamNotesFinalized = true;
+    flushPendingDrewShapesNotice();
+    const anchorNote = copilotPlacedMarkers(streamRenderableAnchorCount);
+    if (anchorNote) appendAgentChatLine(anchorNote);
+    if (!streamMergedMeta) return;
+    appendMetaFallbackNote(streamMergedMeta);
+  };
+
+  const resetStreamMetaAccumulator = (): void => {
+    streamMergedMeta = null;
+    streamNotesFinalized = false;
+    streamSawServerOverlayText = false;
+    pendingDrewShapesNotice = null;
+    streamTimeValidMarkers = [];
+    streamRenderableAnchorCount = 0;
+    streamChartPair = null;
+    streamChartKey = null;
+    streamChartStateRevision = null;
+    streamChartStateError = null;
+    streamChartStateCap = { field: null, limit: null };
+    streamAnalysisRaw = null;
+    streamKeptPreviousShapes = false;
+  };
 
   const runQueuedIfAny = async () => {
     if (!queuedPrompt) return;
@@ -185,25 +414,96 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
       data = {};
     }
 
-    type SseEvent = "text" | "shapes" | "markers" | "extendRange" | "error" | "done";
+    type SseEvent =
+      | "meta"
+      | "regime"
+      | "analysis"
+      | "text"
+      | "shapes"
+      | "markers"
+      | "extendRange"
+      | "skipped"
+      | "error"
+      | "done";
     const isSseEvent = (value: string): value is SseEvent =>
+      value === "meta" ||
+      value === "regime" ||
+      value === "analysis" ||
       value === "text" ||
       value === "shapes" ||
       value === "markers" ||
       value === "extendRange" ||
+      value === "skipped" ||
       value === "error" ||
       value === "done";
 
     if (!isSseEvent(event)) return "ok";
 
     switch (event) {
+      case "meta": {
+        // Final meta (right before done): server-side chart save result.
+        if (typeof data.chart_state_revision === "number") {
+          streamChartStateRevision = data.chart_state_revision;
+        }
+        if (typeof data.chart_state_error === "string") {
+          streamChartStateError = data.chart_state_error;
+          streamChartStateCap = {
+            field: typeof data.field === "string" ? data.field : null,
+            limit: typeof data.limit === "number" ? data.limit : null,
+          };
+        }
+        const parsed = AnalyzeMetaEventSchema.safeParse(data);
+        if (streamIsForOtherChart()) return "ok";
+        if (parsed.success) {
+          const merged = mergeAnalyzeMeta(streamMergedMeta, parsed.data);
+          applyStreamMergedMeta(merged);
+          appendServerSkippedNote(parsed.data);
+        }
+        return "ok";
+      }
+      case "regime": {
+        if (streamIsForOtherChart()) return "ok";
+        const parsed = RegimeSseEventSchema.safeParse(data);
+        if (parsed.success) {
+          useCopilotSessionStore.getState().setLastDetectedRegime(parsed.data.regime);
+          if (parsed.data.intent_check) {
+            useCopilotSessionStore.getState().setStreamingIntentCheck(parsed.data.intent_check);
+            mergeIntentCheckIntoStreamMeta(parsed.data.intent_check);
+          }
+        }
+        return "ok";
+      }
+      case "analysis": {
+        const analysis = parseAnalysisSseEvent(data);
+        if (analysis) streamAnalysisRaw = data;
+        if (streamIsForOtherChart()) return "ok";
+        if (analysis && !isAnalysisSseEmpty(analysis)) {
+          useCopilotSessionStore.getState().setLastAnalysisEvent(analysis);
+          if (analysis.intent_check) {
+            useCopilotSessionStore.getState().setStreamingIntentCheck(analysis.intent_check);
+            mergeIntentCheckIntoStreamMeta(analysis.intent_check);
+          }
+        }
+        return "ok";
+      }
+      case "skipped": {
+        appendServerSkippedNote(data);
+        return "ok";
+      }
       case "text": {
         const delta = typeof data.delta === "string" ? data.delta : "";
-        if (delta) useAiStore.getState().appendText(delta);
+        if (delta) {
+          // N25: the server's "Lớp phủ sẵn sàng: N" would contradict the kept-previous note.
+          if (streamKeptPreviousShapes && isServerOverlayReadyText(delta)) return "ok";
+          if (isServerOverlayReadyText(delta)) streamSawServerOverlayText = true;
+          appendAgentStreamText(delta);
+        }
         return "ok";
       }
       case "shapes": {
+        if (streamIsForOtherChart()) return "ok";
         const list = Array.isArray(data.shapes) ? data.shapes : [];
+        rememberShapeLabels(data.labels);
         const zodValid: PatternShape[] = [];
         const droppedIds: string[] = [];
         const chart = useChartStore.getState();
@@ -225,35 +525,56 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
             droppedIds.push(id);
           }
         }
+        const closedSlice = closedCandlesFromChart(chart.candles, deps.getClosedTimes?.());
         const allowedTimes = resolveClosedTimes(chart.candles, deps.getClosedTimes?.());
         const { valid, droppedIds: outOfWindow } = filterShapesToClosedTimes(
           zodValid,
           allowedTimes,
+          closedSlice,
+          chart.interval,
         );
         droppedIds.push(...outOfWindow);
-        useShapeStore.getState().setPreview(valid);
-        if (valid.length > 0) {
-          useShapeStore.getState().commitPreview();
-          const lines = valid.map((s) =>
+        const hadPrevious = useShapeStore.getState().committed().length > 0;
+        // The run sent shapes but none survived (schema or closed-candle filter): wiping the
+        // chart would leave the user with nothing — keep the previous overlays (N25).
+        const nothingDrawable = list.length > 0 && valid.length === 0 && hadPrevious;
+        let added: PatternShape[] = [];
+        if (nothingDrawable) {
+          streamKeptPreviousShapes = true;
+          appendAgentChatLine(
+            outOfWindow.length > 0 ? CHART_HISTORY_N25_KEPT_PREVIOUS : CHART_HISTORY_KEPT_PREVIOUS_INVALID,
+          );
+        } else {
+          // Pinned shapes (user/kept/edited) win over a new AI shape with the same id.
+          added = useShapeStore.getState().replaceAgentShapes(valid);
+        }
+        useMarkerStore.getState().pruneOrphans(shapeIdsOnChart());
+        if (added.length > 0) {
+          const lines = added.map((s) =>
             copilotShapeSummaryLine(
-              s.name,
+              shapeDisplayName(s),
               s.kind,
               Math.round(s.confidence * 100),
               s.points.length,
             ),
           );
-          useAiStore.getState().appendText(copilotDrewShapes(valid.length, lines));
-          const times = valid.flatMap((s) => s.points.map((pt) => pt.time));
+          pendingDrewShapesNotice = { count: added.length, lines };
+          const times = added.flatMap((s) => s.points.map((pt) => pt.time));
           const visible = deps.getCoordApi?.()?.getVisibleTimeRange?.() ?? null;
           if (!timesInsideVisibleRange(times, visible)) {
             deps.getCoordApi?.()?.revealTimes(times);
-            useAiStore.getState().appendText(COPILOT_SCROLLED_TO_OVERLAYS);
+            appendAgentChatLine(COPILOT_SCROLLED_TO_OVERLAYS.trim());
           }
         }
-        noteDroppedShapes(droppedIds);
+        if (!streamKeptPreviousShapes) noteDroppedShapes(droppedIds);
+        appendServerSkippedNote(data);
+        if (streamTimeValidMarkers.length > 0) {
+          streamRenderableAnchorCount = applyRenderableStreamMarkers(streamTimeValidMarkers).renderableCount;
+        }
         return "ok";
       }
       case "markers": {
+        if (streamIsForOtherChart()) return "ok";
         const list = Array.isArray(data.markers) ? data.markers : [];
         const zodValid: AgentMarker[] = [];
         const droppedIds: string[] = [];
@@ -280,10 +601,8 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
           allowedTimes,
         );
         droppedIds.push(...outOfWindow);
-        useMarkerStore.getState().setMarkers(valid);
-        if (valid.length > 0) {
-          useAiStore.getState().appendText(copilotPlacedMarkers(valid.length));
-        }
+        streamTimeValidMarkers = valid;
+        streamRenderableAnchorCount = applyRenderableStreamMarkers(valid).renderableCount;
         noteDroppedMarkers(droppedIds);
         return "ok";
       }
@@ -300,19 +619,21 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
         return "ok";
       }
       case "error": {
-        const message =
-          typeof data.message === "string" && data.message.trim()
-            ? mapCopilotSseError(data.message)
-            : COPILOT_ERROR;
-        useAiStore.getState().fail(message);
+        useAiStore.getState().fail(mapCopilotSseErrorPayload(data));
+        useCopilotSessionStore.getState().persistActiveSession();
         return "error";
       }
       case "done": {
+        finalizeStreamAnalyzeNotes();
+        finalizeChartHistoryRun();
+        resetStreamMetaAccumulator();
         if (isSuperseded(data)) {
           useAiStore.getState().finish();
+          useCopilotSessionStore.getState().persistActiveSession();
           return "superseded";
         }
         useAiStore.getState().finish();
+        useCopilotSessionStore.getState().persistActiveSession();
         return "ok";
       }
       default: {
@@ -355,7 +676,11 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
 
     if (useAiStore.getState().inFlight) {
       if (sawError) useAiStore.getState().fail(useAiStore.getState().lastError ?? COPILOT_ERROR);
-      else useAiStore.getState().finish();
+      else {
+        finalizeStreamAnalyzeNotes();
+        useAiStore.getState().finish();
+      }
+      resetStreamMetaAccumulator();
     }
   }
 
@@ -365,30 +690,78 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
       return;
     }
 
+    // Probe says no model can serve: never send (covers auto-draw on closed klines too).
+    if (getCachedModelsResponse()?.models.length === 0) return;
+
     const chart = useChartStore.getState();
     const closedTimes = deps.getClosedTimes?.();
     const allClosed = closedCandlesFromChart(chart.candles, closedTimes);
     if (allClosed.length === 0) return;
 
+    const sessionState = useCopilotSessionStore.getState();
+    const candleCount = sessionState.getRequestedCandleCount(allClosed.length);
     const visibleRange = deps.getCoordApi?.()?.getVisibleTimeRange?.() ?? null;
-    const window = selectAnalysisCandles(allClosed, { visibleRange, prompt });
+    const window = selectAnalysisCandles(allClosed, {
+      visibleRange,
+      prompt,
+      candleCount,
+    });
     if (window.candles.length === 0) return;
 
+    const models = getModelsList();
+    const apiDefault = getDefaultModelId();
+    // While a probe runs the healthy list is partial: keep sending the selected model.
+    const keepSelected =
+      !!sessionState.modelId &&
+      isProbeIncomplete(getCachedModelsResponse() ?? null, getModelProbeReport());
+    const analyzeModelId = keepSelected
+      ? (sessionState.modelId ?? undefined)
+      : modelIdForAnalyzeRequest(models, sessionState.modelId, apiDefault);
+    const displayModelId =
+      analyzeModelId ?? sessionState.modelId ?? apiDefault ?? undefined;
+    const model = findCachedModel(analyzeModelId ?? sessionState.modelId);
+
     analyzing = true;
+    // Save pending chart edits first so the server-side merge sees the user's pins.
+    const chartRun = beginAnalyzeRun();
+    await chartRun.flushed;
+    resetStreamMetaAccumulator();
+    streamChartPair = `${chart.symbol}|${chart.interval}`;
+    streamChartKey = chartRun.key;
+    useCopilotSessionStore.getState().clearAnalyzeStreamState();
     useAiStore.getState().appendUser(prompt);
-    useAiStore.getState().startAgent();
+    useAiStore.getState().startAgent({
+      modelId: model?.id ?? displayModelId,
+      modelLabel: modelLabelForSession(
+        models,
+        model?.id ?? displayModelId,
+        apiDefault,
+      ),
+    });
+    useCopilotSessionStore.getState().recordAnalysisWindow(window.from, window.to);
 
     const annotatedPrompt = annotatePromptWithWindow(prompt, window);
-    const body = {
+    const body: Record<string, unknown> = {
       symbol: chart.symbol,
       interval: chart.interval,
       from: window.from,
       to: window.to,
       closedCandles: window.candles,
-      existingShapes: useShapeStore.getState().committed(),
+      existingShapes: useShapeStore.getState().committed().map(shapeForAnalyzeRequest),
       existingMarkers: useMarkerStore.getState().markers,
       prompt: annotatedPrompt,
+      candle_count: candleCount,
     };
+    if (analyzeModelId) {
+      body.model = analyzeModelId;
+    }
+    const reasoningEffort = reasoningEffortForAnalyze(model, sessionState.reasoningEffort);
+    if (reasoningEffort) {
+      body.reasoning_effort = reasoningEffort;
+    }
+    if (sessionState.activeSessionId) {
+      body.session_id = sessionState.activeSessionId;
+    }
 
     try {
       const res = await fetchImpl(`${baseUrl}/v1/copilot/analyze`, {
@@ -398,14 +771,17 @@ export function createCopilotClient(deps: CopilotClientDeps = {}): CopilotClient
       });
 
       if (!res.ok) {
-        useAiStore.getState().fail(mapHttpError(res.status));
+        useAiStore.getState().fail(await handleAnalyzeHttpError(res));
+        useCopilotSessionStore.getState().persistActiveSession();
         return;
       }
 
       await consumeSse(res);
     } catch {
       useAiStore.getState().fail(COPILOT_ERROR);
+      useCopilotSessionStore.getState().persistActiveSession();
     } finally {
+      endAnalyzeRun();
       analyzing = false;
       if (useAiStore.getState().inFlight) {
         useAiStore.getState().finish();

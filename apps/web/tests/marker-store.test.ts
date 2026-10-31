@@ -4,15 +4,17 @@ import { useMarkerStore } from "../lib/stores/marker-store";
 import { useShapeStore } from "../lib/stores/shape-store";
 
 const marker = (overrides: Partial<AgentMarker> = {}): AgentMarker => ({
-  id: "m1",
+  id: "anchor-m1",
   symbol: "BTCUSDT",
   interval: "1h",
   time: 1710000000,
-  side: "buy",
-  position: "belowBar",
-  shape: "arrowUp",
+  side: "neutral",
+  position: "inBar",
+  shape: "circle",
+  label: "Neo",
   confidence: 0.7,
   source: "agent",
+  drawing_id: "drw_m1",
   ...overrides,
 });
 

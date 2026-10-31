@@ -9,11 +9,15 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import type { ChartCoordinateApi } from "../lib/chart-api";
+import { shapeDisplayName } from "../lib/shape-labels";
+import { CHART_ACTIVE_LAYERS, CHART_GHOST_PREVIEW } from "../lib/copilot-strings";
 import { buildHumanShape, shouldAutoCommit } from "../lib/human-draw";
 import { mapShapeToPixels, mapZoneToRect, pixelsToPoint } from "../lib/overlay-map";
 import type { PatternShape } from "../lib/pattern-shape";
 import { useChartStore } from "../lib/stores/chart-store";
 import { useDrawToolStore } from "../lib/stores/draw-tool-store";
+import { getCopilotFeedbackClient } from "../lib/copilot-feedback-host";
+import { shapeFeedbackSnapshot } from "../lib/copilot-shape-snapshot";
 import { useShapeStore } from "../lib/stores/shape-store";
 import { DrawToolbar } from "./draw-toolbar";
 
@@ -31,8 +35,21 @@ type ShapeOverlayProps = {
 };
 
 type DragState =
-  | { kind: "point"; shapeId: string; index: number; points: PatternShape["points"] }
-  | { kind: "zone-edge"; shapeId: string; edge: "high" | "low"; low: number; high: number };
+  | {
+      kind: "point";
+      shapeId: string;
+      index: number;
+      points: PatternShape["points"];
+      before: Record<string, unknown>;
+    }
+  | {
+      kind: "zone-edge";
+      shapeId: string;
+      edge: "high" | "low";
+      low: number;
+      high: number;
+      before: Record<string, unknown>;
+    };
 
 export function ShapeOverlay({ coordApiRef, overlayTick }: ShapeOverlayProps) {
   const shapes = useShapeStore((s) => s.shapes);
@@ -122,7 +139,13 @@ export function ShapeOverlay({ coordApiRef, overlayTick }: ShapeOverlayProps) {
   );
 
   const endDrag = useCallback(() => {
+    const drag = dragRef.current;
     dragRef.current = null;
+    if (!drag) return;
+    const shape = useShapeStore.getState().shapes.find((s) => s.id === drag.shapeId);
+    const feedback = getCopilotFeedbackClient();
+    if (!shape || shape.source !== "agent" || !feedback) return;
+    feedback.scheduleEdit(drag.shapeId, drag.before, shapeFeedbackSnapshot(shape));
   }, []);
 
   const onDrawPointerDown = useCallback(
@@ -184,7 +207,9 @@ export function ShapeOverlay({ coordApiRef, overlayTick }: ShapeOverlayProps) {
       {(committed.length > 0 || previews.length > 0) && (
         <div className="pointer-events-none absolute left-3 top-3 z-10 rounded border border-[#2b313a] bg-[#181a20]/90 p-2 text-xs backdrop-blur">
           {committed.length > 0 && (
-            <div className="mb-1 text-[#848e9c]">Active Layers ({committed.length}):</div>
+            <div className="mb-1 text-[#848e9c]" data-testid="active-layers-heading">
+              {CHART_ACTIVE_LAYERS} ({committed.length}):
+            </div>
           )}
           {committed.map((s) => (
             <div
@@ -192,12 +217,14 @@ export function ShapeOverlay({ coordApiRef, overlayTick }: ShapeOverlayProps) {
               className={`flex items-center gap-1 ${s.source === "human" ? "text-[#3b82f6]" : "text-[#0ecb81]"}`}
             >
               <span>
-                • {s.name} ({Math.round(s.confidence * 100)}%)
+                • {shapeDisplayName(s)} ({Math.round(s.confidence * 100)}%)
               </span>
             </div>
           ))}
           {previews.length > 0 && (
-            <div className="mt-1 text-[#f0b90b]">Ghost preview ({previews.length})</div>
+            <div className="mt-1 text-[#f0b90b]">
+              {CHART_GHOST_PREVIEW} ({previews.length})
+            </div>
           )}
         </div>
       )}
@@ -306,6 +333,7 @@ function renderZone(
                 edge: "high",
                 low: shape.priceLow!,
                 high: shape.priceHigh!,
+                before: shapeFeedbackSnapshot(shape),
               };
             }}
           />
@@ -327,6 +355,7 @@ function renderZone(
                 edge: "low",
                 low: shape.priceLow!,
                 high: shape.priceHigh!,
+                before: shapeFeedbackSnapshot(shape),
               };
             }}
           />
@@ -388,6 +417,7 @@ function renderPath(
               shapeId: shape.id,
               index,
               points: shape.points.slice(),
+              before: shapeFeedbackSnapshot(shape),
             };
           }}
         />

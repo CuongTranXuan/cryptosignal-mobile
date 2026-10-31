@@ -1,0 +1,481 @@
+import { z } from "zod";
+import type { AgentMarker, Interval, PatternShape } from "./pattern-shape";
+
+/** Zod schemas aligned with `docs/MODEL_SELECTION_SPEC.md` (client-facing subset). */
+
+export const CopilotModelRecordSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  provider: z.string(),
+  context_window: z.number(),
+  max_output_tokens: z.number(),
+  supports_reasoning: z.boolean(),
+  reasoning_efforts: z.array(z.string()).optional().default([]),
+  supports_json: z.boolean().optional().default(true),
+  source: z.enum(["provider", "table", "default"]).optional(),
+  request_max_tokens: z.number().optional(),
+  recommended_candles: z.number().optional(),
+  recommended_max_candles: z.number().optional(),
+  presets: z.array(z.number()).optional(),
+  latency_ms: z.number().nullable().optional(),
+  status: z.string().optional(),
+});
+
+export const MODEL_PROBE_STATUSES = [
+  "ok",
+  "auth_error",
+  "quota_or_rate_limited",
+  "not_found",
+  "timeout",
+  "upstream_error",
+  "provider_unconfigured",
+] as const;
+export type ModelProbeStatus = (typeof MODEL_PROBE_STATUSES)[number];
+
+export const UpstreamErrorSchema = z.object({
+  code: z.string().nullable().optional(),
+  message: z.string().nullable().optional(),
+});
+
+/**
+ * `GET /v1/copilot/models`: healthy models only once the backend probes OmniRoute.
+ * Probe fields are optional so older backends (no probe) still parse; their
+ * absence means "probe state unknown".
+ */
+export const ModelsListResponseSchema = z.object({
+  default_model: z.string().nullable(),
+  fetched_at: z.number().nullable().optional(),
+  models: z.array(CopilotModelRecordSchema),
+  requested_default: z.string().nullable().optional(),
+  default_fallback: z.boolean().optional(),
+  probed_at: z.string().nullable().optional(),
+  ttl_s: z.number().int().optional(),
+  stale: z.boolean().optional(),
+  probe_in_progress: z.boolean().optional(),
+  /** While probing: ids in the running probe (null until its model list loads). */
+  total: z.number().int().nullable().optional(),
+  pending_count: z.number().int().nullable().optional(),
+  upstream_reachable: z.boolean().optional(),
+  upstream_error: UpstreamErrorSchema.nullable().optional(),
+});
+
+/** Unknown future statuses are kept as strings and shown with a generic reason. */
+export const ModelProbeResultSchema = z.object({
+  id: z.string(),
+  status: z.string(),
+  latency_ms: z.number().nullable().optional(),
+  http_status: z.number().int().nullable().optional(),
+  error_code: z.string().nullable().optional(),
+  message: z.string().nullable().optional(),
+});
+
+/** `GET|POST /v1/copilot/models/probe`. */
+export const ModelProbeReportSchema = z.object({
+  probed_at: z.string().nullable(),
+  ttl_s: z.number().int().optional(),
+  provider: z.string().optional(),
+  upstream_reachable: z.boolean().optional(),
+  upstream_error: UpstreamErrorSchema.nullable().optional(),
+  results: z.array(ModelProbeResultSchema),
+  /** Candidates over the probe cap, never probed. */
+  skipped_count: z.number().int().nonnegative().optional(),
+  skipped_ids: z.array(z.string()).optional(),
+  /** `false` while a running probe has only published part of its results. */
+  complete: z.boolean().optional(),
+  probe_in_progress: z.boolean().optional(),
+  /** Ids probed in this run; null while the upstream list loads. */
+  total: z.number().int().nullable().optional(),
+  pending_count: z.number().int().nullable().optional(),
+});
+
+export type CopilotModelRecord = z.infer<typeof CopilotModelRecordSchema>;
+export type ModelsListResponse = z.infer<typeof ModelsListResponseSchema>;
+export type ModelProbeResult = z.infer<typeof ModelProbeResultSchema>;
+export type ModelProbeReport = z.infer<typeof ModelProbeReportSchema>;
+
+export const ChartStyleIdSchema = z.enum(["classic", "smc", "elliott", "wyckoff"]);
+export type ChartStyleId = z.infer<typeof ChartStyleIdSchema>;
+
+export const ChartBiasSchema = z.enum(["bullish", "bearish", "neutral"]);
+export type ChartBias = z.infer<typeof ChartBiasSchema>;
+
+const optionalBias = z
+  .union([ChartBiasSchema, z.null()])
+  .optional()
+  .transform((value) => (value == null ? undefined : value));
+
+const optionalPatternId = z
+  .union([z.string().min(1), z.null()])
+  .optional()
+  .transform((value) => (value == null ? undefined : value));
+
+export const ChartHorizonSchema = z.enum(["scalp", "swing", "position"]);
+export type ChartHorizon = z.infer<typeof ChartHorizonSchema>;
+
+const optionalHorizon = z
+  .union([ChartHorizonSchema, z.null()])
+  .optional()
+  .transform((value) => (value == null ? undefined : value));
+
+export const AnalyzeIntentSchema = z.object({
+  style: ChartStyleIdSchema.default("classic"),
+  bias: optionalBias,
+  requested_pattern: optionalPatternId,
+  horizon: optionalHorizon,
+});
+
+export type AnalyzeIntent = z.infer<typeof AnalyzeIntentSchema>;
+
+export const DrawingRegimeSchema = z.enum(["trend_up", "trend_down", "range", "volatile"]);
+export type DrawingRegime = z.infer<typeof DrawingRegimeSchema>;
+
+/**
+ * Coded backend text: stable `code` + `params`, with `text` already in Vietnamese.
+ * Older backends send plain (often English) strings instead; both parse.
+ */
+export const CodedTextSchema = z
+  .object({
+    code: z.string().optional(),
+    params: z.record(z.unknown()).optional(),
+    text: z.string().optional(),
+  })
+  .passthrough();
+
+export const EvidenceItemSchema = z.union([z.string(), CodedTextSchema]);
+export type EvidenceItem = z.infer<typeof EvidenceItemSchema>;
+
+export const DrawingInvalidationSchema = z
+  .object({
+    price: z.number(),
+    condition: z.string().optional(),
+    code: z.string().optional(),
+    params: z.record(z.unknown()).optional(),
+    text: z.string().optional(),
+  })
+  .passthrough();
+
+export const DrawingGuardrailSchema = z.object({
+  regime: DrawingRegimeSchema,
+  confidence: z.number().min(0).max(1),
+  evidence_against: z.array(EvidenceItemSchema),
+  evidence_against_items: z.array(CodedTextSchema).optional(),
+  invalidation: DrawingInvalidationSchema.nullable(),
+});
+
+export type DrawingGuardrail = z.infer<typeof DrawingGuardrailSchema>;
+
+export const IntentCheckSchema = z.object({
+  detected_regime: DrawingRegimeSchema,
+  bias_conflict: z.boolean(),
+  message: z
+    .union([z.string(), z.null()])
+    .optional()
+    .transform((value) => (value == null ? undefined : value)),
+});
+
+export type IntentCheck = z.infer<typeof IntentCheckSchema>;
+
+export const KnownSkippedReasonCodeSchema = z.enum([
+  "low_confidence",
+  "out_of_window",
+  "invalid_geometry",
+  "no_candidate",
+  "unsupported_pattern",
+  "cap",
+]);
+
+export type KnownSkippedReasonCode = z.infer<typeof KnownSkippedReasonCodeSchema>;
+
+/** Wire `reason_code` — unknown codes are kept for display, not rejected. */
+export const SkippedReasonCodeSchema = z.string().min(1);
+
+export type SkippedReasonCode = string;
+
+export const SkippedEntrySchema = z.object({
+  reason_code: SkippedReasonCodeSchema,
+  count: z.number().int().nonnegative(),
+});
+
+export type SkippedEntry = z.infer<typeof SkippedEntrySchema>;
+
+export const IntentSourceSchema = z.enum(["rules", "llm"]);
+
+export const AnalyzeMetaEventSchema = z.object({
+  model: z.string(),
+  candle_count_requested: z
+    .union([z.number(), z.null()])
+    .optional()
+    .transform((value) => (value == null ? 0 : value)),
+  candle_count_used: z.number(),
+  clamped: z.boolean(),
+  max_tokens: z.number().optional(),
+  reasoning_effort: z.string().nullable().optional(),
+  retried: z.boolean().optional(),
+  intent: AnalyzeIntentSchema.optional(),
+  intent_check: IntentCheckSchema.optional(),
+  intent_source: IntentSourceSchema.optional(),
+  feature_sheet: z.record(z.unknown()).optional(),
+  candidates: z.array(z.unknown()).optional(),
+  prompt_candle_reduction_pct: z.number().optional(),
+  preview_shape_budget: z.number().int().positive().optional(),
+  intent_budget_fallback: z.boolean().optional(),
+  validator_fallback: z.boolean().optional(),
+  htf: z
+    .object({
+      interval: z.string().optional(),
+      regime: DrawingRegimeSchema.optional(),
+      last_closed_time: z.number().optional(),
+      last_closed_open_time: z.number().optional(),
+      bars: z.number().optional(),
+    })
+    .passthrough()
+    .nullable()
+    .optional(),
+  horizon: ChartHorizonSchema.nullable().optional(),
+  skipped: z.array(SkippedEntrySchema).optional(),
+  skipped_count: z.number().int().nonnegative().optional(),
+  /** Final meta: revision of the chart-state doc the server saved, or why it did not. */
+  chart_state_revision: z.number().int().optional(),
+  chart_state_error: z.string().optional(),
+  /** With `chart_state_error: chart_state_too_large`: which cap and its number. */
+  field: z.string().optional(),
+  limit: z.number().optional(),
+});
+
+export type AnalyzeMetaEvent = z.infer<typeof AnalyzeMetaEventSchema>;
+
+const RegimeSseEventCoreSchema = z.object({
+  regime: DrawingRegimeSchema.optional(),
+  intent_check: IntentCheckSchema.optional(),
+  ltf: z
+    .object({
+      regime: DrawingRegimeSchema.optional(),
+      strength: z.number().optional(),
+    })
+    .optional(),
+});
+
+export const RegimeSseEventSchema = RegimeSseEventCoreSchema.transform((data) => {
+  const regime = data.regime ?? data.ltf?.regime ?? "range";
+  return { regime, intent_check: data.intent_check };
+});
+
+export type RegimeSseEvent = z.infer<typeof RegimeSseEventSchema>;
+
+const optionalBiasWire = z
+  .union([ChartBiasSchema, z.null()])
+  .optional()
+  .transform((value) => (value == null ? undefined : value));
+
+export const SummaryDirectionSchema = z.enum([
+  "bullish",
+  "bearish",
+  "neutral",
+  "conditional",
+]);
+export type SummaryDirection = z.infer<typeof SummaryDirectionSchema>;
+
+export const AnalysisSseEventSchema = z
+  .object({
+    bias: optionalBiasWire,
+    summary_direction: SummaryDirectionSchema.optional(),
+    no_valid_pattern: z.boolean().optional(),
+    evidence_for: z.array(EvidenceItemSchema).optional().default([]),
+    evidence_against: z.array(EvidenceItemSchema).optional().default([]),
+    /** Coded `{code, params, text}` lines (CHART_AI_SPEC §C.16); preferred over the strings. */
+    evidence_for_items: z.array(CodedTextSchema).optional(),
+    evidence_against_items: z.array(CodedTextSchema).optional(),
+    invalidation: DrawingInvalidationSchema.nullable().optional(),
+    confidence: z.number().nullable().optional(),
+    intent_check: IntentCheckSchema.optional(),
+  })
+  .passthrough();
+
+export type AnalysisSseEvent = z.infer<typeof AnalysisSseEventSchema>;
+
+export const StylePatternRefSchema = z.object({
+  id: z.string().min(1),
+});
+
+export const StyleCatalogEntrySchema = z.object({
+  id: z.string().min(1),
+  patterns: z.array(StylePatternRefSchema),
+});
+
+export const StylesListResponseSchema = z.object({
+  styles: z.array(StyleCatalogEntrySchema),
+});
+
+export type StylesListResponse = z.infer<typeof StylesListResponseSchema>;
+
+export const FeedbackActionSchema = z.enum(["keep", "reject", "edit", "delete"]);
+export type FeedbackAction = z.infer<typeof FeedbackActionSchema>;
+
+export const FeedbackRequestSchema = z.object({
+  session_id: z.string().min(1),
+  message_id: z.string().optional(),
+  drawing_id: z.string().min(1),
+  action: FeedbackActionSchema,
+  before: z.unknown().optional(),
+  after: z.unknown().optional(),
+  client_ts: z.number().optional(),
+});
+
+export type FeedbackRequest = z.infer<typeof FeedbackRequestSchema>;
+
+export const FeedbackResponseSchema = z.object({
+  id: z.string().min(1),
+});
+
+export type FeedbackResponse = z.infer<typeof FeedbackResponseSchema>;
+
+export const CopilotErrorEventSchema = z.object({
+  code: z.string(),
+  message: z.string(),
+  detail: z.unknown().optional(),
+});
+
+export type CopilotErrorEvent = z.infer<typeof CopilotErrorEventSchema>;
+
+export const SessionChartSchema = z.object({
+  symbol: z.string(),
+  interval: z.string(),
+  from: z.number(),
+  to: z.number(),
+  candle_count: z.number(),
+});
+
+export const SessionMessageSchema = z.object({
+  id: z.string(),
+  role: z.enum(["user", "assistant"]),
+  content: z.string(),
+  model_id: z.string().nullable(),
+  shapes: z.array(z.unknown()),
+  created_at: z.number(),
+  /**
+   * The backend dumps `meta: null` for messages without analyze meta (every user message) and
+   * may send null fields; a strict `.optional()` made every PATCH/GET response fail to parse,
+   * which showed "Không lưu được phiên" although the PATCH returned 200.
+   */
+  meta: z
+    .object({
+      candle_count_used: z.number().nullable().optional(),
+      clamped: z.boolean().nullable().optional(),
+    })
+    .nullable()
+    .optional()
+    .transform((meta) =>
+      meta && meta.candle_count_used != null && meta.clamped != null
+        ? { candle_count_used: meta.candle_count_used, clamped: meta.clamped }
+        : undefined,
+    ),
+  markers: z.array(z.unknown()).optional(),
+});
+
+export const CopilotSessionSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  created_at: z.number(),
+  updated_at: z.number(),
+  model_id: z.string(),
+  reasoning_effort: z.string().nullable().optional(),
+  intent: AnalyzeIntentSchema.nullable().optional(),
+  chart: SessionChartSchema,
+  messages: z.array(SessionMessageSchema),
+});
+
+export type CopilotSessionV1 = z.infer<typeof CopilotSessionSchema>;
+
+/** Backend `SessionSummary` (list endpoint). */
+export const SessionSummarySchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  created_at: z.number(),
+  updated_at: z.number(),
+  model_id: z.string(),
+  reasoning_effort: z.string().nullable().optional(),
+  intent: AnalyzeIntentSchema.nullable().optional(),
+  symbol: z.string(),
+  interval: z.string(),
+  candle_count: z.number(),
+  message_count: z.number(),
+});
+
+export type SessionSummary = z.infer<typeof SessionSummarySchema>;
+
+export const SessionsListResponseSchema = z.object({
+  sessions: z.array(SessionSummarySchema),
+});
+
+/** Backend `CopilotSession` document. */
+export const CopilotSessionApiSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  created_at: z.number(),
+  updated_at: z.number(),
+  model_id: z.string(),
+  reasoning_effort: z.string().nullable().optional(),
+  intent: AnalyzeIntentSchema.nullable().optional(),
+  chart: SessionChartSchema,
+  messages: z.array(SessionMessageSchema),
+});
+
+export type CopilotSessionApi = z.infer<typeof CopilotSessionApiSchema>;
+
+export const CreateSessionRequestSchema = z.object({
+  title: z.string(),
+  model_id: z.string(),
+  reasoning_effort: z.string().nullable().optional(),
+  intent: AnalyzeIntentSchema.nullable().optional(),
+  chart: SessionChartSchema,
+  messages: z.array(SessionMessageSchema).optional(),
+});
+
+export type CreateSessionRequest = z.infer<typeof CreateSessionRequestSchema>;
+
+export const UpdateSessionRequestSchema = z.object({
+  title: z.string().optional(),
+  model_id: z.string().optional(),
+  reasoning_effort: z.string().nullable().optional(),
+  intent: AnalyzeIntentSchema.nullable().optional(),
+  chart: SessionChartSchema.optional(),
+  messages: z.array(SessionMessageSchema).optional(),
+});
+
+export type UpdateSessionRequest = z.infer<typeof UpdateSessionRequestSchema>;
+
+export type CopilotProviderGroup = {
+  id: string;
+  label: string;
+  models: CopilotModelRecord[];
+};
+
+export function groupModelsByProvider(models: CopilotModelRecord[]): CopilotProviderGroup[] {
+  const map = new Map<string, CopilotModelRecord[]>();
+  for (const model of models) {
+    const list = map.get(model.provider) ?? [];
+    list.push(model);
+    map.set(model.provider, list);
+  }
+  return [...map.entries()].map(([id, groupModels]) => ({
+    id,
+    label: id,
+    models: groupModels,
+  }));
+}
+
+export function isAdvancedRouteModel(model: CopilotModelRecord): boolean {
+  const id = model.id.toLowerCase();
+  const provider = model.provider.toLowerCase();
+  return provider === "combo" || id.startsWith("auto/") || id.startsWith("combo/");
+}
+
+export type PersistedChartRestore = {
+  symbol: string;
+  interval: Interval;
+  from: number;
+  to: number;
+  candle_count: number;
+  shapes: PatternShape[];
+  markers: AgentMarker[];
+};

@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import logging
+
 import httpx
+
 from cryptosignal_copilot.schema import Candle
 
-KLINES_URL = "https://api.binance.com/api/v3/klines"
+logger = logging.getLogger(__name__)
+
+KLINES_URL = "https://data-api.binance.vision/api/v3/klines"
 
 
 async def fetch_klines(

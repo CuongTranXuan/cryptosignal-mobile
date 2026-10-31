@@ -1,5 +1,7 @@
 /** Vietnamese UI strings for the Copilot panel (default product language). */
 
+import type { AnalyzeIntent } from "./copilot-schema";
+
 export const COPILOT_TITLE = "Copilot";
 export const COPILOT_OFFLINE = "ngắt kết nối";
 
@@ -8,6 +10,43 @@ export const COPILOT_TAB_AUTO_DRAW = "Tự vẽ";
 
 export const COPILOT_ACTION_FIND_TRIANGLES = "Tìm tam giác";
 export const COPILOT_ACTION_HEAD_SHOULDERS = "Vai đầu vai";
+
+export const COPILOT_STYLE_LABEL = "Phong cách phân tích";
+export const COPILOT_BIAS_LABEL = "Xu hướng (tùy chọn)";
+export const COPILOT_HORIZON_LABEL = "Khung thời gian (tùy chọn)";
+export const COPILOT_HORIZON_NONE = "Mặc định";
+export const COPILOT_BIAS_NONE = "Không chọn";
+export const COPILOT_PATTERN_LABEL = "Mẫu yêu cầu (tùy chọn)";
+export const COPILOT_PATTERN_ANY = "Bất kỳ";
+export const COPILOT_STYLE_NO_PATTERNS = "Chưa có mẫu hình cho phong cách này";
+
+export const COPILOT_GUARDRAIL_REGIME = "Chế độ";
+export const COPILOT_GUARDRAIL_CONFIDENCE = "Độ tin cậy kiểm soát rủi ro";
+export const COPILOT_GUARDRAIL_EVIDENCE = "Bằng chứng trái";
+export const COPILOT_GUARDRAIL_NO_EVIDENCE = "Không có bằng chứng trái";
+export const COPILOT_GUARDRAIL_INVALIDATION = "Vô hiệu hóa";
+export const COPILOT_GUARDRAIL_NONE = "Không có kiểm soát rủi ro";
+
+export const COPILOT_FEEDBACK_KEEP = "Giữ";
+export const COPILOT_FEEDBACK_REJECT = "Bỏ";
+export const COPILOT_FEEDBACK_FAILED = "Không gửi được phản hồi — thử lại sau.";
+
+export const PATTERNS_TABLE_TITLE = "Mẫu hình & lớp vẽ";
+export const PATTERNS_TABLE_TOTAL = "Hình đang hoạt động";
+export const PATTERNS_TABLE_EMPTY = "Chưa có hình đã xác nhận";
+export const PATTERNS_TABLE_ACTIONS = "Thao tác";
+export const PATTERNS_TABLE_PATTERN = "Mẫu";
+export const PATTERNS_TABLE_INTERVAL = "Khung";
+export const PATTERNS_TABLE_KIND = "Loại";
+export const PATTERNS_TABLE_CONFIDENCE = "Tin cậy";
+export const PATTERNS_TABLE_GUARDRAIL = "Kiểm soát rủi ro";
+export const SHAPE_KIND_LABELS = {
+  trendline: "đường",
+  polyline: "đa tuyến",
+  zone: "vùng",
+} as const;
+export const PATTERNS_TABLE_EDIT = "Sửa";
+export const PATTERNS_TABLE_DELETE = "Xóa";
 export const COPILOT_ACTION_DRAW_ON_CHART = "Vẽ lên biểu đồ";
 export const COPILOT_ACTION_EDIT_COORDS = "Sửa tọa độ";
 
@@ -22,6 +61,17 @@ export const TRIANGLES_PROMPT =
 export const HEAD_SHOULDERS_PROMPT =
   "Tìm mẫu vai đầu vai trong cửa sổ nến đã đóng này. Return PatternShape polyline(s). " +
   COPILOT_VIETNAMESE_OUTPUT_INSTRUCTION;
+
+/** Quick actions set analyze intent before sending the paired prompt. */
+export const TRIANGLES_QUICK_INTENT: AnalyzeIntent = {
+  style: "classic",
+  requested_pattern: "symmetrical_triangle",
+};
+
+export const HEAD_SHOULDERS_QUICK_INTENT: AnalyzeIntent = {
+  style: "classic",
+  requested_pattern: "head_and_shoulders",
+};
 
 export const AUTO_DRAW_PROMPT =
   "Tự vẽ: cập nhật mẫu hình cho nến đóng mới nhất. Update patterns for the latest closed candle. " +
@@ -40,6 +90,57 @@ export const COPILOT_ERROR = "Copilot lỗi";
 export const COPILOT_ERROR_UNAUTHORIZED = "Copilot lỗi: nhà cung cấp không được phép";
 export const COPILOT_ERROR_CREDITS_EXHAUSTED = "Copilot lỗi: hết hạn mức nhà cung cấp";
 export const COPILOT_ERROR_RATE_LIMITED = "Copilot lỗi: nhà cung cấp giới hạn tần suất";
+export const COPILOT_ERROR_INVALID_MODEL = "Copilot lỗi: mô hình không hợp lệ hoặc không khả dụng";
+export const COPILOT_ERROR_INVALID_REASONING =
+  "Copilot lỗi: mô hình này không hỗ trợ mức lý luận — đã bỏ chọn mức lý luận, hãy gửi lại.";
+export const COPILOT_ERROR_CANDLE_COUNT =
+  "Copilot lỗi: số nến vượt giới hạn an toàn của mô hình đã chọn";
+export const COPILOT_ERROR_CONTEXT_LENGTH = "Copilot lỗi: cửa sổ ngữ cảnh quá dài cho mô hình này";
+export const COPILOT_ERROR_OVER_BUDGET =
+  "Copilot lỗi: lịch sử và số nến vượt ngân sách token của mô hình";
+export const COPILOT_ERROR_EMPTY_OUTPUT =
+  "Mô hình không trả lời — thử ít nến hơn hoặc đổi mô hình";
+export const COPILOT_ERROR_MODELS_UNAVAILABLE =
+  "Copilot lỗi: không tải được danh sách mô hình từ nhà cung cấp";
+
+export const COPILOT_MODEL_ADVANCED = "Nâng cao";
+export const COPILOT_MODEL_SEARCH = "Tìm mô hình…";
+export const COPILOT_REASONING_LABEL = "Mức lý luận";
+export const COPILOT_REASONING_OFF = "Tắt";
+export const COPILOT_REASONING_LOW = "Thấp";
+export const COPILOT_REASONING_MEDIUM = "Trung bình";
+export const COPILOT_REASONING_HIGH = "Cao";
+export const COPILOT_EFFECTIVE_CANDLES = "Đã dùng {count} nến";
+export const COPILOT_EFFECTIVE_CANDLES_CLAMPED = "Đã dùng {count} nến (đã giới hạn)";
+export const COPILOT_META_CLAMPED_DETAIL =
+  "Máy chủ đã giảm từ {requested} xuống {used} nến (giới hạn token hoặc thử lại tự động)";
+export const COPILOT_SERVER_PICKED_SHAPES = "Hình do máy chủ chọn.";
+export const COPILOT_INTENT_BUDGET_FALLBACK = `\n\n${COPILOT_SERVER_PICKED_SHAPES}`;
+export const COPILOT_DETECTED_REGIME_EARLY = "Chế độ phát hiện";
+export const COPILOT_ANALYSIS_CARD_TITLE = "Tóm tắt phân tích";
+export const COPILOT_CANDLE_CLAMPED_TO_MAX =
+  "Đã giới hạn xuống {max} nến (tối đa mô hình)";
+export const COPILOT_ANALYZING_ELAPSED = "Đã chạy {seconds} giây";
+
+export const COPILOT_MODEL_PICKER_LABEL = "Mô hình";
+export const COPILOT_MODEL_PICKER_PLACEHOLDER = "Chọn mô hình…";
+export const COPILOT_CANDLE_COUNT_LABEL = "Số nến phân tích";
+export const COPILOT_CANDLE_CUSTOM = "Tùy chỉnh";
+export const COPILOT_SESSIONS_TITLE = "Phiên";
+export const COPILOT_SESSION_NEW = "Phiên mới";
+export const COPILOT_SESSION_RENAME = "Đổi tên";
+export const COPILOT_SESSION_DELETE = "Xóa";
+export const COPILOT_SESSION_DELETE_CONFIRM = "Xóa phiên này?";
+export const COPILOT_SESSION_EMPTY = "Chưa có phiên — tạo phiên mới để lưu lịch sử.";
+export const COPILOT_SESSIONS_OFFLINE =
+  "Không lưu được phiên lên máy chủ — tin nhắn vẫn giữ trên thiết bị này. Sẽ thử lại khi kết nối lại.";
+export const COPILOT_SESSION_GONE =
+  "Phiên này không còn trên máy chủ (đã bị xoá hoặc không thuộc thiết bị này) — đã chuyển sang phiên khác.";
+export const COPILOT_SESSIONS_SAVE_FAILED =
+  "Không lưu được phiên — thay đổi được giữ tạm trên thiết bị. Thử lại sau.";
+export const COPILOT_SESSIONS_MIGRATION_PARTIAL =
+  "Một phần phiên cũ chưa chuyển lên máy chủ — vẫn lưu cục bộ cho đến khi chuyển thành công.";
+export const COPILOT_MODEL_LIMITS_PREFIX = "Giới hạn";
 
 export function copilotDrewShapes(count: number, lines: string[]): string {
   return `\n\nĐã vẽ ${count} hình trên biểu đồ:\n${lines.join("\n")}`;
@@ -48,7 +149,8 @@ export function copilotDrewShapes(count: number, lines: string[]): string {
 export const COPILOT_SCROLLED_TO_OVERLAYS = "\nĐã cuộn biểu đồ để hiển thị các lớp phủ.";
 
 export function copilotPlacedMarkers(count: number): string {
-  return `\n\nĐã đặt ${count} đánh dấu trên biểu đồ.`;
+  if (count <= 0) return "";
+  return `\n\nĐã đặt ${count} điểm neo.`;
 }
 
 export function copilotSkippedShapes(count: number): string {
@@ -56,7 +158,7 @@ export function copilotSkippedShapes(count: number): string {
 }
 
 export function copilotSkippedMarkers(count: number): string {
-  return `\n\n(Bỏ qua ${count} đánh dấu không hợp lệ.)`;
+  return `\n\n(Bỏ qua ${count} điểm neo không hợp lệ.)`;
 }
 
 export function copilotShapeSummaryLine(
@@ -73,15 +175,140 @@ export function mapCopilotSseError(message: string): string {
   const trimmed = message.trim();
   if (!trimmed) return COPILOT_ERROR;
   const lower = trimmed.toLowerCase();
-  if (lower.includes("provider unauthorized")) return COPILOT_ERROR_UNAUTHORIZED;
-  if (lower.includes("credits exhausted")) return COPILOT_ERROR_CREDITS_EXHAUSTED;
-  if (lower.includes("rate-limited") || lower.includes("rate limited")) {
+  if (lower.includes("provider unauthorized") || lower.includes("không được ủy quyền")) {
+    return COPILOT_ERROR_UNAUTHORIZED;
+  }
+  if (lower.includes("credits exhausted") || lower.includes("hết credits")) {
+    return COPILOT_ERROR_CREDITS_EXHAUSTED;
+  }
+  if (
+    lower.includes("rate-limited") ||
+    lower.includes("rate limited") ||
+    lower.includes("giới hạn tốc độ")
+  ) {
     return COPILOT_ERROR_RATE_LIMITED;
   }
-  if (lower === "copilot failed" || lower.startsWith("copilot failed:")) return COPILOT_ERROR;
+  if (lower.includes("invalid model") || lower.includes("mô hình không hợp lệ")) {
+    return COPILOT_ERROR_INVALID_MODEL;
+  }
+  if (lower.includes("candle_count") || lower.includes("số nến")) {
+    return COPILOT_ERROR_CANDLE_COUNT;
+  }
+  if (lower.includes("context length") || lower.includes("cửa sổ ngữ cảnh")) {
+    return COPILOT_ERROR_CONTEXT_LENGTH;
+  }
+  if (
+    lower === "copilot failed" ||
+    lower.startsWith("copilot failed:") ||
+    lower.startsWith("copilot thất bại")
+  ) {
+    return COPILOT_ERROR;
+  }
   return trimmed;
 }
 
-export function copilotRoleLabel(role: "user" | "agent"): string {
-  return role === "user" ? COPILOT_ROLE_USER : COPILOT_ROLE_AGENT;
+export function copilotRoleLabel(role: "user" | "agent", modelLabel?: string): string {
+  if (role === "user") return COPILOT_ROLE_USER;
+  return modelLabel ? `${COPILOT_ROLE_AGENT} · ${modelLabel}` : COPILOT_ROLE_AGENT;
 }
+
+export const COPILOT_PROBE_CHECKED_AT = "Kiểm tra lúc {time} · {ago}";
+export const COPILOT_PROBE_NEVER = "Chưa kiểm tra mô hình";
+export const COPILOT_PROBE_STALE = "cũ";
+export const COPILOT_PROBE_STALE_HINT = "Kết quả kiểm tra đã cũ — đang chờ kiểm tra lại";
+export const COPILOT_PROBE_IN_PROGRESS = "Đang kiểm tra…";
+export const COPILOT_PROBE_PROGRESS = "Đang kiểm tra… ({done}/{total})";
+export const COPILOT_PROBE_PROGRESS_DONE = "Đang kiểm tra… (đã xong {done})";
+export const COPILOT_PROBE_RETRY = "Kiểm tra lại";
+export const COPILOT_PROBE_RETRY_IN = "Thử lại sau {seconds}s";
+export const COPILOT_PROBE_FAILED = "Không kiểm tra lại được — thử lại sau.";
+export const COPILOT_PROBE_HIDDEN_TOGGLE = "{count} mô hình bị ẩn";
+export const COPILOT_PROBE_HIDDEN_TITLE = "Mô hình không qua kiểm tra OmniRoute";
+export const COPILOT_PROBE_JUST_NOW = "vừa xong";
+export const COPILOT_PROBE_MINUTES_AGO = "{n} phút trước";
+export const COPILOT_PROBE_HOURS_AGO = "{n} giờ trước";
+export const COPILOT_PROBE_DAYS_AGO = "{n} ngày trước";
+export const COPILOT_PROBE_REASON_UNKNOWN = "Không khả dụng";
+export const COPILOT_UPSTREAM_DOWN_TITLE = "Không kết nối được OmniRoute";
+export const COPILOT_UPSTREAM_DOWN_BODY =
+  "Chưa thể phân tích cho đến khi OmniRoute hoạt động lại.";
+export const COPILOT_NO_MODELS_TITLE = "Không có mô hình nào khả dụng";
+export const COPILOT_NO_MODELS_BODY =
+  "Mọi mô hình đều không qua kiểm tra OmniRoute. Xem danh sách mô hình bị ẩn hoặc kiểm tra lại.";
+export const COPILOT_NO_MODELS_SHORT = "Không có mô hình khả dụng";
+export const COPILOT_INPUT_NO_MODEL = "Chưa có mô hình khả dụng — chưa thể phân tích";
+export const COPILOT_NOTICE_DISMISS = "Đóng thông báo";
+
+export function copilotModelSwitchedNotice(from: string, to: string, reason?: string): string {
+  const why = reason ? ` (${reason})` : "";
+  return `Mô hình "${from}" không còn khả dụng${why} — đã chuyển sang "${to}".`;
+}
+
+export function copilotDefaultFallbackNotice(requested: string, fallback: string): string {
+  return `Mô hình mặc định "${requested}" không qua kiểm tra — đang dùng "${fallback}".`;
+}
+
+export function copilotUnhealthyModelError(reason?: string): string {
+  return reason
+    ? `Copilot lỗi: mô hình đã chọn không khả dụng (${reason}) — đang cập nhật danh sách mô hình`
+    : "Copilot lỗi: mô hình đã chọn không khả dụng — đang cập nhật danh sách mô hình";
+}
+
+// Chart history (per session × symbol × timeframe).
+export const CHART_HISTORY_LABEL = "Đã phân tích trong phiên";
+export const CHART_HISTORY_LOADING = "Đang tải biểu đồ đã lưu…";
+export const CHART_HISTORY_SUMMARY_PREFIX = "Tóm tắt";
+export const CHART_HISTORY_N25_KEPT_PREVIOUS =
+  "Không vẽ được hình mới nào (nến chưa đóng) — giữ các hình trước.";
+export const CHART_HISTORY_CONFLICT =
+  "Biểu đồ vừa được thay đổi ở nơi khác và chưa gộp được — hình trên màn hình chưa được lưu. Thử lại sau.";
+export const CHART_HISTORY_SAVE_FAILED = "Không lưu được hình vẽ của biểu đồ — thử lại sau.";
+export const CHART_HISTORY_SERVER_SAVE_FAILED =
+  "Máy chủ không lưu được biểu đồ của lần phân tích này — đã lưu lại từ thiết bị.";
+export const CHART_HISTORY_SESSION_MISSING =
+  "Phiên này không còn trên máy chủ — hình vẽ của lần phân tích này chưa được lưu.";
+export const COPILOT_ERROR_REQUEST_TOO_LARGE =
+  "Yêu cầu quá lớn (giới hạn ~1,5 MB) — hãy giảm số nến hoặc bớt hình đang vẽ rồi thử lại.";
+export const COPILOT_ERROR_UPSTREAM_UNREACHABLE =
+  "Không kết nối được máy chủ mô hình AI — vui lòng thử lại sau.";
+export const CHART_HISTORY_INVALID =
+  "Máy chủ từ chối dữ liệu biểu đồ (không hợp lệ) — hình vẽ vẫn giữ trên thiết bị.";
+export const CHART_HISTORY_INVALID_NUMBER =
+  "Máy chủ từ chối biểu đồ: có giá trị số không hợp lệ (NaN/∞) — hình vẽ vẫn giữ trên thiết bị.";
+export const CHART_HISTORY_INVALID_VIEW =
+  "Máy chủ từ chối biểu đồ: khung nhìn không hợp lệ (đầu lớn hơn cuối) — hình vẽ vẫn giữ trên thiết bị.";
+export const CHART_HISTORY_DUPLICATE_ID =
+  "Máy chủ từ chối biểu đồ: có hình bị trùng mã — hình vẽ vẫn giữ trên thiết bị.";
+export const CHART_HISTORY_INVALID_INTERVAL =
+  "Máy chủ từ chối biểu đồ: khung thời gian không được hỗ trợ — hình vẽ vẫn giữ trên thiết bị.";
+export const CHART_HISTORY_REQUEST_TOO_LARGE =
+  "Dữ liệu biểu đồ vượt giới hạn kích thước yêu cầu (~1,5 MB) — hãy xoá bớt hình hoặc điểm neo.";
+export const CHART_HISTORY_UNSAVED = "chưa lưu";
+export const CHART_HISTORY_UNSAVED_RETRYING_TITLE =
+  "Chưa lưu lên máy chủ — đang tự thử lại; hình vẽ vẫn giữ trên thiết bị.";
+export const CHART_HISTORY_UNSAVED_FAILED_TITLE =
+  "Chưa lưu lên máy chủ — hình vẽ vẫn giữ trên thiết bị; sửa hình để thử lưu lại.";
+export const CHART_HISTORY_KEPT_PREVIOUS_INVALID =
+  "Không vẽ được hình mới nào (hình từ mô hình không hợp lệ) — giữ các hình trước.";
+export const CHART_HISTORY_DOT_TITLE = "Khung này có hình vẽ đã lưu trong phiên";
+
+export function chartHistoryTooLarge(limit: string): string {
+  const detail = limit ? ` (giới hạn: ${limit})` : "";
+  return `Biểu đồ quá lớn để lưu${detail} — hãy xoá bớt hình hoặc điểm neo.`;
+}
+
+/** "1h · 3 hình · phân tích lúc 14:05" (time in the user's local zone). */
+export function chartHistoryChipLabel(
+  intervalLabel: string,
+  shapeCount: number,
+  analyzedAt: number | null,
+  updatedAt: number,
+): string {
+  const at = analyzedAt ?? updatedAt;
+  const d = new Date(at * 1000);
+  const hhmm = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  const verb = analyzedAt != null ? "phân tích lúc" : "lưu lúc";
+  return `${intervalLabel} · ${shapeCount} hình · ${verb} ${hhmm}`;
+}
+export const CHART_ACTIVE_LAYERS = "Lớp đang hiển thị";
+export const CHART_GHOST_PREVIEW = "Bản xem trước";

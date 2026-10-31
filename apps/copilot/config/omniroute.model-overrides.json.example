@@ -1,0 +1,24 @@
+{
+  "id_prefix_aliases": {
+    "cu/": "cursor/"
+  },
+  "advanced_substrings": ["/no-think/", "/auto/", "auto/"],
+  "models": {
+    "cursor/*": {
+      "supports_reasoning": false,
+      "reasoning_efforts": [],
+      "structured_output_mode": "text_json",
+      "max_output_tokens": 8192,
+      "request_max_tokens": 8192
+    },
+    "cursor/auto": {
+      "advanced": true
+    },
+    "cursor/auto-*": {
+      "advanced": true
+    },
+    "cursor/composer-2": {
+      "hide": true
+    }
+  }
+}

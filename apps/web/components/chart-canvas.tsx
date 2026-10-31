@@ -14,7 +14,12 @@ import {
 } from "lightweight-charts";
 import { useEffect, useRef, useState, type MutableRefObject } from "react";
 import type { ChartCoordinateApi } from "../lib/chart-api";
+import { notifyCandlesReplaced, notifyChartViewChanged } from "../lib/chart-history";
 import { CHART_THEME } from "../lib/chart-theme";
+import {
+  effectiveProjectionBars,
+  timeToCoordinateWithProjection,
+} from "../lib/shape-projection";
 import { mapAgentMarkersToSeriesMarkers } from "../lib/marker-map";
 import { toVolumeData } from "../lib/volume-map";
 import { useChartStore } from "../lib/stores/chart-store";
@@ -61,9 +66,15 @@ export function ChartCanvas({ coordApiRef }: ChartCanvasProps) {
     setMarkers: (markers: SeriesMarker<UTCTimestamp>[]) => void;
   } | null>(null);
   const lastDataRef = useRef<CandlestickData[]>([]);
+  const lastPairRef = useRef<string | null>(null);
   const [overlayTick, setOverlayTick] = useState(0);
 
   const candles = useChartStore((s) => s.candles);
+  const interval = useChartStore((s) => s.interval);
+  const candlesRef = useRef(candles);
+  candlesRef.current = candles;
+  const intervalRef = useRef(interval);
+  intervalRef.current = interval;
   const tickerPercent = useChartStore((s) => s.tickerPercent);
   const connection = useChartStore((s) => s.connection);
   const symbol = useChartStore((s) => s.symbol);
@@ -130,11 +141,18 @@ export function ChartCanvas({ coordApiRef }: ChartCanvasProps) {
         coordApiRef.current = null;
         return;
       }
+      const rawTimeToCoordinate = (time: number) => {
+        const v = c.timeScale().timeToCoordinate(time as UTCTimestamp);
+        return v == null ? null : Number(v);
+      };
       coordApiRef.current = {
-        timeToCoordinate: (time) => {
-          const v = c.timeScale().timeToCoordinate(time as UTCTimestamp);
-          return v == null ? null : Number(v);
-        },
+        timeToCoordinate: (time) =>
+          timeToCoordinateWithProjection(
+            time,
+            rawTimeToCoordinate,
+            candlesRef.current,
+            intervalRef.current,
+          ),
         priceToCoordinate: (price) => {
           const v = s.priceToCoordinate(price);
           return v == null ? null : Number(v);
@@ -163,6 +181,17 @@ export function ChartCanvas({ coordApiRef }: ChartCanvasProps) {
             to: (maxT + pad) as UTCTimestamp,
           });
         },
+        setVisibleTimeRange: (range) => {
+          if (!(range.to > range.from)) return;
+          try {
+            c.timeScale().setVisibleRange({
+              from: range.from as UTCTimestamp,
+              to: range.to as UTCTimestamp,
+            });
+          } catch {
+            // Range outside the loaded series: keep the default view.
+          }
+        },
         getVisibleTimeRange: () => {
           const range = c.timeScale().getVisibleRange();
           if (!range) return null;
@@ -179,7 +208,10 @@ export function ChartCanvas({ coordApiRef }: ChartCanvasProps) {
       setOverlayTick((n) => n + 1);
     };
 
-    const onRange = () => rebuildApi();
+    const onRange = () => {
+      rebuildApi();
+      notifyChartViewChanged();
+    };
     const onSize = () => rebuildApi();
     chart.timeScale().subscribeVisibleLogicalRangeChange(onRange);
     chart.timeScale().subscribeSizeChange(onSize);
@@ -206,6 +238,7 @@ export function ChartCanvas({ coordApiRef }: ChartCanvasProps) {
       markersApiRef.current = null;
       coordApiRef.current = null;
       lastDataRef.current = [];
+      lastPairRef.current = null;
     };
   }, [coordApiRef]);
 
@@ -229,7 +262,11 @@ export function ChartCanvas({ coordApiRef }: ChartCanvasProps) {
     const prevLast = prev[prev.length - 1];
     const lastVol = volumeMapped[volumeMapped.length - 1]!;
 
+    const { symbol: pairSymbol, interval: pairInterval } = useChartStore.getState();
+    const pair = `${pairSymbol}|${pairInterval}`;
+    const samePair = lastPairRef.current === pair;
     const sameSeries =
+      samePair &&
       prev.length > 0 &&
       mapped.length > 0 &&
       prev[0]?.time === mapped[0]?.time &&
@@ -248,8 +285,20 @@ export function ChartCanvas({ coordApiRef }: ChartCanvasProps) {
 
     lastDataRef.current = mapped;
     setOverlayTick((n) => n + 1);
+    if (!sameSeries) {
+      lastPairRef.current = pair;
+      notifyCandlesReplaced(pairSymbol, pairInterval);
+    }
   }, [candles]);
 
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    chart.timeScale().applyOptions({
+      rightOffset: effectiveProjectionBars(interval),
+    });
+    setOverlayTick((n) => n + 1);
+  }, [interval, candles.length]);
 
   // Drawing mode: stop LWC from eating pointer events under the overlay.
   useEffect(() => {
@@ -299,7 +348,7 @@ export function ChartCanvas({ coordApiRef }: ChartCanvasProps) {
           {symbol} · {connection}
         </div>
       </div>
-      <div className="relative min-h-0 flex-1">
+      <div className="relative min-h-0 flex-1" data-testid="chart-canvas">
         <div ref={containerRef} className="absolute inset-0" />
         <div ref={overlayBoxRef} className="absolute inset-x-0 top-0" style={{ pointerEvents: "none" }}>
           <ShapeOverlay coordApiRef={coordApiRef} overlayTick={overlayTick} />

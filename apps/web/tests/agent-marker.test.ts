@@ -8,28 +8,26 @@ const markerFixture = JSON.parse(
 );
 
 describe("AgentMarker", () => {
-  it("parses the shared fixture", () => {
+  it("parses the shared C.13 anchor fixture", () => {
     const marker = parseAgentMarker(markerFixture);
-    expect(marker.side).toBe("buy");
-    expect(marker.position).toBe("belowBar");
-    expect(marker.shape).toBe("arrowUp");
+    expect(marker.side).toBe("neutral");
+    expect(marker.position).toBe("inBar");
+    expect(marker.shape).toBe("circle");
+    expect(marker.label).toBe("Neo");
+    expect(marker.drawing_id).toBe("drw_fixture");
     expect(marker.source).toBe("agent");
     expect(marker.agentId).toBeUndefined();
   });
 
-  it("accepts optional agentId and label", () => {
+  it("accepts optional agentId and wire side enum values", () => {
     const marker = parseAgentMarker({
       ...markerFixture,
       agentId: "agent-beta",
-      label: "sweep",
+      label: "Neo",
     });
     expect(marker.agentId).toBe("agent-beta");
-    expect(marker.label).toBe("sweep");
-  });
-
-  it("accepts signal-direction side only", () => {
+    expect(parseAgentMarker({ ...markerFixture, side: "buy" }).side).toBe("buy");
     expect(parseAgentMarker({ ...markerFixture, side: "sell" }).side).toBe("sell");
-    expect(parseAgentMarker({ ...markerFixture, side: "neutral" }).side).toBe("neutral");
     expect(() => parseAgentMarker({ ...markerFixture, side: "BUY" })).toThrow();
   });
 

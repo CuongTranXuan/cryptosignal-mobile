@@ -1,0 +1,61 @@
+services:
+  copilot:
+    build:
+      context: ../apps/copilot
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      PORT: "8000"
+      COPILOT_RUN_DB_MIGRATIONS: "true"
+      DATABASE_URL: ${DATABASE_URL:-sqlite:////tmp/copilot-sessions.sqlite3}
+    restart: unless-stopped
+    expose:
+      - "8000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/v1/copilot/health', timeout=3)",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 25s
+
+  web:
+    build:
+      context: ../apps/web
+      dockerfile: Dockerfile
+    ports:
+      - "${WEB_PUBLISH_PORT:-3000}:3000"
+    environment:
+      PORT: "3000"
+      HOSTNAME: "0.0.0.0"
+      COPILOT_UPSTREAM_URL: http://copilot:8000
+    depends_on:
+      copilot:
+        condition: service_healthy
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    profiles: ["postgres"]
+    environment:
+      POSTGRES_USER: copilot
+      POSTGRES_PASSWORD: copilot
+      POSTGRES_DB: copilot
+    ports:
+      - "5432:5432"
+    volumes:
+      - copilot_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U copilot -d copilot"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  copilot_pg:
