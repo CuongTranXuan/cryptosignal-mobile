@@ -87,6 +87,7 @@ Copilot normalizes `/models` ids (`models/gemini-2.5-flash` → `gemini-2.5-flas
 | `AUTOSCAN_ENABLED` | no | `false` | Start the in-process auto-analysis scheduler in the FastAPI lifespan (lifecycle only so far; the tick does nothing) |
 | `AUTOSCAN_EVERY` | no | `1h` | Scheduler period: `1h` or `2h` |
 | `PORT` | no | `8000` | Uvicorn bind (Docker / Cloud Run) |
+| `COPILOT_DOTENV` | no | on | Load `apps/copilot/.env` at startup without overriding variables already set (python-dotenv, `override=False`). Always skipped with `COPILOT_ENV=production`; `0` disables it elsewhere. In production pass env via the systemd `EnvironmentFile` / `docker --env-file` instead |
 
 \*Required for successful analyze and 200 health; missing → 503 on health/models.  
 \*\*Not required when the UI proxies server-side (`COPILOT_UPSTREAM_URL` on Next.js).

@@ -38,6 +38,11 @@ cp .env.example .env   # fill LLM_* below
 uvicorn cryptosignal_copilot.app:app --app-dir src --reload --port 8000
 ```
 
+The app loads `apps/copilot/.env` itself at startup (python-dotenv): variables already set in the
+shell or by the process manager win over the file, and the file is skipped when
+`COPILOT_ENV=production` or `COPILOT_DOTENV=0`. `uvicorn … --env-file .env` works too (same
+`override=False` semantics, since the app runs after uvicorn has set them).
+
 ### 2. Web (`apps/web`)
 
 ```bash
