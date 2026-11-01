@@ -38,7 +38,7 @@ Build from this directory (monorepo context = `apps/web`):
 ```bash
 docker build -t cryptosignal-web .
 docker run --rm -p 3000:3000 \
-  -e COPILOT_UPSTREAM_URL=http://host.docker.internal:8000 \
+  -e COPILOT_UPSTREAM_URL=http://host.docker.internal:8787 \
   -e PORT=3000 \
   -e HOSTNAME=0.0.0.0 \
   cryptosignal-web
@@ -52,6 +52,6 @@ Image uses Next `output: 'standalone'`, runs as non-root, honors `PORT` / `HOSTN
 |---|---|
 | **Build context** | `apps/web` (this directory; `Dockerfile` at root of context) |
 | **Published port** | Host `3000` → container `PORT` (default `3000`) |
-| **Required env** | `COPILOT_UPSTREAM_URL` → reachable copilot base (e.g. `http://copilot:8000`) when not using direct client mode |
+| **Required env** | `COPILOT_UPSTREAM_URL` → reachable copilot base (e.g. `http://copilot:8787`) when not using direct client mode |
 | **Optional env** | `NEXT_PUBLIC_COPILOT_URL` (usually unset in compose so the proxy is used), `PORT`, `HOSTNAME=0.0.0.0` |
 | **Secrets** | None in the web image — no LLM keys in the web service |
