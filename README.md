@@ -7,7 +7,7 @@ Two processes:
 | App | Role | Default port |
 |---|---|---|
 | `apps/web` | Next.js UI + TradingView Lightweight Charts | `3000` |
-| `apps/copilot` | FastAPI + Pydantic AI agent | `8000` |
+| `apps/copilot` | FastAPI + Pydantic AI agent | `8787` |
 
 ## Market data (chart)
 
@@ -35,8 +35,13 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 cp .env.example .env   # fill LLM_* below
-uvicorn cryptosignal_copilot.app:app --app-dir src --reload --port 8000
+uvicorn cryptosignal_copilot.app:app --app-dir src --reload --port 8787
 ```
+
+The app loads `apps/copilot/.env` itself at startup (python-dotenv): variables already set in the
+shell or by the process manager win over the file, and the file is skipped when
+`COPILOT_ENV=production` or `COPILOT_DOTENV=0`. `uvicorn … --env-file .env` works too (same
+`override=False` semantics, since the app runs after uvicorn has set them).
 
 ### 2. Web (`apps/web`)
 
@@ -60,7 +65,7 @@ Web alone can show the live chart. Copilot actions fail visibly until `apps/copi
 | Variable | Local | Production |
 |---|---|---|
 | `NEXT_PUBLIC_COPILOT_URL` | Empty → same-origin `/v1/copilot/*` (runtime App Router proxy) | Optional direct copilot origin (no `/v1` suffix); when set, proxy is unused |
-| `COPILOT_UPSTREAM_URL` | `http://127.0.0.1:8000` (proxy target at **request** time) | Set on the web container/VM when using same-origin proxy (e.g. Docker Compose) |
+| `COPILOT_UPSTREAM_URL` | `http://127.0.0.1:8787` (proxy target at **request** time) | Set on the web container/VM when using same-origin proxy (e.g. Docker Compose) |
 
 See [`apps/web/README.md`](apps/web/README.md) for Docker and Compose notes.
 
