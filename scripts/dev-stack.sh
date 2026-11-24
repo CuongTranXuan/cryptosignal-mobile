@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Start CryptoSignal local stack: copilot (:8000) + web (:3000).
+# Start CryptoSignal local stack: copilot (:8787) + web (:3000).
 # Logs stream to THIS terminal (stdout/stderr). Ctrl+C stops both.
 #   cd /Users/cuong/Documents/cryptosignal-mobile && ./scripts/dev-stack.sh
 # Stop from another terminal:
@@ -31,9 +31,9 @@ stop_port() {
 }
 
 stop_stack() {
-  echo "Stopping stack on :3000 and :8000..."
+  echo "Stopping stack on :3000 and :8787..."
   stop_port 3000
-  stop_port 8000
+  stop_port 8787
   rm -f "$PID_DIR/web.pid" "$PID_DIR/copilot.pid"
   echo "Stopped."
 }
@@ -72,20 +72,20 @@ cleanup() {
   if [[ -n "${COPILOT_PID:-}" ]]; then kill "$COPILOT_PID" 2>/dev/null || true; fi
   if [[ -n "${WEB_PID:-}" ]]; then kill "$WEB_PID" 2>/dev/null || true; fi
   stop_port 3000
-  stop_port 8000
+  stop_port 8787
   rm -f "$PID_DIR/web.pid" "$PID_DIR/copilot.pid"
   exit "$code"
 }
 trap cleanup EXIT INT TERM
 
-echo "Starting copilot on http://127.0.0.1:8000 (logs → stdout) ..."
+echo "Starting copilot on http://127.0.0.1:8787 (logs → stdout) ..."
 (
   cd "$COPILOT"
   set -a
   # shellcheck disable=SC1091
   source .env
   set +a
-  exec .venv/bin/uvicorn cryptosignal_copilot.app:app --app-dir src --reload --host 127.0.0.1 --port 8000
+  exec .venv/bin/uvicorn cryptosignal_copilot.app:app --app-dir src --reload --host 127.0.0.1 --port 8787
 ) 2>&1 | tee -a "$COPILOT_LOG" | prefix_stream "copilot" &
 COPILOT_PID=$!
 echo "$COPILOT_PID" >"$PID_DIR/copilot.pid"
@@ -93,7 +93,7 @@ echo "$COPILOT_PID" >"$PID_DIR/copilot.pid"
 echo "Starting web on http://127.0.0.1:3000 (logs → stdout) ..."
 (
   cd "$WEB"
-  export COPILOT_UPSTREAM_URL="${COPILOT_UPSTREAM_URL:-http://127.0.0.1:8000}"
+  export COPILOT_UPSTREAM_URL="${COPILOT_UPSTREAM_URL:-http://127.0.0.1:8787}"
   export NEXT_PUBLIC_COPILOT_URL="${NEXT_PUBLIC_COPILOT_URL:-}"
   exec "$PNPM" exec next dev --hostname 127.0.0.1 --port 3000
 ) 2>&1 | tee -a "$WEB_LOG" | prefix_stream "web" &
@@ -114,7 +114,7 @@ for i in $(seq 1 90); do
     tail -n 40 "$COPILOT_LOG" "$WEB_LOG" >&2 || true
     exit 1
   fi
-  if curl -sf "http://127.0.0.1:8000/v1/copilot/health" >/dev/null 2>&1 \
+  if curl -sf "http://127.0.0.1:8787/v1/copilot/health" >/dev/null 2>&1 \
     && curl -sf "http://127.0.0.1:3000/" >/dev/null 2>&1 \
     && curl -sf "http://127.0.0.1:3000/v1/copilot/health" >/dev/null 2>&1; then
     echo "=== Stack ready ==="

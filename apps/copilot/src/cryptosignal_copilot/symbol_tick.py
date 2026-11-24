@@ -246,10 +246,13 @@ def _env_ttl() -> float:
         return _DEFAULT_TTL_S
 
 
-_cache = TickSizeCache(enabled=_env_enabled(), path=default_cache_path(), ttl_s=_env_ttl())
+_cache: TickSizeCache | None = None
 
 
 def get_tick_cache() -> TickSizeCache:
+    global _cache
+    if _cache is None:
+        _cache = TickSizeCache(enabled=_env_enabled(), path=default_cache_path(), ttl_s=_env_ttl())
     return _cache
 
 
@@ -261,13 +264,14 @@ def set_tick_cache_for_tests(cache: TickSizeCache) -> TickSizeCache:
 
 def prefetch_tick_size(symbol: str) -> None:
     """Warm the cache off the request path (call from async handlers)."""
-    _cache.schedule(symbol)
+    get_tick_cache().schedule(symbol)
 
 
 def tick_size_for_symbol(symbol: str, *, reference_price: float | None = None) -> float:
     """Never blocks: cached exchange tick (even stale), else magnitude fallback."""
-    tick = _cache.cached(symbol)
-    _cache.schedule(symbol)  # no-op unless missing / past TTL / retry due
+    cache = get_tick_cache()
+    tick = cache.cached(symbol)
+    cache.schedule(symbol)  # no-op unless missing / past TTL / retry due
     if tick is not None:
         return tick
     if reference_price is not None:

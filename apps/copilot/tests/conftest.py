@@ -39,6 +39,8 @@ def pytest_configure(config: pytest.Config) -> None:
     db_path = base / f"sessions-{os.getpid()}.sqlite3"
     os.environ["DATABASE_URL"] = sqlite_url_for_path(db_path)
     os.environ.setdefault("COPILOT_RUN_DB_MIGRATIONS", "true")
+    # Never let a developer's apps/copilot/.env leak into tests (test_env_file.py opts in).
+    os.environ["COPILOT_DOTENV"] = "0"
     os.environ["_COPILOT_PYTEST_DB_ISOLATED"] = "1"
 
 

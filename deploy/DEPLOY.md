@@ -2,26 +2,26 @@
 
 ### BLUF
 
-**Run the chart UI and copilot API as two containers: only port 3000 is published.** The browser talks to the Next.js app on same-origin `/v1/copilot/*`; the `web` service proxies to `http://copilot:8000`. Leave `NEXT_PUBLIC_COPILOT_URL` unset in compose — no LLM secrets on the web container.
+**Run the chart UI and copilot API as two containers: only port 3000 is published.** The browser talks to the Next.js app on same-origin `/v1/copilot/*`; the `web` service proxies to `http://copilot:8787`. Leave `NEXT_PUBLIC_COPILOT_URL` unset in compose — no LLM secrets on the web container.
 
 ### Key metrics & actions
 
 - **Prerequisites:** Docker Compose v2, `deploy/.env` from `deploy/.env.example` (LLM + optional `DATABASE_URL`).
 - **Primary commands:** `cd deploy && docker compose up --build -d`
 - **UI URL:** `http://localhost:3000` (or `WEB_PUBLISH_PORT`)
-- **Copilot on host:** not exposed by default; use `docker compose -f docker-compose.yml -f docker-compose.expose-copilot.yml up` to map `${COPILOT_PUBLISH_PORT:-8000}`
+- **Copilot on host:** not exposed by default; use `docker compose -f docker-compose.yml -f docker-compose.expose-copilot.yml up` to map `${COPILOT_PUBLISH_PORT:-8787}`
 
 ### Architecture
 
 ```text
 Browser → :3000 web (Next.js)
-              └─ server proxy COPILOT_UPSTREAM_URL → copilot:8000 (internal)
+              └─ server proxy COPILOT_UPSTREAM_URL → copilot:8787 (internal)
 ```
 
 | Service | Published | Secrets |
 |---|---|---|
 | `web` | `3000` | None (`COPILOT_UPSTREAM_URL` only) |
-| `copilot` | internal `8000` | `LLM_*`, `DATABASE_URL`, etc. in `deploy/.env` |
+| `copilot` | internal `8787` | `LLM_*`, `DATABASE_URL`, etc. in `deploy/.env` |
 
 `CORS_ORIGINS` on copilot is optional for this layout because the browser does not call copilot directly. Set it if you also expose copilot publicly or use a split deployment.
 

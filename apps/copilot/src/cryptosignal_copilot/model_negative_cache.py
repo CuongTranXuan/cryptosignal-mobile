@@ -50,10 +50,13 @@ class ModelNegativeCache:
         return [mid for mid in model_ids if not self.is_blocked(mid, now=ts)]
 
 
-_default_cache = ModelNegativeCache()
+_default_cache: ModelNegativeCache | None = None
 
 
 def get_model_negative_cache() -> ModelNegativeCache:
+    global _default_cache
+    if _default_cache is None:
+        _default_cache = ModelNegativeCache()
     return _default_cache
 
 

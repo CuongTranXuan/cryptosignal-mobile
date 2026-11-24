@@ -86,7 +86,8 @@ Copilot normalizes `/models` ids (`models/gemini-2.5-flash` → `gemini-2.5-flas
 | `COPILOT_DB_STARTUP_RETRIES` | no | `5` | Startup migration attempts while the DB is unreachable (backoff 1, 2, 4, 8 s). After the last one the app starts anyway and answers 503 `db_unavailable`; restart it once the DB is back if the schema was never created |
 | `AUTOSCAN_ENABLED` | no | `false` | Start the in-process auto-analysis scheduler in the FastAPI lifespan (lifecycle only so far; the tick does nothing) |
 | `AUTOSCAN_EVERY` | no | `1h` | Scheduler period: `1h` or `2h` |
-| `PORT` | no | `8000` | Uvicorn bind (Docker / Cloud Run) |
+| `PORT` | no | `8787` | Uvicorn bind (Docker / Cloud Run) |
+| `COPILOT_DOTENV` | no | on | Load `apps/copilot/.env` at startup without overriding variables already set (python-dotenv, `override=False`). Always skipped with `COPILOT_ENV=production`; `0` disables it elsewhere. In production pass env via the systemd `EnvironmentFile` / `docker --env-file` instead |
 
 \*Required for successful analyze and 200 health; missing → 503 on health/models.  
 \*\*Not required when the UI proxies server-side (`COPILOT_UPSTREAM_URL` on Next.js).
@@ -138,7 +139,7 @@ cd apps/web && pnpm build:export   # NEXT_STATIC_EXPORT=1; out/ has no Node prox
 ```bash
 cd apps/copilot
 docker build -t cryptosignal-copilot .
-docker run --rm -p 8000:8000 --env-file .env \
+docker run --rm -p 8787:8787 --env-file .env \
   -e COPILOT_RUN_DB_MIGRATIONS=true cryptosignal-copilot
 ```
 

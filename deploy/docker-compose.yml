@@ -6,19 +6,19 @@ services:
     env_file:
       - .env
     environment:
-      PORT: "8000"
+      PORT: "8787"
       COPILOT_RUN_DB_MIGRATIONS: "true"
       DATABASE_URL: ${DATABASE_URL:-sqlite:////tmp/copilot-sessions.sqlite3}
     restart: unless-stopped
     expose:
-      - "8000"
+      - "8787"
     healthcheck:
       test:
         [
           "CMD",
           "python",
           "-c",
-          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/v1/copilot/health', timeout=3)",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/v1/copilot/health', timeout=3)",
         ]
       interval: 15s
       timeout: 5s
@@ -34,7 +34,7 @@ services:
     environment:
       PORT: "3000"
       HOSTNAME: "0.0.0.0"
-      COPILOT_UPSTREAM_URL: http://copilot:8000
+      COPILOT_UPSTREAM_URL: http://copilot:8787
     depends_on:
       copilot:
         condition: service_healthy

@@ -52,6 +52,7 @@ from cryptosignal_copilot.device import (
     request_owner,
     verified_device,
 )
+from cryptosignal_copilot.env_file import load_env_file
 from cryptosignal_copilot.feedback_store import FeedbackStore, get_feedback_store
 from cryptosignal_copilot.intent_prep import normalize_session_intent, resolve_analyze_intent
 from cryptosignal_copilot.logging_setup import configure_logging
@@ -690,6 +691,7 @@ def create_app(
     return app
 
 
+load_env_file()
 configure_logging()
 validate_llm_env_on_startup()
 run_db_migrations_with_retry()

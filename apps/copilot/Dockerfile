@@ -24,10 +24,10 @@ COPY alembic ./alembic
 
 USER appuser
 
-ENV PORT=8000
-EXPOSE 8000
+ENV PORT=8787
+EXPOSE 8787
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/v1/copilot/health', timeout=3)"
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/v1/copilot/health', timeout=3)"
 
-CMD ["sh", "-c", "exec uvicorn cryptosignal_copilot.app:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --forwarded-allow-ips='*'"]
+CMD ["sh", "-c", "exec uvicorn cryptosignal_copilot.app:app --host 0.0.0.0 --port ${PORT:-8787} --proxy-headers --forwarded-allow-ips='*'"]
